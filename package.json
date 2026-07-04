@@ -1,0 +1,18 @@
+{
+  "name": "jimeng-flow-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,server -c green,blue \"npm:dev:web\" \"npm:dev:server\"",
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:server": "npm --workspace apps/server run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

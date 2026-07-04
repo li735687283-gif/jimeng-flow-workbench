@@ -1,0 +1,115 @@
+@import '@xyflow/react/dist/style.css';
+
+:root {
+  --bg-base: #0d0e12;
+  --bg-panel: #16171d;
+  --bg-card: #1f2028;
+  --bg-card-hover: #262830;
+  --border: #2e303a;
+  --border-light: #3a3d4a;
+  --text: #9ca3af;
+  --text-h: #f3f4f6;
+  --text-dim: #6b7280;
+  --accent: #3b82f6;
+  --accent-dim: #4a5568;
+  --edge-color: #5b6573;
+  --edge-color-active: #3b82f6;
+  --status-idle: #4a5568;
+  --status-running: #3b82f6;
+  --status-success: #10b981;
+  --status-error: #ef4444;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.1px;
+  color-scheme: dark;
+  color: var(--text);
+  background: var(--bg-base);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+#root {
+  display: flex;
+}
+
+body {
+  background: var(--bg-base);
+}
+
+/* React Flow 暗色覆盖 */
+.react-flow {
+  background: var(--bg-base);
+}
+
+.react-flow__background {
+  background: var(--bg-base);
+}
+
+.react-flow__controls {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background: var(--bg-card);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  fill: var(--text);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-card-hover);
+}
+
+.react-flow__controls-button svg {
+  fill: var(--text);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.react-flow__edge .react-flow__edge-path {
+  stroke: var(--edge-color);
+  stroke-width: 2;
+}
+
+.react-flow__node {
+  font-size: 12px;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-light);
+}

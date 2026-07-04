@@ -1,0 +1,578 @@
+/* 主布局 */
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 通用面板标题 */
+.panel-title {
+  padding: 10px 14px 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* === 顶部工具栏 === */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 44px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-title {
+  color: var(--text-h);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.toolbar-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.status-dot {
+  fill: var(--status-idle);
+}
+
+.status-dot.running {
+  fill: var(--status-running);
+}
+
+.status-dot.error {
+  fill: var(--status-error);
+}
+
+.status-label {
+  color: var(--text-dim);
+}
+
+/* === 左侧节点库 === */
+.node-library {
+  width: 200px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.node-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.node-item:hover {
+  background: var(--bg-card);
+  color: var(--text-h);
+  border-color: var(--border-light);
+}
+
+/* === 中间画布 === */
+.canvas-container {
+  flex: 1;
+  position: relative;
+  background: var(--bg-base);
+  min-width: 0;
+}
+
+/* === 节点通用样式 === */
+.node-wrapper {
+  position: relative;
+  font-size: 12px;
+}
+
+.node-title {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.node-title .node-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 2px;
+}
+
+.node-title .node-status-dot.success {
+  background: var(--status-success);
+}
+
+.node-title .node-status-dot.error {
+  background: var(--status-error);
+}
+
+.node-title .node-status-spinner {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--status-running);
+  border-top-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 2px;
+  animation: node-spin 0.8s linear infinite;
+}
+
+@keyframes node-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.node-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  min-width: 180px;
+  min-height: 80px;
+  padding: 12px;
+  position: relative;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.node-wrapper.selected .node-card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-strong);
+}
+
+.node-wrapper.status-running .node-card {
+  border-color: var(--status-running);
+}
+
+.node-wrapper.status-success .node-card {
+  border-color: var(--status-success);
+}
+
+.node-wrapper.status-error .node-card {
+  border-color: var(--status-error);
+}
+
+.node-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+}
+
+.node-stub-content {
+  color: var(--text-dim);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 56px;
+  padding: 4px;
+}
+
+.node-preview-area {
+  min-width: 180px;
+  min-height: 110px;
+}
+
+.node-placeholder-icon {
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+.node-placeholder {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.node-text-preview {
+  color: var(--text);
+  font-size: 11px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  max-width: 160px;
+}
+
+/* 连接点 */
+.node-handle {
+  width: 9px;
+  height: 9px;
+  background: var(--border-light);
+  border: 2px solid var(--bg-card);
+  border-radius: 50%;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.node-handle:hover {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+.react-flow__handle.node-handle {
+  width: 9px;
+  height: 9px;
+  background: var(--border-light);
+  border: 2px solid var(--bg-card);
+  border-radius: 50%;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.react-flow__handle.node-handle:hover {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+.react-flow__handle.node-handle.connectionindicator {
+  cursor: crosshair;
+}
+
+/* === CutEdge 剪刀断线 === */
+.cut-edge-button-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cut-edge-button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text);
+  box-shadow: var(--shadow);
+  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.cut-edge-button:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* === 右键菜单 / 添加节点菜单 === */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+
+.context-menu,
+.add-node-menu {
+  position: fixed;
+  z-index: 100;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: var(--shadow-strong);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.menu-item:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  color: var(--text-h);
+}
+
+.menu-item:disabled {
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* === 右侧参数面板 === */
+.inspector {
+  width: 280px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.inspector-empty {
+  padding: 32px 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.inspector-content {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-h);
+  font-size: 12px;
+  font-weight: 500;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.inspector-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.inspector-row .label {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.inspector-row .value {
+  color: var(--text);
+  text-align: right;
+  word-break: break-all;
+}
+
+.inspector-row .value-mono {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-h);
+  background: var(--bg-card);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.status-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.status-badge.status-idle {
+  background: rgba(107, 114, 128, 0.18);
+  color: var(--text-dim);
+}
+
+.status-badge.status-running {
+  background: rgba(59, 130, 246, 0.18);
+  color: var(--status-running);
+}
+
+.status-badge.status-success {
+  background: rgba(16, 185, 129, 0.18);
+  color: var(--status-success);
+}
+
+.status-badge.status-error {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--status-error);
+}
+
+.inspector-placeholder {
+  padding: 16px;
+  background: var(--bg-card);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+/* === 底部面板 === */
+.bottom-panel {
+  height: 180px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.bottom-panel-content {
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.bottom-placeholder {
+  color: var(--text-dim);
+}
+
+/* === 弹窗 === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 480px;
+  color: var(--text);
+  box-shadow: var(--shadow-strong);
+}
+
+.modal-content h3 {
+  margin: 0 0 12px;
+  color: var(--text-h);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.modal-placeholder {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin: 0 0 16px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 6px 14px;
+  background: var(--bg-base);
+  color: var(--text-h);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.modal-btn:hover {
+  background: var(--bg-card-hover);
+}

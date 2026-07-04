@@ -1,0 +1,183 @@
+// 即梦 Flow 工作台 - Jimeng Image Generate 节点数据模型与生成请求
+// 参考 PRD 6.2（节点定义）、8.3（生成任务状态）、8.6（设置与密钥）、
+//       10.3（生成接口请求/响应示例）、11.2（Asset 数据模型）、13.12（节点状态）。
+//
+// 本文件为前后端共享类型与常量。前端通过 subpath 导入：
+//   import { GenerateNodeData, IMAGE_MODELS } from '@jimeng-flow/shared/generateNode'
+
+/** 生成任务状态机（参考 PRD 8.3、13.12） */
+export type GenerationStatus =
+  | 'idle'
+  | 'queued'
+  | 'running'
+  | 'success'
+  | 'error'
+
+/**
+ * Generate 节点数据模型。
+ * 参考 PRD 6.2、11.7（按 10.3 推断）、8.3。
+ */
+export interface GenerateNodeData {
+  /** 节点 id（与 React Flow node.id 一致） */
+  id: string
+  type: 'generate'
+  /** 节点标题（显示在卡片外侧上方） */
+  title: string
+  /** 当前任务状态 */
+  status: GenerationStatus
+  /** 错误信息（status==='error' 时） */
+  error?: string
+
+  /** Prompt 文本，来自上游文本节点或自填 */
+  prompt: string
+  /** 上游 Prompt 节点 id（可选，用于追溯） */
+  promptSourceNodeId?: string
+
+  /** 模型 id，例如 'jimeng-3.0'、'jimeng-2.0' */
+  model: string
+  /** 输出图宽度 */
+  width: number
+  /** 输出图高度 */
+  height: number
+  /** 生成张数 */
+  count: number
+  /** 随机种子（可选，空时由后端/上游随机） */
+  seed?: number | null
+
+  /** 图生图参考图 Asset id 数组（可选，文生图时为空） */
+  inputImageAssetIds: string[]
+
+  /** 生成成功的 Asset id 数组 */
+  outputAssetIds: string[]
+
+  /** 最近一次生成任务 id（由后端 generations service 分配） */
+  generationId?: string
+
+  /** 创建时间 ISO 字符串 */
+  createdAt: string
+  /** 最近更新时间 ISO 字符串 */
+  updatedAt: string
+}
+
+/**
+ * POST /api/generations 请求体。
+ * 参考 PRD 10.3 生成请求示例。
+ */
+export interface GenerationRequest {
+  /** 工作流 id */
+  flowId?: string
+  /** 调用方节点 id（Generate 节点） */
+  nodeId: string
+  /** 媒体类型，图片生成固定为 'image' */
+  mediaType: 'image'
+  /** Prompt 文本 */
+  prompt: string
+  /** 图生图参考图路径或 Asset id 列表 */
+  inputImages?: string[]
+  /** 模型 id */
+  model: string
+  /** 输出宽度 */
+  width: number
+  /** 输出高度 */
+  height: number
+  /** 生成张数 */
+  count: number
+  /** 随机种子（可选，null 表示随机） */
+  seed?: number | null
+}
+
+/** 单张生成图结果 */
+export interface GenerationResult {
+  /** 该张图的临时 URL 或最终 Asset id（取决于上游 JimengCli_api 返回结构） */
+  url?: string
+  /** 图片远端 URL（如果 JimengCli_api 返回的是远端 URL） */
+  remoteUrl?: string
+  /** 本地保存后的 Asset id（保存成功后才有） */
+  assetId?: string
+  /** 该张图对应的 seed（若上游返回） */
+  seed?: number
+}
+
+/**
+ * GET /api/generations/:id 与 POST /api/generations/:id/retry 响应体。
+ * 参考 PRD 10.3。
+ */
+export interface GenerationResponse {
+  /** 生成任务 id */
+  id: string
+  /** 关联的节点 id */
+  nodeId: string
+  /** 任务状态 */
+  status: GenerationStatus
+  /** 错误信息（status==='error' 时） */
+  error?: string
+  /** 生成结果列表（成功后才有） */
+  results?: GenerationResult[]
+  /** 创建时间 ISO */
+  createdAt: string
+  /** 完成时间 ISO */
+  finishedAt?: string
+}
+
+/** 可选图片模型列表（参考 reference-model-menu.png、PRD 13.10） */
+export const IMAGE_MODELS = [
+  { id: 'jimeng-3.0', label: '即梦 3.0', description: '高质量通用模型' },
+  { id: 'jimeng-2.0', label: '即梦 2.0', description: '快速生成模型' },
+  { id: 'jimeng', label: '即梦（默认）', description: '默认即梦模型' },
+] as const
+
+/** 可选图片尺寸（参考 reference-quality-ratio-menu.png、PRD 11.3 defaultSize） */
+export const IMAGE_SIZES: { id: string; label: string; width: number; height: number }[] = [
+  { id: '1024x1024', label: '1:1 · 1024²', width: 1024, height: 1024 },
+  { id: '1024x1792', label: '9:16 · 1024×1792', width: 1024, height: 1792 },
+  { id: '1792x1024', label: '16:9 · 1792×1024', width: 1792, height: 1024 },
+  { id: '1024x1536', label: '2:3 · 1024×1536', width: 1024, height: 1536 },
+  { id: '1536x1024', label: '3:2 · 1536×1024', width: 1536, height: 1024 },
+  { id: '2048x2048', label: '1:1 · 2048²', width: 2048, height: 2048 },
+]
+
+/** 可选生成张数（参考 reference-count-menu.png） */
+export const IMAGE_COUNTS: number[] = [1, 2, 4]
+
+/** Generate 节点字段默认值（参考 PRD 11.3 默认图片参数） */
+const GENERATE_DEFAULTS = {
+  prompt: '',
+  model: 'jimeng-3.0',
+  width: 1024,
+  height: 1024,
+  count: 1,
+  seed: null as number | null,
+  inputImageAssetIds: [] as string[],
+  outputAssetIds: [] as string[],
+  status: 'idle' as GenerationStatus,
+}
+
+/**
+ * 将任意 partial 节点数据合并为完整的 GenerateNodeData。
+ * registry 创建的节点初始只有 { title, status }，这里补齐生成相关字段的默认值。
+ * 参考 videoNode.ts 的 mergeVideoDefaults 模式。
+ */
+export function mergeGenerateDefaults(
+  data: Partial<GenerateNodeData>,
+): GenerateNodeData {
+  return {
+    id: data.id ?? '',
+    type: 'generate',
+    title: data.title ?? '',
+    status: data.status ?? GENERATE_DEFAULTS.status,
+    error: data.error,
+    prompt: data.prompt ?? GENERATE_DEFAULTS.prompt,
+    promptSourceNodeId: data.promptSourceNodeId,
+    model: data.model ?? GENERATE_DEFAULTS.model,
+    width: data.width ?? GENERATE_DEFAULTS.width,
+    height: data.height ?? GENERATE_DEFAULTS.height,
+    count: data.count ?? GENERATE_DEFAULTS.count,
+    seed: data.seed ?? GENERATE_DEFAULTS.seed,
+    inputImageAssetIds:
+      data.inputImageAssetIds ?? GENERATE_DEFAULTS.inputImageAssetIds,
+    outputAssetIds: data.outputAssetIds ?? GENERATE_DEFAULTS.outputAssetIds,
+    generationId: data.generationId,
+    createdAt: data.createdAt ?? '',
+    updatedAt: data.updatedAt ?? '',
+  }
+}

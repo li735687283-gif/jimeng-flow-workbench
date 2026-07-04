@@ -1,0 +1,74 @@
+// 即梦 Flow 前端 - Flows API client
+// 封装工作流 CRUD 的 fetch 调用。
+// Vite proxy 已把 /api 转发到后端 8787，前端直接用相对路径即可。
+// 参考 PRD 10.2。
+
+import type {
+  Flow,
+  FlowSummary,
+  CreateFlowRequest,
+  UpdateFlowRequest,
+} from '@jimeng-flow/shared/flow'
+
+/** 列出所有工作流摘要 */
+export async function listFlows(): Promise<FlowSummary[]> {
+  const res = await fetch('/api/flows', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error(`获取工作流列表失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as FlowSummary[]
+}
+
+/** 读取单个工作流 */
+export async function getFlow(id: string): Promise<Flow> {
+  const res = await fetch(`/api/flows/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error(`读取工作流失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Flow
+}
+
+/** 创建新工作流 */
+export async function createFlow(body?: CreateFlowRequest): Promise<Flow> {
+  const res = await fetch('/api/flows', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!res.ok) {
+    throw new Error(`创建工作流失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Flow
+}
+
+/** 更新工作流（部分字段） */
+export async function updateFlow(
+  id: string,
+  body: UpdateFlowRequest,
+): Promise<Flow> {
+  const res = await fetch(`/api/flows/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    throw new Error(`保存工作流失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Flow
+}
+
+/** 删除工作流 */
+export async function deleteFlow(id: string): Promise<void> {
+  const res = await fetch(`/api/flows/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) {
+    throw new Error(`删除工作流失败：${res.status} ${res.statusText}`)
+  }
+}
