@@ -8,13 +8,14 @@ import type {
   GenerationRequest,
   GenerationStatus,
 } from '@jimeng-flow/shared/generateNode'
+import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
 
 /** 单个 Generate 节点的调用状态 */
 export interface GenerateCallState {
   status: GenerationStatus
   error?: string
   /** 最近一次请求参数（用于失败后重试） */
-  lastRequest?: GenerationRequest
+  lastRequest?: GenerationRequest | VideoGenerationRequest
   /** 后端分配的生成任务 id */
   generationId?: string
 }
@@ -29,7 +30,10 @@ interface GenerateStore {
   /** 设置节点错误（undefined 清空错误） */
   setError: (nodeId: string, error?: string) => void
   /** 记录最近一次请求参数（用于重试） */
-  setLastRequest: (nodeId: string, request: GenerationRequest) => void
+  setLastRequest: (
+    nodeId: string,
+    request: GenerationRequest | VideoGenerationRequest,
+  ) => void
   /** 记录后端分配的生成任务 id */
   setGenerationId: (nodeId: string, generationId?: string) => void
   /** 一次性更新多个字段（合并） */

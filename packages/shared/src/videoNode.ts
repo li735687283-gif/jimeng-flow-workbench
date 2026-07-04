@@ -1,6 +1,8 @@
 // 即梦 Flow 工作台 - Video 节点数据模型与生成请求
 // 参考 PRD 11.6（VideoNodeData）、10.3（生成请求示例）、8.4（视频生成任务）
 
+import type { GenerationResponse, GenerationResult } from '@jimeng-flow/shared/generateNode'
+
 /** 视频生成模式（参考 PRD 13.11 模式切换） */
 export type VideoMode =
   | 'text_to_video'
@@ -65,6 +67,12 @@ export interface VideoGenerationRequest {
   count: number
   generateAudio: boolean
 }
+
+/** 视频生成响应（复用 GenerationResponse，结果项同样使用 GenerationResult） */
+export type VideoGenerationResponse = GenerationResponse
+
+/** 视频生成单条结果（复用 GenerationResult：remoteUrl / url / assetId / seed） */
+export type VideoGenerationResult = GenerationResult
 
 /** 可选视频模型列表（参考 PRD 13.11） */
 export const VIDEO_MODELS = [

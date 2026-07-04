@@ -6,6 +6,8 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import type { Settings } from '@jimeng-flow/shared'
 import { getSettings, updateSettings } from '../services/settings'
+import { testJimengConnection } from '../services/jimeng'
+import { testLlmConnection } from '../services/llm'
 
 const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // GET /api/settings
@@ -58,6 +60,27 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
 
     const updated = await updateSettings(safePatch)
     return updated
+  })
+
+  // POST /api/settings/test-jimeng
+  // 使用当前表单中的 jimengBaseUrl + auth 信息测试连接，不保存配置。
+  app.post<{ Body: Partial<Settings> }>('/api/settings/test-jimeng', async (req) => {
+    const result = await testJimengConnection({
+      jimengBaseUrl: req.body.jimengBaseUrl,
+      authMode: req.body.authMode,
+      apiKey: req.body.apiKey,
+    })
+    return result
+  })
+
+  // POST /api/settings/test-llm
+  // 使用当前表单中的 llmBaseUrl + llmApiKey 测试连接，不保存配置。
+  app.post<{ Body: Partial<Settings> }>('/api/settings/test-llm', async (req) => {
+    const result = await testLlmConnection({
+      llmBaseUrl: req.body.llmBaseUrl,
+      llmApiKey: req.body.llmApiKey,
+    })
+    return result
   })
 }
 

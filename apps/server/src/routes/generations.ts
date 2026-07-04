@@ -1,8 +1,8 @@
 // 即梦 Flow 后端 - Generations 路由
-// POST   /api/generations          创建生成任务（图像）
+// POST   /api/generations          创建生成任务（图像/视频）
 // GET    /api/generations/:id      查询生成任务状态
 // POST   /api/generations/:id/retry  重试生成任务
-// 参考 PRD 8.3（生成任务）、10.3（生成接口）、12.1/12.2（错误处理）。
+// 参考 PRD 8.3（生成任务）、8.4（视频生成任务）、10.3（生成接口）、12.1/12.2（错误处理）。
 //
 // default export Fastify plugin；不在本文件注册到 app，由 index.ts 统一集成。
 
@@ -11,6 +11,7 @@ import type {
   GenerationRequest,
   GenerationResponse,
 } from '@jimeng-flow/shared/generateNode'
+import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
 import {
   createGeneration,
   getGeneration,
@@ -38,8 +39,8 @@ function errorPayload(err: unknown) {
 
 const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // POST /api/generations
-  // body: GenerationRequest → GenerationResponse
-  app.post<{ Body: GenerationRequest }>(
+  // body: GenerationRequest | VideoGenerationRequest → GenerationResponse
+  app.post<{ Body: GenerationRequest | VideoGenerationRequest }>(
     '/api/generations',
     { bodyLimit: 4 * 1024 * 1024 },
     async (req, reply) => {

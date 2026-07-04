@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, ChangeEvent } from 'react'
 import {
   ReactFlow,
@@ -6,6 +6,7 @@ import {
   BackgroundVariant,
   Controls,
   useReactFlow,
+  SelectionMode,
 } from '@xyflow/react'
 import type { Node, Edge } from '@xyflow/react'
 import { useCanvasStore } from '../../state/canvasStore'
@@ -16,6 +17,7 @@ import type { FlowNodeType } from '../../types/nodeTypes'
 import { CutEdge } from './CutEdge'
 import { ContextMenu, type ContextMenuState } from '../menus/ContextMenu'
 import { AddNodeMenu, type AddNodeMenuState } from '../menus/AddNodeMenu'
+import { SelectionToolbar } from './SelectionToolbar'
 
 const edgeTypes = { cut: CutEdge }
 
@@ -35,6 +37,8 @@ export function CanvasView() {
   const { screenToFlowPosition } = useReactFlow()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [addMenu, setAddMenu] = useState<AddNodeMenuState | null>(null)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingUploadPosRef = useRef<{ x: number; y: number }>({
     x: 400,
@@ -50,9 +54,17 @@ export function CanvasView() {
 
   const handlePaneClick = useCallback(() => {
     setSelectedNode(null)
+    setSelectedNodeIds([])
     setContextMenu(null)
     setAddMenu(null)
   }, [setSelectedNode])
+
+  const handleSelectionChange = useCallback(
+    ({ nodes }: { nodes: Node[] }) => {
+      setSelectedNodeIds(nodes.map((n) => n.id))
+    },
+    [],
+  )
 
   const handlePaneContextMenu = useCallback(
     (event: ReactMouseEvent | MouseEvent) => {
@@ -64,23 +76,6 @@ export function CanvasView() {
         y: clientY,
         flowPosition: screenToFlowPosition({ x: clientX, y: clientY }),
       })
-    },
-    [screenToFlowPosition],
-  )
-
-  const handleDoubleClick = useCallback(
-    (event: ReactMouseEvent) => {
-      const target = event.target as HTMLElement
-      if (target.classList.contains('react-flow__pane')) {
-        setAddMenu({
-          x: event.clientX,
-          y: event.clientY,
-          flowPosition: screenToFlowPosition({
-            x: event.clientX,
-            y: event.clientY,
-          }),
-        })
-      }
     },
     [screenToFlowPosition],
   )
@@ -129,8 +124,36 @@ export function CanvasView() {
     [addNode],
   )
 
+  // 在容器捕获阶段监听双击，只在画布 pane 上触发添加节点菜单
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const handleDblClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target) return
+      // 仅当双击目标为 React Flow 的画布 pane 时才打开菜单
+      if (
+        target.classList.contains('react-flow__pane') ||
+        target.classList.contains('react-flow__renderer')
+      ) {
+        setAddMenu({
+          x: event.clientX,
+          y: event.clientY,
+          flowPosition: screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          }),
+        })
+      }
+    }
+    el.addEventListener('dblclick', handleDblClick, true)
+    return () => {
+      el.removeEventListener('dblclick', handleDblClick, true)
+    }
+  }, [screenToFlowPosition])
+
   return (
-    <div className="canvas-container" onDoubleClick={handleDoubleClick}>
+    <div ref={containerRef} className="canvas-container">
       <ReactFlow
         nodes={nodes as Node[]}
         edges={edges as Edge[]}
@@ -142,8 +165,11 @@ export function CanvasView() {
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         onPaneContextMenu={handlePaneContextMenu}
+        onSelectionChange={handleSelectionChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        selectionOnDrag
+        selectionMode={SelectionMode.Partial}
         deleteKeyCode={['Delete', 'Backspace']}
         fitView
         proOptions={{ hideAttribution: true }}
@@ -156,6 +182,8 @@ export function CanvasView() {
         />
         <Controls showInteractive={false} />
       </ReactFlow>
+
+      <SelectionToolbar selectedNodeIds={selectedNodeIds} />
 
       <input
         ref={fileInputRef}

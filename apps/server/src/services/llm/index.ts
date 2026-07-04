@@ -334,3 +334,59 @@ export async function listModels(
     clearTimeout(timer)
   }
 }
+
+/** LLM 连接测试选项 */
+export interface LlmTestOptions {
+  llmBaseUrl?: string
+  llmApiKey?: string
+}
+
+/**
+ * 测试 LLM Provider 连接与鉴权。
+ * 调 GET ${baseUrl}/models，返回结构便于前端展示成功/失败原因，不抛出异常。
+ */
+export async function testLlmConnection(
+  opts: LlmTestOptions,
+): Promise<{ ok: boolean; message?: string }> {
+  const baseUrl = (opts.llmBaseUrl ?? '').replace(/\/+$/, '')
+  const apiKey = opts.llmApiKey ?? ''
+
+  if (!baseUrl) {
+    return { ok: false, message: '未配置 LLM Base URL' }
+  }
+  if (!apiKey) {
+    return { ok: false, message: '未配置 LLM API Key' }
+  }
+
+  const url = `${baseUrl}/models`
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10_000)
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+    })
+
+    if (res.ok) {
+      return { ok: true, message: '连接成功' }
+    }
+
+    const text = await res.text().catch(() => '')
+    const summary = text.length > 300 ? `${text.slice(0, 300)}...` : text
+    return {
+      ok: false,
+      message: `LLM 服务返回错误：HTTP ${res.status} ${res.statusText}${summary ? ` - ${summary}` : ''}`,
+    }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return { ok: false, message: 'LLM 连接超时（10s）' }
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, message: `LLM 连接失败：${msg}` }
+  } finally {
+    clearTimeout(timer)
+  }
+}

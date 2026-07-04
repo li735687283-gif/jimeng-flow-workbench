@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import { Play, Film, Link2, Image as ImageIcon } from 'lucide-react'
+import { Play, Film, Link2, Image as ImageIcon, AlertCircle } from 'lucide-react'
 import { NodeWrapper } from './NodeWrapper'
 import { useCanvasStore } from '../state/canvasStore'
+import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
 import {
   VIDEO_MODES,
   mergeVideoDefaults,
@@ -28,10 +30,86 @@ const quickBtnStyle = {
   transition: 'background 0.15s, border-color 0.15s',
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  idle: '待生成',
+  queued: '排队中',
+  running: '生成中',
+  success: '已生成',
+  error: '失败',
+}
+
+const statusBadgeStyle = (status: string): CSSProperties => {
+  if (status === 'success') {
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      background: 'rgba(34, 197, 94, 0.12)',
+      color: '#22c55e',
+      fontSize: 10,
+      padding: '2px 6px',
+      borderRadius: 4,
+      fontWeight: 500,
+    }
+  }
+  if (status === 'error') {
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      background: 'rgba(239, 68, 68, 0.12)',
+      color: '#ef4444',
+      fontSize: 10,
+      padding: '2px 6px',
+      borderRadius: 4,
+      fontWeight: 500,
+    }
+  }
+  if (status === 'running' || status === 'queued') {
+    return {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+      background: 'rgba(74, 158, 255, 0.12)',
+      color: '#4a9eff',
+      fontSize: 10,
+      padding: '2px 6px',
+      borderRadius: 4,
+      fontWeight: 500,
+    }
+  }
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    background: 'transparent',
+    color: 'var(--text-dim)',
+    fontSize: 10,
+    padding: '2px 6px',
+    borderRadius: 4,
+    fontWeight: 500,
+  }
+}
+
+const errorRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  background: 'rgba(239, 68, 68, 0.12)',
+  border: '1px solid #ef4444',
+  borderRadius: 4,
+  padding: '4px 6px',
+  color: '#ef4444',
+  fontSize: 10,
+}
+
 export function VideoNode({ id, data, selected }: NodeProps) {
   const nodeData = mergeVideoDefaults(data as Partial<VideoNodeData>)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const edges = useCanvasStore((s) => s.edges)
+  const callState = useGenerateStore(
+    (s) => s.states[id] ?? IDLE_CALL_STATE,
+  )
 
   const connectedCount = edges.filter((e) => e.target === id).length
   const [hint, setHint] = useState<string | null>(null)
@@ -49,12 +127,15 @@ export function VideoNode({ id, data, selected }: NodeProps) {
 
   // 透传状态到 BaseNodeData（Inspector / NodeWrapper 通过 data.status 读取）
   const baseData = data as BaseNodeData
+  const displayStatus =
+    callState.status !== 'idle' ? callState.status : baseData.status ?? 'idle'
+  const error = callState.error ?? nodeData.error
 
   return (
     <NodeWrapper
       icon={Film}
       title={nodeData.title}
-      status={baseData.status}
+      status={displayStatus as BaseNodeData['status']}
       selected={selected}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 200 }}>
@@ -109,6 +190,40 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           )}
         </div>
 
+        {/* 状态徽章 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: 10,
+          }}
+        >
+          <span style={statusBadgeStyle(displayStatus)}>
+            {STATUS_LABEL[displayStatus] ?? displayStatus}
+          </span>
+          <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
+            {modeLabel}
+          </span>
+        </div>
+
+        {/* 错误信息 */}
+        {error ? (
+          <div style={errorRowStyle}>
+            <AlertCircle size={11} style={{ flexShrink: 0 }} />
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={error}
+            >
+              {error}
+            </span>
+          </div>
+        ) : null}
+
         {/* Quick actions */}
         <div style={{ display: 'flex', gap: 4 }}>
           <button
@@ -131,23 +246,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           </button>
         </div>
 
-        {/* 已连接输入 + 当前模式 */}
+        {/* 已连接输入 */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             fontSize: 10,
             color: 'var(--text-dim)',
+            gap: 3,
           }}
         >
-          <span
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}
-          >
-            <Link2 size={10} strokeWidth={1.6} />
-            已连接 {connectedCount} 个输入
-          </span>
-          <span>{modeLabel}</span>
+          <Link2 size={10} strokeWidth={1.6} />
+          已连接 {connectedCount} 个输入
         </div>
 
         {hint && (

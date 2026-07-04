@@ -9,6 +9,7 @@ import { Settings as SettingsIcon, X } from 'lucide-react'
 import type { AuthMode, Settings } from '@jimeng-flow/shared'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import { useSettingsStore } from '../state/settingsStore'
+import { testJimengConnection, testLlmConnection } from '../api/settings'
 
 export interface SettingsModalProps {
   open: boolean
@@ -70,11 +71,25 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // 测试连接状态
+  const [testingJimeng, setTestingJimeng] = useState(false)
+  const [jimengTestResult, setJimengTestResult] = useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
+  const [testingLlm, setTestingLlm] = useState(false)
+  const [llmTestResult, setLlmTestResult] = useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
+
   // 打开时拉取一次最新 settings
   useEffect(() => {
     if (!open) return
     setLoadError(null)
     setSaveError(null)
+    setJimengTestResult(null)
+    setLlmTestResult(null)
     loadSettings().catch((err: unknown) => {
       setLoadError(err instanceof Error ? err.message : String(err))
     })
@@ -109,6 +124,68 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const handleCancel = () => {
     setSaveError(null)
     onClose()
+  }
+
+  const handleTestJimeng = async () => {
+    setTestingJimeng(true)
+    setJimengTestResult(null)
+    try {
+      const result = await testJimengConnection(form)
+      setJimengTestResult({
+        ok: result.ok,
+        message: result.message ?? (result.ok ? '连接成功' : '连接失败'),
+      })
+    } catch (err: unknown) {
+      setJimengTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setTestingJimeng(false)
+    }
+  }
+
+  const handleTestLlm = async () => {
+    setTestingLlm(true)
+    setLlmTestResult(null)
+    try {
+      const result = await testLlmConnection(form)
+      setLlmTestResult({
+        ok: result.ok,
+        message: result.message ?? (result.ok ? '连接成功' : '连接失败'),
+      })
+    } catch (err: unknown) {
+      setLlmTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setTestingLlm(false)
+    }
+  }
+
+  const renderTestResult = (result: { ok: boolean; message: string } | null) => {
+    if (!result) return null
+    return (
+      <div
+        style={{
+          marginBottom: '12px',
+          padding: '8px 10px',
+          borderRadius: '6px',
+          fontSize: '12px',
+          background: result.ok
+            ? 'rgba(40, 160, 80, 0.12)'
+            : 'rgba(220, 50, 50, 0.12)',
+          border: result.ok
+            ? '1px solid rgba(40, 160, 80, 0.5)'
+            : '1px solid rgba(220, 50, 50, 0.5)',
+          color: result.ok ? '#7ee0a0' : '#ff9a9a',
+        }}
+      >
+        {result.ok ? '连接成功：' : '连接失败：'}
+        {result.message}
+      </div>
+    )
   }
 
   return (
@@ -194,7 +271,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           {/* JimengCli_api */}
           <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>JimengCli_api 服务</div>
+            <div
+              style={{
+                ...sectionTitleStyle,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>JimengCli_api 服务</span>
+              <button
+                type="button"
+                onClick={handleTestJimeng}
+                disabled={testingJimeng}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  border: '1px solid #444',
+                  background: testingJimeng ? '#333' : '#252525',
+                  color: testingJimeng ? '#888' : '#cfcfcf',
+                  cursor: testingJimeng ? 'not-allowed' : 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                {testingJimeng ? '测试中...' : '测试连接'}
+              </button>
+            </div>
+            {renderTestResult(jimengTestResult)}
             <div style={gridStyle}>
               <div style={fieldStyle}>
                 <label style={labelStyle} htmlFor="set-jimeng-base">
@@ -243,7 +346,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           {/* LLM Provider */}
           <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>LLM Provider（OpenAI-compatible）</div>
+            <div
+              style={{
+                ...sectionTitleStyle,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>LLM Provider（OpenAI-compatible）</span>
+              <button
+                type="button"
+                onClick={handleTestLlm}
+                disabled={testingLlm}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  border: '1px solid #444',
+                  background: testingLlm ? '#333' : '#252525',
+                  color: testingLlm ? '#888' : '#cfcfcf',
+                  cursor: testingLlm ? 'not-allowed' : 'pointer',
+                  fontSize: '12px',
+                }}
+              >
+                {testingLlm ? '测试中...' : '测试连接'}
+              </button>
+            </div>
+            {renderTestResult(llmTestResult)}
             <div style={gridStyle}>
               <div style={fieldStyle}>
                 <label style={labelStyle} htmlFor="set-llm-base">

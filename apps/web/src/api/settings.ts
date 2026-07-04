@@ -4,6 +4,12 @@
 
 import type { Settings } from '@jimeng-flow/shared'
 
+/** 测试连接结果 */
+export interface TestConnectionResult {
+  ok: boolean
+  message?: string
+}
+
 /** 获取当前 settings（合并默认值后的完整内容） */
 export async function getSettings(): Promise<Settings> {
   const res = await fetch('/api/settings', {
@@ -30,4 +36,40 @@ export async function saveSettings(settings: Partial<Settings>): Promise<Setting
     throw new Error(`保存设置失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Settings
+}
+
+/**
+ * 测试 JimengCli_api 连接（不保存配置）。
+ * @param settings 当前表单中的 jimengBaseUrl、authMode、apiKey 等字段
+ */
+export async function testJimengConnection(
+  settings: Partial<Settings>,
+): Promise<TestConnectionResult> {
+  const res = await fetch('/api/settings/test-jimeng', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) {
+    throw new Error(`测试 JimengCli_api 连接失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as TestConnectionResult
+}
+
+/**
+ * 测试 LLM Provider 连接（不保存配置）。
+ * @param settings 当前表单中的 llmBaseUrl、llmModel、llmApiKey 等字段
+ */
+export async function testLlmConnection(
+  settings: Partial<Settings>,
+): Promise<TestConnectionResult> {
+  const res = await fetch('/api/settings/test-llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) {
+    throw new Error(`测试 LLM 连接失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as TestConnectionResult
 }

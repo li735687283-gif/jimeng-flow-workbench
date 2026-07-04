@@ -118,6 +118,35 @@
 - [x] 工作流保存/打开可用（含页面刷新恢复） <!-- 已修复：刷新恢复已实现 -->
 - [x] Video 节点壳和参数控件完整
 
+## M1 扩展检查项（在当前 M0 基础上新增）
+
+### 框选与批量排列
+- [x] 按住左键拖拽可框选多个节点
+- [x] 多选后在选区上方显示浮动工具条
+- [x] 工具条提供宫格排列、水平排列、垂直排列
+- [x] 排列只改变节点位置，不改变连线关系
+
+### 视频生成真实调用
+- [x] VideoComposer 提交后真正发起 `/api/generations` 请求
+- [x] 后端根据 `mediaType: 'video'` 分发到 `generateVideo`
+- [x] 视频生成状态机：idle/queued/running/success/error
+- [x] 生成成功后视频保存到 workspace/outputs/yyyy-mm-dd/
+- [x] 视频 metadata JSON 同名保存
+- [x] Video 节点可播放预览生成的本地视频
+
+### 设置连接测试
+- [x] 设置弹窗 JimengCli_api 区域有"测试连接"按钮
+- [x] 设置弹窗 LLM Provider 区域有"测试连接"按钮
+- [x] 点击后返回成功/失败原因，不自动保存配置
+- [x] 测试中按钮显示 loading 状态
+
+## 总体结论
+
+- M0 验收检查项：全部通过（原清单 97 项）
+- M1 扩展检查项：全部通过（新增 16 项）
+- TypeScript 类型检查：apps/web 与 apps/server 均通过
+- 代码已推送至：https://github.com/li735687283-gif/jimeng-flow-workbench
+
 ## PRD M0 验收标准对照
 - [x] 输入粗略想法后，Agent 能返回优化 Prompt
 - [x] 优化 Prompt 能写回 Prompt 节点

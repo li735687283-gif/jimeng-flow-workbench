@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Film, Sparkles, Volume2 } from 'lucide-react'
 import { useCanvasStore } from '../state/canvasStore'
+import { useGenerateStore } from '../state/generateStore'
+import { createGeneration } from '../api/generations'
 import {
   VIDEO_MODELS,
   VIDEO_MODES,
@@ -98,7 +100,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const modeLabel =
     VIDEO_MODES.find((m) => m.id === d.mode)?.label ?? d.mode
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const req: VideoGenerationRequest = {
       flowId: 'local',
       nodeId,
@@ -114,11 +116,50 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       count: d.count,
       generateAudio: d.generateAudio,
     }
-    // M0：不真正调用后端，仅打印请求结构并复位状态
-    console.log('[VideoComposer] submit (M0 stub)', req)
-    updateNodeData(nodeId, { status: 'idle' })
-    setNotice('视频生成功能将在后续版本接入（请求结构已打印到控制台）')
-    window.setTimeout(() => setNotice(null), 3500)
+
+    // 更新节点与 store 状态为运行中
+    updateNodeData(nodeId, { status: 'running', error: undefined, assetIds: [] })
+    useGenerateStore.getState().patch(nodeId, {
+      status: 'running',
+      error: undefined,
+      lastRequest: req,
+      generationId: undefined,
+    })
+    setNotice(null)
+
+    try {
+      const res = await createGeneration(req)
+      const assetIds = (res.results ?? [])
+        .map((r) => r.assetId)
+        .filter((id): id is string => typeof id === 'string')
+
+      updateNodeData(nodeId, {
+        status: res.status === 'success' ? 'success' : 'error',
+        error: res.error,
+        assetIds,
+      })
+      useGenerateStore.getState().patch(nodeId, {
+        status: res.status,
+        error: res.error,
+        generationId: res.id,
+      })
+
+      if (res.status === 'success') {
+        setNotice(`视频生成完成，共 ${assetIds.length} 个结果`)
+      } else {
+        setNotice(res.error ?? '视频生成失败')
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      updateNodeData(nodeId, { status: 'error', error: msg })
+      useGenerateStore.getState().patch(nodeId, {
+        status: 'error',
+        error: msg,
+      })
+      setNotice(`视频生成失败：${msg}`)
+    } finally {
+      window.setTimeout(() => setNotice(null), 4000)
+    }
   }
 
   return (

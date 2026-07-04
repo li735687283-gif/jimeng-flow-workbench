@@ -7,6 +7,7 @@ import type {
   GenerationRequest,
   GenerationResponse,
 } from '@jimeng-flow/shared/generateNode'
+import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
 
 /** 统一解析后端错误响应，返回可读 message */
 async function parseError(res: Response, fallback: string): Promise<string> {
@@ -22,9 +23,9 @@ async function parseError(res: Response, fallback: string): Promise<string> {
   return text.length > 300 ? `${text.slice(0, 300)}...` : text
 }
 
-/** POST /api/generations - 创建生成任务 */
+/** POST /api/generations - 创建生成任务（图片或视频） */
 export async function createGeneration(
-  req: GenerationRequest,
+  req: GenerationRequest | VideoGenerationRequest,
 ): Promise<GenerationResponse> {
   const res = await fetch('/api/generations', {
     method: 'POST',

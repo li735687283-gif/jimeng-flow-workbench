@@ -17,6 +17,15 @@ import type {
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
 
+const ARRANGE_GAP = 40
+
+function getNodeSize(node: Node): { width: number; height: number } {
+  const measured = node.measured
+  const width = measured?.width ?? node.width ?? 200
+  const height = measured?.height ?? node.height ?? 150
+  return { width, height }
+}
+
 interface CanvasState {
   nodes: Node[]
   edges: Edge[]
@@ -31,6 +40,9 @@ interface CanvasState {
   removeEdge: (id: string) => void
   updateNodeData: (id: string, data: Partial<BaseNodeData>) => void
   setSelectedNode: (id: string | null) => void
+  arrangeGrid: (nodeIds: string[]) => void
+  arrangeHorizontal: (nodeIds: string[]) => void
+  arrangeVertical: (nodeIds: string[]) => void
   saveFlow: () => void
 }
 
@@ -116,6 +128,95 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
+
+  arrangeGrid: (nodeIds) => {
+    const { nodes } = get()
+    const selected = nodeIds
+      .map((id) => nodes.find((n) => n.id === id))
+      .filter((n): n is Node => !!n)
+    if (selected.length < 2) return
+
+    const minX = Math.min(...selected.map((n) => n.position.x))
+    const minY = Math.min(...selected.map((n) => n.position.y))
+    const sizes = selected.map(getNodeSize)
+    const maxW = Math.max(...sizes.map((s) => s.width))
+    const maxH = Math.max(...sizes.map((s) => s.height))
+    const cols = Math.ceil(Math.sqrt(selected.length))
+
+    const nextPositions = new Map<string, { x: number; y: number }>()
+    selected.forEach((node, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      nextPositions.set(node.id, {
+        x: minX + col * (maxW + ARRANGE_GAP),
+        y: minY + row * (maxH + ARRANGE_GAP),
+      })
+    })
+
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        nextPositions.has(n.id)
+          ? { ...n, position: nextPositions.get(n.id)! }
+          : n,
+      ),
+    }))
+  },
+
+  arrangeHorizontal: (nodeIds) => {
+    const { nodes } = get()
+    const selected = nodeIds
+      .map((id) => nodes.find((n) => n.id === id))
+      .filter((n): n is Node => !!n)
+      .sort((a, b) => a.position.x - b.position.x)
+    if (selected.length < 2) return
+
+    const sizes = selected.map(getNodeSize)
+    const avgY =
+      selected.reduce((sum, n) => sum + n.position.y, 0) / selected.length
+
+    const nextPositions = new Map<string, { x: number; y: number }>()
+    let currentX = selected[0].position.x
+    selected.forEach((node, i) => {
+      nextPositions.set(node.id, { x: currentX, y: avgY })
+      currentX += sizes[i].width + ARRANGE_GAP
+    })
+
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        nextPositions.has(n.id)
+          ? { ...n, position: nextPositions.get(n.id)! }
+          : n,
+      ),
+    }))
+  },
+
+  arrangeVertical: (nodeIds) => {
+    const { nodes } = get()
+    const selected = nodeIds
+      .map((id) => nodes.find((n) => n.id === id))
+      .filter((n): n is Node => !!n)
+      .sort((a, b) => a.position.y - b.position.y)
+    if (selected.length < 2) return
+
+    const sizes = selected.map(getNodeSize)
+    const avgX =
+      selected.reduce((sum, n) => sum + n.position.x, 0) / selected.length
+
+    const nextPositions = new Map<string, { x: number; y: number }>()
+    let currentY = selected[0].position.y
+    selected.forEach((node, i) => {
+      nextPositions.set(node.id, { x: avgX, y: currentY })
+      currentY += sizes[i].height + ARRANGE_GAP
+    })
+
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        nextPositions.has(n.id)
+          ? { ...n, position: nextPositions.get(n.id)! }
+          : n,
+      ),
+    }))
+  },
 
   saveFlow: () => {
     // 节流保存（stub）—— TODO: 由 Task 3 接入真实持久化

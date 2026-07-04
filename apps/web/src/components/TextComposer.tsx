@@ -147,7 +147,9 @@ export function TextComposer({ nodeId }: TextComposerProps) {
   const setLoading = useTextNodeStore((s) => s.setLoading)
   const setError = useTextNodeStore((s) => s.setError)
   const setLastRequest = useTextNodeStore((s) => s.setLastRequest)
-  const callState = useTextNodeStore((s) => s.states[nodeId] ?? { loading: false })
+  // 避免 selector 返回新对象导致 React getSnapshot 无限循环
+  const callStateRaw = useTextNodeStore((s) => s.states[nodeId])
+  const callState = callStateRaw ?? { loading: false }
 
   const [models, setModels] = useState<LlmModelInfo[]>([])
   const [model, setModel] = useState('')
