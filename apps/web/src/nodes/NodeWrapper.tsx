@@ -34,7 +34,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function MagneticHandle({ type, position, className }: MagneticHandleProps) {
   const zoom = useStore((state) => state.transform[2])
-  const handleRef = useRef<HTMLDivElement | null>(null)
+  const zoneRef = useRef<HTMLDivElement | null>(null)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [active, setActive] = useState(false)
 
@@ -44,9 +44,9 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
   }, [])
 
   const updateMagnet = useCallback((clientX: number, clientY: number) => {
-    const handle = handleRef.current
-    if (!handle) return
-    const rect = handle.getBoundingClientRect()
+    const zone = zoneRef.current
+    if (!zone) return
+    const rect = zone.getBoundingClientRect()
     const centerX = rect.left + rect.width / 2
     const centerY = rect.top + rect.height / 2
     const dx = clientX - centerX
@@ -87,11 +87,9 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
   }, [active, updateMagnet])
 
   return (
-    <Handle
-      ref={handleRef}
-      type={type}
-      position={position}
-      className={`node-handle ${className}${active ? ' magnetic' : ''}`}
+    <div
+      ref={zoneRef}
+      className={`node-handle-zone ${className}${active ? ' magnetic' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={reset}
       style={
@@ -102,8 +100,10 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
         } as CSSProperties
       }
     >
-      <span className="node-handle-dot" />
-    </Handle>
+      <Handle type={type} position={position} className="node-handle">
+        <span className="node-handle-dot" />
+      </Handle>
+    </div>
   )
 }
 

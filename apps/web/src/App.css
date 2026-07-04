@@ -217,7 +217,7 @@
 .node-card {
   background: #242424;
   border: 1px solid #2c2c2c;
-  border-radius: 11px;
+  border-radius: 15px;
   box-shadow: none;
   min-width: 180px;
   min-height: 80px;
@@ -290,9 +290,20 @@
 }
 
 /* 连接点 */
-.node-handle {
+.node-handle-zone {
+  position: absolute;
   width: 88px;
   height: 88px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8;
+}
+
+.node-handle {
+  width: 22px;
+  height: 22px;
   background: transparent;
   border: none;
   border-radius: 50%;
@@ -329,15 +340,18 @@
   transform: translateY(-1px);
 }
 
-.node-handle.magnetic .node-handle-dot,
-.node-handle:hover .node-handle-dot {
+.node-handle-zone.magnetic .node-handle-dot,
+.node-handle-zone:hover .node-handle-dot {
   background: #3a3a3a;
   border-color: #d1d5db;
 }
 
 .react-flow__handle.node-handle {
-  width: 88px;
-  height: 88px;
+  left: 50%;
+  right: auto;
+  top: 50%;
+  width: 22px;
+  height: 22px;
   background: transparent;
   border: none;
   border-radius: 50%;
@@ -346,9 +360,10 @@
   align-items: center;
   justify-content: center;
   transition: none;
+  transform: translate(-50%, -50%);
 }
 
-.react-flow__handle.node-handle::after {
+.node-handle-zone::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -365,11 +380,15 @@
 }
 
 .node-handle-left {
-  left: 0;
+  left: -44px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .node-handle-right {
-  right: 0;
+  right: -44px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* === CutEdge 剪刀断线 === */
@@ -447,6 +466,90 @@
   color: var(--text-dim);
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* === 连接引用菜单 === */
+.reference-node-menu {
+  position: fixed;
+  z-index: 105;
+  width: 292px;
+  padding: 18px 18px 20px;
+  background: #262626;
+  border: 1px solid #3d3d3d;
+  border-radius: 20px;
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.34);
+  color: #f2f2f2;
+}
+
+.reference-menu-title {
+  margin-bottom: 18px;
+  color: #a8a8a8;
+  font-size: 18px;
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.reference-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+}
+
+.reference-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: 20px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #f3f3f3;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 20px;
+  line-height: 1;
+  text-align: left;
+  transition: color 0.12s, opacity 0.12s;
+}
+
+.reference-menu-item svg {
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.reference-menu-item:hover:not(:disabled) {
+  color: #ffffff;
+}
+
+.reference-menu-item:disabled {
+  color: #777777;
+  cursor: not-allowed;
+}
+
+.reference-menu-label {
+  margin-left: 13px;
+  white-space: nowrap;
+}
+
+.reference-menu-badge {
+  margin-left: 8px;
+  padding: 3px 7px 4px;
+  border-radius: 7px;
+  background: #454545;
+  color: #b8b8b8;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.reference-menu-item:disabled .reference-menu-badge {
+  background: #3c3c3c;
+  color: #757575;
+}
+
+.reference-menu-chevron {
+  margin-left: auto;
 }
 
 /* === 右侧参数面板 === */
