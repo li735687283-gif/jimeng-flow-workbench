@@ -292,6 +292,8 @@ export function AgentPanel() {
   const nodes = useCanvasStore((s) => s.nodes)
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const addNode = useCanvasStore((s) => s.addNode)
+  const onConnect = useCanvasStore((s) => s.onConnect)
 
   const messages = useAgentStore((s) => s.messages)
   const loading = useAgentStore((s) => s.loading)
@@ -388,16 +390,84 @@ export function AgentPanel() {
     if (!lastResponse || !targetPromptNodeId) return
     const optimizedPrompt = lastResponse.optimizedPrompt
     updateNodeData(targetPromptNodeId, {
+      input: optimizedPrompt,
       content: optimizedPrompt,
       promptCandidate: optimizedPrompt,
+      status: 'success',
+      updatedAt: new Date().toISOString(),
     } as Record<string, unknown>)
     setWriteBackNotice(`已写回节点 ${targetPromptNodeId}`)
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
     noticeTimerRef.current = setTimeout(() => setWriteBackNotice(null), 2500)
   }
 
+  /** 创建 Prompt + Generate 改图分支，用户仍需手动点击生成 */
+  const createEditBranch = () => {
+    if (!lastResponse) return
+
+    const selected = selectedNodeId
+      ? nodes.find((n) => n.id === selectedNodeId)
+      : undefined
+    const basePosition = selected?.position ?? { x: 120, y: 120 }
+    const promptNodeId = addNode('text', {
+      x: basePosition.x + 280,
+      y: basePosition.y + 10,
+    })
+    const generateNodeId = addNode('generate', {
+      x: basePosition.x + 560,
+      y: basePosition.y + 10,
+    })
+    if (!promptNodeId || !generateNodeId) return
+
+    updateNodeData(promptNodeId, {
+      title: '改图 Prompt',
+      input: lastResponse.optimizedPrompt,
+      content: lastResponse.optimizedPrompt,
+      promptCandidate: lastResponse.optimizedPrompt,
+      status: 'success',
+      updatedAt: new Date().toISOString(),
+    } as Record<string, unknown>)
+
+    const selectedImageAssetId =
+      selected?.type === 'image'
+        ? (selected.data as { assetId?: string }).assetId
+        : undefined
+
+    updateNodeData(generateNodeId, {
+      prompt: lastResponse.optimizedPrompt,
+      promptSourceNodeId: promptNodeId,
+      inputImageAssetIds: selectedImageAssetId ? [selectedImageAssetId] : [],
+      status: 'idle',
+      updatedAt: new Date().toISOString(),
+    } as Record<string, unknown>)
+
+    onConnect({
+      source: promptNodeId,
+      target: generateNodeId,
+      sourceHandle: null,
+      targetHandle: null,
+    })
+    if (selected?.type === 'image') {
+      onConnect({
+        source: selected.id,
+        target: generateNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    }
+
+    setWriteBackNotice(
+      selected?.type === 'image'
+        ? '已创建改图分支，检查参数后可点击生成'
+        : '已创建 Prompt + Generate 分支',
+    )
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = setTimeout(() => setWriteBackNotice(null), 2500)
+  }
+
   const canSubmit = userIdea.trim().length > 0 && !loading
   const canWriteBack = !!lastResponse && !!targetPromptNodeId && !loading
+  const canCreateBranch = !!lastResponse && !loading
 
   return (
     <div style={containerStyle}>
@@ -547,6 +617,16 @@ export function AgentPanel() {
         >
           <CornerDownRight size={12} />
           写回 Prompt 节点
+        </button>
+        <button
+          type="button"
+          style={writeBackBtnStyle(!canCreateBranch)}
+          disabled={!canCreateBranch}
+          onClick={createEditBranch}
+          title="创建新的 Prompt + 即梦生成分支"
+        >
+          <Sparkles size={12} />
+          创建改图分支
         </button>
         {writeBackNotice && (
           <span style={{ color: COLORS.success, fontSize: 11 }}>{writeBackNotice}</span>

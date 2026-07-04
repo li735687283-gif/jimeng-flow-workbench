@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Toolbar, type RunStatus } from './components/toolbar/Toolbar'
@@ -10,6 +10,7 @@ import { FlowsHistoryModal } from './components/FlowsHistoryModal'
 import { SettingsModal } from './components/SettingsModal'
 import { useCanvasStore } from './state/canvasStore'
 import { useFlowStore } from './state/flowStore'
+import { useSettingsStore } from './state/settingsStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import type { FlowNodeType } from './types/nodeTypes'
 import './App.css'
@@ -22,10 +23,17 @@ function AppInner() {
   const addNode = useCanvasStore((s) => s.addNode)
   const createFlow = useFlowStore((s) => s.createFlow)
   const saveCurrent = useFlowStore((s) => s.saveCurrent)
+  const loadSettings = useSettingsStore((s) => s.loadSettings)
   const { screenToFlowPosition } = useReactFlow()
 
   // 启用自动保存（首次挂载时若无 currentFlowId 会自动新建空工作流）
   useAutoSave()
+
+  useEffect(() => {
+    loadSettings().catch((err: unknown) => {
+      console.error('[App] 加载设置失败:', err)
+    })
+  }, [loadSettings])
 
   const handleNew = useCallback(() => {
     void createFlow().catch((err: unknown) => {
