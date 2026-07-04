@@ -6,6 +6,7 @@ import {
   BackgroundVariant,
   Controls,
   useReactFlow,
+  useStore,
   SelectionMode,
 } from '@xyflow/react'
 import type { Node, Edge } from '@xyflow/react'
@@ -21,6 +22,10 @@ import { SelectionToolbar } from './SelectionToolbar'
 
 const edgeTypes = { cut: CutEdge }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
 export function CanvasView() {
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
@@ -33,6 +38,8 @@ export function CanvasView() {
   const addNode = useCanvasStore((s) => s.addNode)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const setAsset = useAssetStore((s) => s.setAsset)
+  const zoom = useStore((s) => s.transform[2])
+  const connectionRadius = Math.round(clamp(42 * zoom, 22, 84))
 
   const { screenToFlowPosition } = useReactFlow()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -170,8 +177,11 @@ export function CanvasView() {
         edgeTypes={edgeTypes}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
+        panOnDrag={[1]}
+        connectionRadius={connectionRadius}
         deleteKeyCode={['Delete', 'Backspace']}
         fitView
+        fitViewOptions={{ maxZoom: 1 }}
         proOptions={{ hideAttribution: true }}
       >
         <Background

@@ -30,25 +30,26 @@ interface ImageNodeData extends BaseNodeData {
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 8,
-  width: 200,
+  width: 360,
+  minHeight: 300,
 }
 
 const PREVIEW_STYLE: CSSProperties = {
-  minHeight: 120,
+  flex: 1,
+  minHeight: 178,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: 'var(--bg-base)',
-  borderRadius: 6,
+  background: 'transparent',
+  borderRadius: 11,
   overflow: 'hidden',
 }
 
 const IMG_STYLE: CSSProperties = {
   display: 'block',
   width: '100%',
-  height: 'auto',
-  maxHeight: 200,
+  height: '100%',
+  maxHeight: 210,
   objectFit: 'contain',
 }
 
@@ -58,28 +59,29 @@ const PLACEHOLDER_STYLE: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   gap: 6,
-  minHeight: 120,
+  minHeight: 178,
   color: 'var(--text-dim)',
 }
 
 const ACTIONS_STYLE: CSSProperties = {
   display: 'flex',
-  gap: 4,
-  justifyContent: 'center',
-  flexWrap: 'wrap',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: 14,
+  padding: '0 30px 34px',
 }
 
 const BTN_BASE: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
-  padding: '3px 8px',
+  gap: 10,
+  padding: 0,
   background: 'transparent',
-  color: 'var(--text)',
-  border: '1px solid var(--border)',
-  borderRadius: 5,
+  color: '#f2f2f2',
+  border: 'none',
+  borderRadius: 0,
   cursor: 'pointer',
-  fontSize: 11,
+  fontSize: 14,
   fontFamily: 'inherit',
   lineHeight: 1.4,
   transition: 'background 0.12s, color 0.12s, border-color 0.12s',
@@ -87,9 +89,7 @@ const BTN_BASE: CSSProperties = {
 
 const BTN_ACTIVE: CSSProperties = {
   ...BTN_BASE,
-  background: 'var(--accent)',
-  color: '#fff',
-  borderColor: 'var(--accent)',
+  color: '#9ecbff',
 }
 
 const BTN_DISABLED: CSSProperties = {
@@ -186,32 +186,33 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           ) : (
             <div className="image-node-placeholder" style={PLACEHOLDER_STYLE}>
               <ImageIcon
-                size={32}
-                strokeWidth={1.2}
+                size={54}
+                strokeWidth={1.8}
                 className="node-placeholder-icon"
               />
-              <span className="node-placeholder">
-                {imgError ? '图片加载失败' : '图片节点（占位）'}
-              </span>
+              {imgError ? (
+                <span className="node-placeholder">图片加载失败</span>
+              ) : null}
             </div>
           )}
         </div>
         <div className="image-node-actions" style={ACTIONS_STYLE}>
+          <div style={{ color: '#8b8d92', fontSize: 14 }}>尝试:</div>
           <QuickAction
-            icon={<Wand2 size={12} strokeWidth={1.8} />}
+            icon={<Wand2 size={15} strokeWidth={1.8} />}
             label="图生图"
             onClick={handleImageToImage}
             title="基于此图创建即梦生成节点"
           />
           <QuickAction
-            icon={<Bookmark size={12} strokeWidth={1.8} />}
+            icon={<Bookmark size={15} strokeWidth={1.8} />}
             label={nodeData.asReference ? '已参考' : '参考图'}
             onClick={handleToggleReference}
             active={nodeData.asReference === true}
             title="标记为参考图"
           />
           <QuickAction
-            icon={<Sparkles size={12} strokeWidth={1.8} />}
+            icon={<Sparkles size={15} strokeWidth={1.8} />}
             label="高清"
             disabled
             title="图片高清（即将支持）"

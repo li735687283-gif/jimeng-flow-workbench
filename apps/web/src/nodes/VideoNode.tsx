@@ -14,19 +14,18 @@ import {
 import type { BaseNodeData } from '../types/nodeTypes'
 
 const quickBtnStyle = {
-  flex: 1,
-  padding: '4px 6px',
-  background: 'var(--bg-base)',
-  color: 'var(--text)',
-  border: '1px solid var(--border)',
-  borderRadius: 4,
+  padding: 0,
+  background: 'transparent',
+  color: '#f2f2f2',
+  border: 'none',
+  borderRadius: 0,
   cursor: 'pointer',
-  fontSize: 10,
+  fontSize: 14,
   fontFamily: 'inherit' as const,
   display: 'inline-flex' as const,
   alignItems: 'center',
-  justifyContent: 'center',
-  gap: 3,
+  justifyContent: 'flex-start',
+  gap: 10,
   transition: 'background 0.15s, border-color 0.15s',
 }
 
@@ -138,15 +137,23 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       status={displayStatus as BaseNodeData['status']}
       selected={selected}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 200 }}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: 620,
+          minHeight: 320,
+          position: 'relative',
+        }}
+      >
         {/* 视频预览区 */}
         <div
           className="node-preview-area"
           style={{
-            width: 200,
-            height: 112,
-            background: '#000',
-            borderRadius: 6,
+            width: 620,
+            height: 220,
+            background: 'transparent',
+            borderRadius: 11,
             overflow: 'hidden',
             position: 'relative',
             padding: 0,
@@ -163,7 +170,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'cover',
+                objectFit: 'contain',
                 display: 'block',
               }}
             />
@@ -179,33 +186,33 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               }}
             >
               <Play
-                size={24}
-                strokeWidth={1.2}
+                size={58}
+                strokeWidth={2}
                 className="node-placeholder-icon"
               />
-              <span className="node-placeholder" style={{ fontSize: 10 }}>
-                视频节点（占位）
-              </span>
             </div>
           )}
         </div>
 
         {/* 状态徽章 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: 10,
-          }}
-        >
-          <span style={statusBadgeStyle(displayStatus)}>
-            {STATUS_LABEL[displayStatus] ?? displayStatus}
-          </span>
-          <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
-            {modeLabel}
-          </span>
-        </div>
+        {displayStatus !== 'idle' ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: 10,
+              padding: '0 28px',
+            }}
+          >
+            <span style={statusBadgeStyle(displayStatus)}>
+              {STATUS_LABEL[displayStatus] ?? displayStatus}
+            </span>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
+              {modeLabel}
+            </span>
+          </div>
+        ) : null}
 
         {/* 错误信息 */}
         {error ? (
@@ -225,15 +232,24 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         ) : null}
 
         {/* Quick actions */}
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 14,
+            padding: displayStatus !== 'idle' ? '8px 28px 28px' : '0 28px 32px',
+          }}
+        >
+          <div style={{ color: '#8b8d92', fontSize: 14 }}>尝试:</div>
           <button
             type="button"
             style={quickBtnStyle}
             onClick={() => setMode('image_to_video')}
             title="使用首帧图片生成视频"
           >
-            <ImageIcon size={11} strokeWidth={1.6} />
-            首帧
+            <ImageIcon size={15} strokeWidth={1.8} />
+            首帧生成视频
           </button>
           <button
             type="button"
@@ -241,24 +257,29 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             onClick={() => setMode('first_last_frame')}
             title="使用首尾帧图片生成视频"
           >
-            <Film size={11} strokeWidth={1.6} />
-            首尾帧
+            <Film size={15} strokeWidth={1.8} />
+            首尾帧生成视频
           </button>
         </div>
 
         {/* 已连接输入 */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            fontSize: 10,
-            color: 'var(--text-dim)',
-            gap: 3,
-          }}
-        >
-          <Link2 size={10} strokeWidth={1.6} />
-          已连接 {connectedCount} 个输入
-        </div>
+        {connectedCount > 0 ? (
+          <div
+            style={{
+              position: 'absolute',
+              right: 14,
+              bottom: 12,
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: 10,
+              color: 'var(--text-dim)',
+              gap: 3,
+            }}
+          >
+            <Link2 size={10} strokeWidth={1.6} />
+            {connectedCount}
+          </div>
+        ) : null}
 
         {hint && (
           <div style={{ fontSize: 10, color: 'var(--accent)' }}>{hint}</div>

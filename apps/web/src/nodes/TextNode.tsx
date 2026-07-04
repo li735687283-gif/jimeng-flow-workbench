@@ -6,7 +6,14 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import { FileText, Pencil, ImageIcon, Sparkles } from 'lucide-react'
+import {
+  FileText,
+  ImageIcon,
+  Music,
+  Pencil,
+  PlaySquare,
+  Sparkles,
+} from 'lucide-react'
 import { NodeWrapper } from './NodeWrapper'
 import type { BaseNodeData } from '../types/nodeTypes'
 import type { TextNodeData } from '@jimeng-flow/shared/textNode'
@@ -34,7 +41,7 @@ const contentAreaStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '10px 12px',
+  padding: '40px 28px 12px',
   overflow: 'hidden',
 }
 
@@ -42,9 +49,9 @@ const emptyStateStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  gap: 6,
+  gap: 8,
   color: COLORS.textDim,
-  fontSize: 11,
+  fontSize: 12,
 }
 
 const summaryStyle = (isJson: boolean): CSSProperties => ({
@@ -98,22 +105,23 @@ const promptTagStyle: CSSProperties = {
 
 const quickActionsStyle: CSSProperties = {
   display: 'flex',
-  gap: 4,
-  marginTop: 8,
-  paddingTop: 8,
-  borderTop: `1px solid ${COLORS.border}`,
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: 14,
+  padding: '0 30px 34px',
+  borderTop: 'none',
 }
 
 const quickBtnStyle = (disabled: boolean): CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
-  gap: 4,
+  gap: 10,
   background: 'transparent',
-  color: disabled ? COLORS.textDim : COLORS.textMuted,
+  color: disabled ? '#77797e' : '#f2f2f2',
   border: 'none',
-  fontSize: 10,
-  padding: '3px 6px',
-  borderRadius: 4,
+  fontSize: 14,
+  padding: 0,
+  borderRadius: 0,
   cursor: disabled ? 'not-allowed' : 'pointer',
   transition: 'color 0.15s',
 })
@@ -207,7 +215,15 @@ export function TextNode({ id, data, selected }: NodeProps) {
       selected={selected}
     >
       {editing ? (
-        <div style={editAreaStyle}>
+        <div
+          style={{
+            ...editAreaStyle,
+            width: 360,
+            minHeight: 300,
+            padding: 18,
+            boxSizing: 'border-box',
+          }}
+        >
           <textarea
             style={editTextareaStyle}
             value={draft}
@@ -244,12 +260,18 @@ export function TextNode({ id, data, selected }: NodeProps) {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: 360,
+            minHeight: 300,
+          }}
+        >
           <div style={contentAreaStyle}>
             {isEmpty ? (
               <div style={emptyStateStyle}>
-                <FileText size={20} strokeWidth={1.5} />
-                <span>点击底部 Composer 输入</span>
+                <FileText size={46} strokeWidth={2.4} />
               </div>
             ) : (
               <div style={{ width: '100%', overflow: 'hidden' }}>
@@ -275,13 +297,14 @@ export function TextNode({ id, data, selected }: NodeProps) {
           </div>
 
           <div style={quickActionsStyle}>
+            <div style={{ color: '#8b8d92', fontSize: 14 }}>尝试:</div>
             <button
               type="button"
               style={quickBtnStyle(false)}
               onClick={startEdit}
               title="手写文本内容"
             >
-              <Pencil size={10} />
+              <Pencil size={15} fill="currentColor" strokeWidth={0} />
               自己编写内容
             </button>
             <button
@@ -290,8 +313,26 @@ export function TextNode({ id, data, selected }: NodeProps) {
               disabled
               title="未来能力（M2）"
             >
-              <ImageIcon size={10} />
+              <PlaySquare size={15} fill="currentColor" strokeWidth={0} />
+              文生视频
+            </button>
+            <button
+              type="button"
+              style={quickBtnStyle(true)}
+              disabled
+              title="未来能力（M2）"
+            >
+              <ImageIcon size={15} fill="currentColor" strokeWidth={0} />
               图片反推提示词
+            </button>
+            <button
+              type="button"
+              style={quickBtnStyle(true)}
+              disabled
+              title="未来能力（M2）"
+            >
+              <Music size={15} strokeWidth={1.8} />
+              文字生音乐
             </button>
           </div>
         </div>

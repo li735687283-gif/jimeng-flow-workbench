@@ -163,14 +163,22 @@
   position: absolute;
   bottom: 100%;
   left: 0;
-  margin-bottom: 6px;
+  margin-bottom: 7px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  color: var(--text);
-  font-size: 11px;
+  gap: 6px;
+  color: #8d8f93;
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 500;
   white-space: nowrap;
   user-select: none;
+}
+
+.node-title svg {
+  width: 16px;
+  height: 16px;
+  color: #929498;
 }
 
 .node-title .node-status-dot {
@@ -207,28 +215,29 @@
 }
 
 .node-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
+  background: #242424;
+  border: 1px solid #2c2c2c;
+  border-radius: 11px;
+  box-shadow: none;
   min-width: 180px;
   min-height: 80px;
-  padding: 12px;
+  padding: 0;
   position: relative;
+  overflow: visible;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .node-wrapper.selected .node-card {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-strong);
+  border-color: #a4a4a4;
+  box-shadow: 0 0 0 1px rgba(164, 164, 164, 0.7);
 }
 
 .node-wrapper.status-running .node-card {
-  border-color: var(--status-running);
+  border-color: #5f6368;
 }
 
 .node-wrapper.status-success .node-card {
-  border-color: var(--status-success);
+  border-color: #4a4d4f;
 }
 
 .node-wrapper.status-error .node-card {
@@ -237,8 +246,8 @@
 
 .node-body {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: stretch;
+  justify-content: stretch;
   min-height: 56px;
 }
 
@@ -260,12 +269,12 @@
 }
 
 .node-placeholder-icon {
-  color: var(--text-dim);
-  opacity: 0.6;
+  color: #6f7175;
+  opacity: 0.78;
 }
 
 .node-placeholder {
-  color: var(--text-dim);
+  color: #8e9095;
   font-size: 11px;
 }
 
@@ -282,35 +291,85 @@
 
 /* 连接点 */
 .node-handle {
-  width: 9px;
-  height: 9px;
-  background: var(--border-light);
-  border: 2px solid var(--bg-card);
+  width: 88px;
+  height: 88px;
+  background: transparent;
+  border: none;
   border-radius: 50%;
-  transition: background 0.15s, transform 0.15s;
+  color: #b9bbc0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: none;
 }
 
-.node-handle:hover {
-  background: var(--accent);
-  transform: scale(1.25);
+.node-handle-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 19px;
+  height: 19px;
+  background: #2e2e2e;
+  border: 2px solid #83868c;
+  border-radius: 50%;
+  color: #b9bbc0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transform: translate(calc(-50% + var(--magnet-x, 0px)), calc(-50% + var(--magnet-y, 0px)));
+  transition: transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1), background 0.15s, border-color 0.15s;
+}
+
+.node-handle-dot::before {
+  content: '+';
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 500;
+  transform: translateY(-1px);
+}
+
+.node-handle.magnetic .node-handle-dot,
+.node-handle:hover .node-handle-dot {
+  background: #3a3a3a;
+  border-color: #d1d5db;
 }
 
 .react-flow__handle.node-handle {
-  width: 9px;
-  height: 9px;
-  background: var(--border-light);
-  border: 2px solid var(--bg-card);
+  width: 88px;
+  height: 88px;
+  background: transparent;
+  border: none;
   border-radius: 50%;
-  transition: background 0.15s, transform 0.15s;
+  color: #b9bbc0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: none;
 }
 
-.react-flow__handle.node-handle:hover {
-  background: var(--accent);
-  transform: scale(1.25);
+.react-flow__handle.node-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--magnet-radius, 44px);
+  height: var(--magnet-radius, 44px);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .react-flow__handle.node-handle.connectionindicator {
   cursor: crosshair;
+}
+
+.node-handle-left {
+  left: 0;
+}
+
+.node-handle-right {
+  right: 0;
 }
 
 /* === CutEdge 剪刀断线 === */
