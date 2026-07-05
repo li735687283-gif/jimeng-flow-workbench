@@ -26,6 +26,22 @@ interface AgentStore {
     targetPromptNodeId?: string
   }
 
+  /** 同一会话内的对话上下文记忆（用于引用"那张图"、"刚才的"等） */
+  conversationContext: {
+    /** 最近一次生成操作的类型 */
+    lastActionType?: 'image' | 'video' | 'text'
+    /** 最近一次生成的节点 id */
+    lastGeneratedNodeIds?: string[]
+    /** 最近一次生成的 assetIds */
+    lastGeneratedAssetIds?: string[]
+    /** 最近一次使用的提示词 */
+    lastPrompt?: string
+    /** 最近一次使用的参数 */
+    lastParams?: Record<string, unknown>
+    /** 已锁定的参考图 assetId（用于风格一致性） */
+    referenceAssetId?: string
+  }
+
   /** 提交 Prompt 优化请求（不实际调用 API，仅记录请求参数；API 调用在组件中完成） */
   submitPrompt: (params: {
     userIdea: string
@@ -43,6 +59,9 @@ interface AgentStore {
   /** 设置错误 */
   setError: (error?: string) => void
 
+  /** 更新对话上下文 */
+  setConversationContext: (ctx: Partial<AgentStore['conversationContext']>) => void
+
   /** 重置全部状态 */
   reset: () => void
 }
@@ -59,6 +78,7 @@ export const useAgentStore = create<AgentStore>((set) => ({
   error: undefined,
   lastResponse: undefined,
   lastRequest: undefined,
+  conversationContext: {},
 
   submitPrompt: ({ userIdea, contextNodeIds, selectedNodeId, targetPromptNodeId }) => {
     const userMsg: AgentMessage = {
@@ -107,6 +127,11 @@ export const useAgentStore = create<AgentStore>((set) => ({
 
   setError: (error) => set({ loading: false, error }),
 
+  setConversationContext: (ctx) =>
+    set((state) => ({
+      conversationContext: { ...state.conversationContext, ...ctx },
+    })),
+
   reset: () =>
     set({
       messages: [],
@@ -114,5 +139,6 @@ export const useAgentStore = create<AgentStore>((set) => ({
       error: undefined,
       lastResponse: undefined,
       lastRequest: undefined,
+      conversationContext: {},
     }),
 }))

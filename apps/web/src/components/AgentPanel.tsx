@@ -12,12 +12,13 @@ import {
   Mic,
   MicOff,
   Plus,
+  RefreshCw,
   Sparkles,
   Wand2,
   X,
   Film,
 } from 'lucide-react'
-import type { PromptOptimizeRequest } from '@jimeng-flow/shared/agentMessage'
+import type { PromptOptimizeRequest, AgentMessage } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
   IMAGE_MODELS,
@@ -860,6 +861,59 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
   }
 
+  const retryLastRequest = async (modelOverride?: string) => {
+    const lastReq = useAgentStore.getState().lastRequest
+    if (!lastReq) return
+
+    const model = modelOverride || currentModel
+
+    setLoading(true)
+    setError(undefined)
+    setSkillStep('loading')
+
+    try {
+      const request: PromptOptimizeRequest = {
+        userIdea: applySkillsToUserIdea(lastReq.userIdea),
+        contextNodeIds: lastReq.contextNodeIds,
+        selectedNodeId: lastReq.selectedNodeId,
+        model,
+      }
+
+      const response = await optimizePrompt(request)
+      appendAssistant(response)
+
+      const intent = response.intent
+      if (intent === 'image' || intent === 'image_then_video') {
+        setSkillStep('image')
+        setPendingImageRequest({
+          id: `image_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || lastReq.userIdea,
+          contextNodeIds: lastReq.contextNodeIds,
+        })
+        setImageGenerationStatus('')
+        if (intent === 'image_then_video') {
+          setTimeout(() => setSkillStep('video'), 600)
+        } else {
+          setTimeout(() => setSkillStep('done'), 600)
+        }
+      } else if (intent === 'video') {
+        setSkillStep('video')
+        setPendingVideoRequest({
+          id: `video_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || lastReq.userIdea,
+          contextNodeIds: lastReq.contextNodeIds,
+        })
+        setVideoGenerationStatus('')
+        setTimeout(() => setSkillStep('done'), 600)
+      } else {
+        setSkillStep('done')
+      }
+    } catch (err) {
+      setSkillStep('idle')
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const submit = async () => {
     const userIdea = draft.trim()
     if (!userIdea || loading) return
@@ -871,6 +925,42 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     setMentionedNodeIds([])
     setVoiceStatus('')
     setSkillStep('idle')
+
+    // 自动执行关键词检测（仅在有 pending 请求时生效）
+    const normalizedIdea = userIdea.toLowerCase().replace(/[。.，,!！?？\s]/g, '')
+    const confirmKeywords = ['确认', '可以', '好', '继续', '生成', '开始', 'ok', 'yes', '是']
+    const cancelKeywords = ['不', '算了', '取消', '不要', 'no', '否', '停止']
+    const isConfirm = confirmKeywords.some((k) => normalizedIdea === k.toLowerCase())
+    const isCancel = cancelKeywords.some((k) => normalizedIdea === k.toLowerCase())
+
+    if (pendingImageRequest || pendingVideoRequest) {
+      if (isConfirm) {
+        if (pendingImageRequest) {
+          void startAgentImageGeneration()
+          return
+        }
+        if (pendingVideoRequest) {
+          void startAgentVideoGeneration()
+          return
+        }
+      }
+      if (isCancel) {
+        setPendingImageRequest(null)
+        setPendingVideoRequest(null)
+        setSkillStep('idle')
+        const cancelMsg: AgentMessage = {
+          id: `agent_cancel_${Date.now()}`,
+          role: 'assistant',
+          content: '已取消当前操作。',
+          contextNodeIds: [],
+          createdAt: new Date().toISOString(),
+        }
+        useAgentStore.setState((state) => ({
+          messages: [...state.messages, cancelMsg],
+        }))
+        return
+      }
+    }
 
     // 先走 LLM 优化，由 LLM 判断意图
     const request: PromptOptimizeRequest = {
@@ -1010,6 +1100,55 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 <p>{message.optimizedPrompt}</p>
               </div>
             )}
+            {message.role === 'assistant' && (
+              <div className="agent-message-actions">
+                {(message.intent === 'image' || message.intent === 'image_then_video') && (
+                  <>
+                    <button
+                      type="button"
+                      className="agent-msg-action-btn"
+                      onClick={() => {
+                        setPendingVideoRequest({
+                          id: `video_continue_${Date.now()}`,
+                          prompt: message.optimizedPrompt || message.content,
+                          contextNodeIds: message.contextNodeIds,
+                        })
+                      }}
+                    >
+                      <Film size={12} /> 继续生成视频
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-msg-action-btn"
+                      onClick={() => {
+                        setPendingImageRequest({
+                          id: `image_more_${Date.now()}`,
+                          prompt: message.optimizedPrompt || message.content,
+                          contextNodeIds: message.contextNodeIds,
+                        })
+                      }}
+                    >
+                      <Sparkles size={12} /> 生成更多图片
+                    </button>
+                  </>
+                )}
+                {message.intent === 'video' && (
+                  <button
+                    type="button"
+                    className="agent-msg-action-btn"
+                    onClick={() => {
+                      setPendingVideoRequest({
+                        id: `video_more_${Date.now()}`,
+                        prompt: message.optimizedPrompt || message.content,
+                        contextNodeIds: message.contextNodeIds,
+                      })
+                    }}
+                  >
+                    <Film size={12} /> 生成更多视频
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
 
@@ -1043,7 +1182,34 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
         )}
 
-        {error && <div className="agent-error">{error}</div>}
+        {error && (
+          <div className="agent-error">
+            {error}
+            <div className="agent-error-actions">
+              <button
+                type="button"
+                className="agent-msg-action-btn"
+                onClick={() => void retryLastRequest()}
+              >
+                <RefreshCw size={12} /> 重试
+              </button>
+              <button
+                type="button"
+                className="agent-msg-action-btn"
+                onClick={() => {
+                  const currentIndex = models.findIndex((m) => m === currentModel)
+                  const nextModel = models[(currentIndex + 1) % models.length] ?? currentModel
+                  void saveSettings({ llmModel: nextModel }).catch((err: unknown) => {
+                    setError(err instanceof Error ? err.message : String(err))
+                  })
+                  void retryLastRequest(nextModel)
+                }}
+              >
+                <Wand2 size={12} /> 换个模型
+              </button>
+            </div>
+          </div>
+        )}
 
         {pendingImageRequest && (
           <div className="agent-bubble assistant agent-image-request">
