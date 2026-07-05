@@ -27,6 +27,8 @@ export interface AgentMessage {
   thinking?: string
   /** Agent 判断的用户意图 */
   intent?: AgentIntent
+  /** 建议参数（intent==='edit' 时包含 editType 等） */
+  suggestedParams?: AgentSuggestedParams
   /** 分镜/故事板数据（intent==='story_mode' 时） */
   storyboard?: StoryboardData
   createdAt: string
@@ -36,7 +38,7 @@ export interface AgentMessage {
  * Agent 判断的用户意图类型。
  * 参考：前端根据 intent 展示不同的技能加载和生成确认卡片。
  */
-export type AgentIntent = 'image' | 'video' | 'text' | 'image_then_video' | 'story_mode'
+export type AgentIntent = 'image' | 'video' | 'text' | 'image_then_video' | 'story_mode' | 'edit'
 
 /**
  * 分镜/故事板单条镜头

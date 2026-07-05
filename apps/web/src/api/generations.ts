@@ -75,3 +75,26 @@ export async function retryGeneration(
   }
   return (await res.json()) as GenerationResponse
 }
+
+export interface EditGenerationRequest {
+  inputImage: string
+  editType: 'style_transfer' | 'modify' | 'remove_bg'
+  prompt?: string
+  model?: string
+  width?: number
+  height?: number
+}
+
+/** POST /api/generations/edit - 创建图片编辑任务 */
+export async function createEditGeneration(req: EditGenerationRequest): Promise<GenerationResponse> {
+  const res = await fetch('/api/generations/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const msg = await parseError(res, `编辑请求失败：${res.status} ${res.statusText}`)
+    throw new Error(msg)
+  }
+  return (await res.json()) as GenerationResponse
+}

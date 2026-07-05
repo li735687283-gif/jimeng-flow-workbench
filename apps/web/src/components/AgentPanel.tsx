@@ -37,7 +37,7 @@ import {
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
-import { createGeneration } from '../api/generations'
+import { createGeneration, createEditGeneration } from '../api/generations'
 import { listLlmModels, transcribeAudio } from '../api/llm'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
@@ -125,6 +125,13 @@ interface VideoGenerationParams {
   durationSeconds: number
   count: number
   quality: 'standard' | 'high'
+}
+
+interface PendingEditRequest {
+  id: string
+  prompt: string
+  editType: 'style_transfer' | 'modify' | 'remove_bg'
+  contextNodeIds: string[]
 }
 
 const AGENT_SKILLS: AgentSkill[] = [
@@ -227,7 +234,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       quality: 'standard',
     })
   const [videoGenerationStatus, setVideoGenerationStatus] = useState('')
-  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'done'>('idle')
+  const [pendingEditRequest, setPendingEditRequest] =
+    useState<PendingEditRequest | null>(null)
+  const [editGenerationStatus, setEditGenerationStatus] = useState('')
+  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'edit' | 'done'>('idle')
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [listening, setListening] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
@@ -744,6 +754,112 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
   }
 
+  const startAgentEditGeneration = async () => {
+    if (!pendingEditRequest) return
+    if (!isJimengConfigured) {
+      setEditGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
+      return
+    }
+
+    const contextNodes = pendingEditRequest.contextNodeIds
+      .map((id) => nodes.find((node) => node.id === id))
+      .filter((node): node is (typeof nodes)[number] => !!node)
+    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
+    const inputImageAssetIds = imageContextNodes
+      .map((node) => (node.data as { assetId?: string }).assetId)
+      .filter((assetId): assetId is string => !!assetId)
+
+    if (inputImageAssetIds.length === 0) {
+      setEditGenerationStatus('未找到输入图片，请先引用画布上的图片节点')
+      return
+    }
+
+    const inputImageAssetId = inputImageAssetIds[0]
+
+    const generateNodeId = addNode('generate', getCanvasDropPosition())
+    if (!generateNodeId) return
+
+    imageContextNodes.forEach((node) => {
+      onConnect({
+        source: node.id,
+        target: generateNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+
+    const size =
+      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
+      IMAGE_SIZES[0]
+
+    const generateStore = useGenerateStore.getState()
+    generateStore.setStatus(generateNodeId, 'queued')
+    generateStore.setError(generateNodeId, undefined)
+    updateNodeData(generateNodeId, {
+      prompt: pendingEditRequest.prompt,
+      model: imageGenerationParams.model,
+      width: size.width,
+      height: size.height,
+      count: 1,
+      seed: null,
+      status: 'queued',
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+
+    setEditGenerationStatus('已在画布创建编辑节点，正在生成...')
+
+    try {
+      const response = await createEditGeneration({
+        inputImage: inputImageAssetId,
+        editType: pendingEditRequest.editType,
+        prompt: pendingEditRequest.editType === 'remove_bg' ? undefined : pendingEditRequest.prompt,
+        model: imageGenerationParams.model,
+        width: size.width,
+        height: size.height,
+      })
+      generateStore.setGenerationId(generateNodeId, response.id)
+      const results = response.results ?? []
+      const savedAssetIds = createImageNodesForResults(generateNodeId, results)
+      const outputAssetIds =
+        savedAssetIds.length > 0
+          ? savedAssetIds
+          : results
+              .map((result) => result.assetId)
+              .filter((assetId): assetId is string => !!assetId)
+
+      generateStore.setStatus(generateNodeId, response.status)
+      if (response.error) generateStore.setError(generateNodeId, response.error)
+      updateNodeData(generateNodeId, {
+        status: response.status,
+        error: response.error,
+        outputAssetIds,
+        generationId: response.id,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setPendingEditRequest(null)
+      setEditGenerationStatus('已生成并写入画布')
+      setSkillStep('done')
+
+      // 自动将第一张图设为参考图（风格一致性锁定）
+      if (outputAssetIds.length > 0) {
+        useAgentStore.getState().setConversationContext({
+          referenceAssetId: outputAssetIds[0],
+          lastGeneratedAssetIds: outputAssetIds,
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      generateStore.setError(generateNodeId, message)
+      updateNodeData(generateNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setEditGenerationStatus(message)
+    }
+  }
+
   const startBatchImageGeneration = async (storyboard: StoryboardData) => {
     if (!isJimengConfigured) {
       setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
@@ -1142,6 +1258,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         })
         setVideoGenerationStatus('')
         setTimeout(() => setSkillStep('done'), 600)
+      } else if (intent === 'edit') {
+        setSkillStep('edit')
+        const editType = response.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg' | undefined
+        setPendingEditRequest({
+          id: `edit_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || lastReq.userIdea,
+          editType: editType || 'modify',
+          contextNodeIds: lastReq.contextNodeIds,
+        })
+        setEditGenerationStatus('')
+        setTimeout(() => setSkillStep('done'), 600)
       } else if (intent === 'story_mode') {
         setSkillStep('story')
         setTimeout(() => setSkillStep('done'), 600)
@@ -1173,7 +1300,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const isConfirm = confirmKeywords.some((k) => normalizedIdea === k.toLowerCase())
     const isCancel = cancelKeywords.some((k) => normalizedIdea === k.toLowerCase())
 
-    if (pendingImageRequest || pendingVideoRequest) {
+    if (pendingImageRequest || pendingVideoRequest || pendingEditRequest) {
       if (isConfirm) {
         if (pendingImageRequest) {
           void startAgentImageGeneration()
@@ -1183,10 +1310,15 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           void startAgentVideoGeneration()
           return
         }
+        if (pendingEditRequest) {
+          void startAgentEditGeneration()
+          return
+        }
       }
       if (isCancel) {
         setPendingImageRequest(null)
         setPendingVideoRequest(null)
+        setPendingEditRequest(null)
         setSkillStep('idle')
         const cancelMsg: AgentMessage = {
           id: `agent_cancel_${Date.now()}`,
@@ -1243,6 +1375,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           contextNodeIds,
         })
         setVideoGenerationStatus('')
+        setTimeout(() => setSkillStep('done'), 600)
+      } else if (intent === 'edit') {
+        setSkillStep('edit')
+        const editType = response.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg' | undefined
+        setPendingEditRequest({
+          id: `edit_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || userIdea,
+          editType: editType || 'modify',
+          contextNodeIds,
+        })
+        setEditGenerationStatus('')
         setTimeout(() => setSkillStep('done'), 600)
       } else if (intent === 'story_mode') {
         setSkillStep('story')
@@ -1437,6 +1580,22 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     <Film size={12} /> 生成更多视频
                   </button>
                 )}
+                {message.intent === 'edit' && (
+                  <button
+                    type="button"
+                    className="agent-msg-action-btn"
+                    onClick={() => {
+                      setPendingEditRequest({
+                        id: `edit_more_${Date.now()}`,
+                        prompt: message.optimizedPrompt || message.content,
+                        editType: (message.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg') || 'modify',
+                        contextNodeIds: message.contextNodeIds,
+                      })
+                    }}
+                  >
+                    <Sparkles size={12} /> 编辑更多图片
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1475,6 +1634,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-skill-status">
             <span className="agent-skill-status-dot running" />
             <span className="agent-skill-status-label">生成故事分镜</span>
+            <span className="agent-skill-status-state">执行中...</span>
+          </div>
+        )}
+        {skillStep === 'edit' && (
+          <div className="agent-skill-status">
+            <span className="agent-skill-status-dot running" />
+            <span className="agent-skill-status-label">编辑图片</span>
             <span className="agent-skill-status-state">执行中...</span>
           </div>
         )}
@@ -1765,6 +1931,31 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               >
                 生成到画布
               </button>
+            </div>
+          </div>
+        )}
+
+        {pendingEditRequest && (
+          <div className="agent-bubble assistant agent-edit-request">
+            <div className="agent-card-title">
+              <Sparkles size={14} />
+              <span>
+                {pendingEditRequest.editType === 'remove_bg' && '背景消除确认'}
+                {pendingEditRequest.editType === 'style_transfer' && '风格迁移确认'}
+                {pendingEditRequest.editType === 'modify' && '图片编辑确认'}
+              </span>
+            </div>
+            <p className="agent-card-desc">
+              {pendingEditRequest.editType === 'remove_bg' && '我将去除图片背景，保留主体。'}
+              {pendingEditRequest.editType === 'style_transfer' && `我将把图片转换为以下风格：${pendingEditRequest.prompt}`}
+              {pendingEditRequest.editType === 'modify' && `我将按以下要求修改图片：${pendingEditRequest.prompt}`}
+            </p>
+            {editGenerationStatus && (
+              <div className="agent-card-status">{editGenerationStatus}</div>
+            )}
+            <div className="agent-card-actions">
+              <button type="button" className="agent-card-secondary" onClick={() => setPendingEditRequest(null)}>取消</button>
+              <button type="button" className="agent-card-primary" onClick={() => void startAgentEditGeneration()}>生成到画布</button>
             </div>
           </div>
         )}

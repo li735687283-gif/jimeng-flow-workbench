@@ -17,7 +17,7 @@ import {
   getGeneration,
   retryGeneration,
 } from '../services/generations'
-import { JimengError } from '../services/jimeng'
+import { JimengError, removeBackground, generateImage } from '../services/jimeng'
 
 /** 构造统一错误响应 */
 function errorPayload(err: unknown) {
@@ -93,6 +93,54 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       }
     },
   )
+
+  // POST /api/generations/edit
+  // body: { inputImage: string, editType: 'style_transfer'|'modify'|'remove_bg', prompt?: string, ... }
+  app.post('/api/generations/edit', async (req, reply) => {
+    const body = req.body as { inputImage: string; editType: string; prompt?: string; model?: string; width?: number; height?: number }
+    if (!body.inputImage) {
+      return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'inputImage 不能为空' })
+    }
+    try {
+      if (body.editType === 'remove_bg') {
+        const res = await removeBackground({ inputImage: body.inputImage })
+        // 将结果保存为资产，返回 assetId
+        const editResult = res[0]
+        if (editResult?.localPath) {
+          const { readFile } = await import('node:fs/promises')
+          const { saveUploadFile } = await import('../services/assets')
+          const buffer = await readFile(editResult.localPath)
+          const asset = await saveUploadFile({
+            fileBuffer: buffer,
+            originalName: 'remove_bg_output.png',
+            mimeType: 'image/png',
+            prompt: body.prompt || 'remove background',
+          })
+          editResult.assetId = asset.id
+        }
+        return reply.code(201).send({ id: `edit_${Date.now()}`, status: 'success', results: res })
+      }
+      // style_transfer / modify 使用 image2image
+      const genReq: GenerationRequest = {
+        flowId: 'local',
+        nodeId: `edit_${Date.now()}`,
+        mediaType: 'image',
+        prompt: body.prompt || 'modify image',
+        inputImages: [body.inputImage],
+        model: body.model || 'jimeng-3.0',
+        width: body.width || 1024,
+        height: body.height || 1024,
+        count: 1,
+        seed: null,
+      }
+      const res = await generateImage(genReq)
+      return reply.code(201).send({ id: `edit_${Date.now()}`, status: 'success', results: res })
+    } catch (err) {
+      app.log.error({ err }, '[generations/edit] 调用失败')
+      const payload = errorPayload(err)
+      return reply.code(payload.statusCode).send(payload)
+    }
+  })
 }
 
 export default generationsRoutes
