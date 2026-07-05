@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import type {
   PromptOptimizeResponse,
   AgentMessage,
+  AgentRole,
 } from '@jimeng-flow/shared/agentMessage'
 
 interface AgentStore {
@@ -24,7 +25,11 @@ interface AgentStore {
     contextNodeIds: string[]
     selectedNodeId?: string
     targetPromptNodeId?: string
+    role?: AgentRole
   }
+
+  /** 当前 Agent 角色模式 */
+  role: AgentRole
 
   /** 同一会话内的对话上下文记忆（用于引用"那张图"、"刚才的"等） */
   conversationContext: {
@@ -48,6 +53,7 @@ interface AgentStore {
     contextNodeIds?: string[]
     selectedNodeId?: string
     targetPromptNodeId?: string
+    role?: AgentRole
   }) => AgentMessage
 
   /** 追加 assistant 消息并保存响应 */
@@ -58,6 +64,9 @@ interface AgentStore {
 
   /** 设置错误 */
   setError: (error?: string) => void
+
+  /** 设置角色 */
+  setRole: (role: AgentRole) => void
 
   /** 更新对话上下文 */
   setConversationContext: (ctx: Partial<AgentStore['conversationContext']>) => void
@@ -72,15 +81,17 @@ function nextId(): string {
   return `agent_msg_${Date.now()}_${msgSeq}`
 }
 
-export const useAgentStore = create<AgentStore>((set) => ({
+export const useAgentStore = create<AgentStore>((set, get) => ({
   messages: [],
   loading: false,
   error: undefined,
   lastResponse: undefined,
   lastRequest: undefined,
+  role: (typeof window !== 'undefined' && localStorage.getItem('agentRole') as AgentRole) || 'general',
   conversationContext: {},
 
-  submitPrompt: ({ userIdea, contextNodeIds, selectedNodeId, targetPromptNodeId }) => {
+  submitPrompt: ({ userIdea, contextNodeIds, selectedNodeId, targetPromptNodeId, role }) => {
+    const currentRole = role || get().role
     const userMsg: AgentMessage = {
       id: nextId(),
       role: 'user',
@@ -98,6 +109,7 @@ export const useAgentStore = create<AgentStore>((set) => ({
         contextNodeIds: contextNodeIds ?? [],
         selectedNodeId,
         targetPromptNodeId,
+        role: currentRole,
       },
     }))
     return userMsg
@@ -129,18 +141,28 @@ export const useAgentStore = create<AgentStore>((set) => ({
 
   setError: (error) => set({ loading: false, error }),
 
+  setRole: (role) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('agentRole', role)
+    }
+    set({ role })
+  },
+
   setConversationContext: (ctx) =>
     set((state) => ({
       conversationContext: { ...state.conversationContext, ...ctx },
     })),
 
   reset: () =>
-    set({
+    set((state) => ({
       messages: [],
       loading: false,
       error: undefined,
       lastResponse: undefined,
       lastRequest: undefined,
       conversationContext: {},
-    }),
+      // role 不被重置，保持用户的选择
+      role: state.role,
+    })),
 }))
+

@@ -18,7 +18,8 @@ import {
   X,
   Film,
 } from 'lucide-react'
-import type { PromptOptimizeRequest, AgentMessage, StoryboardData } from '@jimeng-flow/shared/agentMessage'
+import type { PromptOptimizeRequest, AgentMessage, StoryboardData, AgentRole } from '@jimeng-flow/shared/agentMessage'
+import { AGENT_ROLES } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
   IMAGE_MODELS,
@@ -194,6 +195,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const messages = useAgentStore((s) => s.messages)
   const loading = useAgentStore((s) => s.loading)
   const error = useAgentStore((s) => s.error)
+  const role = useAgentStore((s) => s.role)
+  const setRole = useAgentStore((s) => s.setRole)
   const appendAssistant = useAgentStore((s) => s.appendAssistant)
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
@@ -206,6 +209,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
+  const [rolePickerOpen, setRolePickerOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<string[]>(FALLBACK_MODELS)
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
@@ -314,6 +318,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
     }
   }, [])
+
+  // 点击外部关闭角色选择器
+  useEffect(() => {
+    if (!rolePickerOpen) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.agent-role-dropdown') && !target.closest('.agent-role-pill')) {
+        setRolePickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [rolePickerOpen])
 
   const mentionOptions = useMemo(() => {
     const query = (mentionQuery ?? '').toLowerCase()
@@ -1230,6 +1247,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         contextNodeIds: lastReq.contextNodeIds,
         selectedNodeId: lastReq.selectedNodeId,
         model,
+        role: lastReq.role || 'general',
       }
 
       const response = await optimizePrompt(request)
@@ -1340,6 +1358,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       contextNodeIds,
       selectedNodeId: selectedNodeId ?? undefined,
       model: currentModel,
+      role: useAgentStore.getState().role,
     }
 
     setLoading(true)
@@ -1419,6 +1438,82 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         <div className="agent-title">
           <Bot size={15} />
           <span>AI创作搭档</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setRolePickerOpen((v) => !v)}
+            className="agent-role-pill"
+            title="切换 Agent 角色"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              borderRadius: 12,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.06)',
+              color: '#e2e8f0',
+              fontSize: 11,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ fontSize: 13 }}>{AGENT_ROLES.find((r) => r.id === role)?.icon}</span>
+            <span>{AGENT_ROLES.find((r) => r.id === role)?.name}</span>
+            <ChevronDown size={10} />
+          </button>
+          {rolePickerOpen && (
+            <div
+              className="agent-role-dropdown"
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                right: 0,
+                zIndex: 50,
+                width: 220,
+                background: '#1e293b',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 10,
+                padding: 6,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              }}
+            >
+              {AGENT_ROLES.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => {
+                    setRole(r.id as AgentRole)
+                    setRolePickerOpen(false)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: role === r.id ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    color: '#e2e8f0',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.12)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = role === r.id ? 'rgba(255,255,255,0.08)' : 'transparent')}
+                >
+                  <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{r.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{r.name}</div>
+                    <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 1 }}>{r.description}</div>
+                  </div>
+                  {role === r.id && <Check size={12} style={{ color: '#10b981', flexShrink: 0 }} />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="agent-header-actions">
           <button type="button" className="agent-header-btn" title="新对话">

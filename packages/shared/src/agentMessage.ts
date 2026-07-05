@@ -2,8 +2,25 @@
 // 参考 PRD 8.7（Agent Prompt 优化流程）、10.5（Agent 接口请求/响应示例）、
 //       11.4（AgentMessage 数据模型）、9.4（Agent 数据流）。
 
-/** Agent 消息角色 */
-export type AgentMessageRole = 'user' | 'assistant' | 'system'
+/** Agent 角色模式 */
+export type AgentRole = 'general' | 'director' | 'visual' | 'editor'
+
+/** Agent 角色显示信息 */
+export interface AgentRoleInfo {
+  id: AgentRole
+  name: string
+  description: string
+  icon: string
+  color: string
+}
+
+/** 所有可用角色信息 */
+export const AGENT_ROLES: AgentRoleInfo[] = [
+  { id: 'general', name: '通用助手', description: '全能型 AI 助手，涵盖创意、视觉、剪辑等多种能力', icon: '✨', color: '#6366f1' },
+  { id: 'director', name: '创意导演', description: '擅长故事策划、分镜设计、脚本撰写和创意构思', icon: '🎬', color: '#f59e0b' },
+  { id: 'visual', name: '视觉设计师', description: '专注于图片生成、风格优化、构图设计和图像编辑', icon: '🎨', color: '#ec4899' },
+  { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', icon: '✂️', color: '#10b981' },
+]
 
 /**
  * Agent 对话消息数据模型。
@@ -92,6 +109,9 @@ export interface AgentProposedAction {
   payload?: Record<string, unknown>
 }
 
+/** Agent 消息角色 */
+export type AgentMessageRole = 'user' | 'assistant' | 'system'
+
 /**
  * POST /api/agent/prompt-optimize 请求体。
  * 参考 PRD 8.7、10.5。
@@ -109,6 +129,8 @@ export interface PromptOptimizeRequest {
   flowId?: string
   /** 模型（可选，默认用 settings.llmModel） */
   model?: string
+  /** Agent 角色模式（可选，默认 'general'） */
+  role?: AgentRole
 }
 
 /**
