@@ -26,6 +26,7 @@ import {
   IMAGE_SIZES,
   type GenerationRequest,
   type GenerationResult,
+  type GenerationResponse,
 } from '@jimeng-flow/shared/generateNode'
 import {
   VIDEO_MODELS,
@@ -38,7 +39,7 @@ import {
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
-import { createGeneration, createEditGeneration } from '../api/generations'
+import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
 import { listLlmModels, transcribeAudio } from '../api/llm'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
@@ -600,49 +601,81 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     try {
       const response = await createGeneration(request)
       generateStore.setGenerationId(generateNodeId, response.id)
-      const results = response.results ?? []
-      const savedAssetIds = createImageNodesForResults(generateNodeId, results)
-      const outputAssetIds =
-        savedAssetIds.length > 0
-          ? savedAssetIds
-          : results
-              .map((result) => result.assetId)
-              .filter((assetId): assetId is string => !!assetId)
 
-      generateStore.setStatus(generateNodeId, response.status)
-      if (response.error) generateStore.setError(generateNodeId, response.error)
-      updateNodeData(generateNodeId, {
-        status: response.status,
-        error: response.error,
-        outputAssetIds,
-        generationId: response.id,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setPendingImageRequest(null)
-      setImageGenerationStatus('已生成并写入画布')
+      // 订阅 SSE 实时获取状态更新
+      const unsubscribe = subscribeGeneration(response.id, {
+        onUpdate: (data) => {
+          generateStore.setStatus(generateNodeId, data.status)
+          if (data.error) generateStore.setError(generateNodeId, data.error)
+          updateNodeData(generateNodeId, {
+            status: data.status,
+            error: data.error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          const statusText =
+            data.status === 'queued' ? '已排队...' :
+            data.status === 'running' ? '生成中...' :
+            data.status === 'success' ? '生成完成' :
+            data.status === 'error' ? '生成失败' : '处理中'
+          setImageGenerationStatus(statusText)
+        },
+        onComplete: (data) => {
+          const results = data.results ?? []
+          const savedAssetIds = createImageNodesForResults(generateNodeId, results)
+          const outputAssetIds =
+            savedAssetIds.length > 0
+              ? savedAssetIds
+              : results
+                  .map((result) => result.assetId)
+                  .filter((assetId): assetId is string => !!assetId)
 
-      // 自动将第一张图设为参考图（风格一致性锁定）
-      if (outputAssetIds.length > 0) {
-        useAgentStore.getState().setConversationContext({
-          referenceAssetId: outputAssetIds[0],
-          lastGeneratedAssetIds: outputAssetIds,
-        })
-      }
+          generateStore.setStatus(generateNodeId, data.status)
+          if (data.error) generateStore.setError(generateNodeId, data.error)
+          updateNodeData(generateNodeId, {
+            status: data.status,
+            error: data.error,
+            outputAssetIds,
+            generationId: data.id,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          setPendingImageRequest(null)
+          setImageGenerationStatus('已生成并写入画布')
 
-      // 如果 intent 是 image_then_video，图片生成完成后自动触发视频生成
-      const lastIntent = useAgentStore.getState().lastResponse?.intent
-      if (lastIntent === 'image_then_video') {
-        setTimeout(() => {
-          setPendingVideoRequest({
-            id: `video_auto_${Date.now()}`,
-            prompt: pendingImageRequest.prompt,
-            contextNodeIds: pendingImageRequest.contextNodeIds,
-            sourceImageNodeIds: outputAssetIds,
-          })
-          setVideoGenerationStatus('')
-          setSkillStep('video')
-        }, 400)
-      }
+          // 自动将第一张图设为参考图（风格一致性锁定）
+          if (outputAssetIds.length > 0) {
+            useAgentStore.getState().setConversationContext({
+              referenceAssetId: outputAssetIds[0],
+              lastGeneratedAssetIds: outputAssetIds,
+            })
+          }
+
+          // 如果 intent 是 image_then_video，图片生成完成后自动触发视频生成
+          const lastIntent = useAgentStore.getState().lastResponse?.intent
+          if (lastIntent === 'image_then_video') {
+            setTimeout(() => {
+              setPendingVideoRequest({
+                id: `video_auto_${Date.now()}`,
+                prompt: pendingImageRequest.prompt,
+                contextNodeIds: pendingImageRequest.contextNodeIds,
+                sourceImageNodeIds: outputAssetIds,
+              })
+              setVideoGenerationStatus('')
+              setSkillStep('video')
+            }, 400)
+          }
+          unsubscribe()
+        },
+        onError: (error) => {
+          generateStore.setError(generateNodeId, error)
+          updateNodeData(generateNodeId, {
+            status: 'error',
+            error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          setImageGenerationStatus(error)
+          unsubscribe()
+        },
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       generateStore.setError(generateNodeId, message)
@@ -742,23 +775,55 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     try {
       const response = await createGeneration(request)
       generateStore.setGenerationId(videoNodeId, response.id)
-      const results = response.results ?? []
-      const assetIds = results
-        .map((result) => result.assetId)
-        .filter((assetId): assetId is string => !!assetId)
 
-      generateStore.setStatus(videoNodeId, response.status)
-      if (response.error) generateStore.setError(videoNodeId, response.error)
-      updateNodeData(videoNodeId, {
-        status: response.status,
-        error: response.error,
-        assetIds,
-        generationId: response.id,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setPendingVideoRequest(null)
-      setVideoGenerationStatus('已生成并写入画布')
-      setSkillStep('done')
+      // 订阅 SSE 实时获取状态更新
+      const unsubscribe = subscribeGeneration(response.id, {
+        onUpdate: (data) => {
+          generateStore.setStatus(videoNodeId, data.status)
+          if (data.error) generateStore.setError(videoNodeId, data.error)
+          updateNodeData(videoNodeId, {
+            status: data.status,
+            error: data.error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          const statusText =
+            data.status === 'queued' ? '已排队...' :
+            data.status === 'running' ? '生成中...' :
+            data.status === 'success' ? '生成完成' :
+            data.status === 'error' ? '生成失败' : '处理中'
+          setVideoGenerationStatus(statusText)
+        },
+        onComplete: (data) => {
+          const results = data.results ?? []
+          const assetIds = results
+            .map((result) => result.assetId)
+            .filter((assetId): assetId is string => !!assetId)
+
+          generateStore.setStatus(videoNodeId, data.status)
+          if (data.error) generateStore.setError(videoNodeId, data.error)
+          updateNodeData(videoNodeId, {
+            status: data.status,
+            error: data.error,
+            assetIds,
+            generationId: data.id,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          setPendingVideoRequest(null)
+          setVideoGenerationStatus('已生成并写入画布')
+          setSkillStep('done')
+          unsubscribe()
+        },
+        onError: (error) => {
+          generateStore.setError(videoNodeId, error)
+          updateNodeData(videoNodeId, {
+            status: 'error',
+            error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          setVideoGenerationStatus(error)
+          unsubscribe()
+        },
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       generateStore.setError(videoNodeId, message)
@@ -913,6 +978,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const generateStore = useGenerateStore.getState()
     const newImageAssetIds: string[] = []
 
+    // 辅助函数：等待 SSE 完成
+    const waitForGeneration = (id: string): Promise<GenerationResponse> => {
+      return new Promise((resolve, reject) => {
+        const unsubscribe = subscribeGeneration(id, {
+          onComplete: (data) => { resolve(data); unsubscribe() },
+          onError: (error) => { reject(new Error(error)); unsubscribe() },
+        })
+      })
+    }
+
     // 2. 串行生成每个镜头
     for (let i = 0; i < storyboard.items.length; i++) {
       const item = storyboard.items[i]
@@ -942,13 +1017,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       try {
         const response = await createGeneration(request)
         generateStore.setGenerationId(generateNodeId, response.id)
-        const results = response.results ?? []
+
+        // 等待 SSE 完成
+        const finalResponse = await waitForGeneration(response.id)
+        const results = finalResponse.results ?? []
         const assetIds = results
           .map((result) => result.assetId)
           .filter((assetId): assetId is string => !!assetId)
 
-        generateStore.setStatus(generateNodeId, response.status)
-        if (response.error) generateStore.setError(generateNodeId, response.error)
+        generateStore.setStatus(generateNodeId, finalResponse.status)
+        if (finalResponse.error) generateStore.setError(generateNodeId, finalResponse.error)
 
         // 创建 image 节点并连线
         if (assetIds.length > 0) {
@@ -971,10 +1049,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         }
 
         updateNodeData(generateNodeId, {
-          status: response.status,
-          error: response.error,
+          status: finalResponse.status,
+          error: finalResponse.error,
           outputAssetIds: assetIds,
-          generationId: response.id,
+          generationId: finalResponse.id,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
       } catch (err) {
@@ -1069,18 +1147,26 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       try {
         const response = await createGeneration(request)
         generateStore.setGenerationId(videoNodeId, response.id)
-        const results = response.results ?? []
+
+        // 等待 SSE 完成
+        const finalResponse = await new Promise<GenerationResponse>((resolve, reject) => {
+          const unsubscribe = subscribeGeneration(response.id, {
+            onComplete: (data) => { resolve(data); unsubscribe() },
+            onError: (error) => { reject(new Error(error)); unsubscribe() },
+          })
+        })
+        const results = finalResponse.results ?? []
         const assetIds = results
           .map((result) => result.assetId)
           .filter((assetId): assetId is string => !!assetId)
 
-        generateStore.setStatus(videoNodeId, response.status)
-        if (response.error) generateStore.setError(videoNodeId, response.error)
+        generateStore.setStatus(videoNodeId, finalResponse.status)
+        if (finalResponse.error) generateStore.setError(videoNodeId, finalResponse.error)
         updateNodeData(videoNodeId, {
-          status: response.status,
-          error: response.error,
+          status: finalResponse.status,
+          error: finalResponse.error,
           assetIds,
-          generationId: response.id,
+          generationId: finalResponse.id,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
       } catch (err) {

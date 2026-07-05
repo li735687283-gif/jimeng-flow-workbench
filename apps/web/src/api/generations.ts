@@ -98,3 +98,35 @@ export async function createEditGeneration(req: EditGenerationRequest): Promise<
   }
   return (await res.json()) as GenerationResponse
 }
+
+/** SSE 订阅生成任务状态 */
+export interface GenerationSseCallback {
+  onUpdate?: (response: GenerationResponse) => void
+  onComplete?: (response: GenerationResponse) => void
+  onError?: (error: string) => void
+}
+
+/** 通过 SSE 订阅生成任务实时状态更新 */
+export function subscribeGeneration(id: string, callbacks: GenerationSseCallback): () => void {
+  const source = new EventSource(`/api/generations/${encodeURIComponent(id)}/sse`)
+
+  source.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data) as GenerationResponse
+      callbacks.onUpdate?.(data)
+      if (data.status === 'success' || data.status === 'error') {
+        callbacks.onComplete?.(data)
+        source.close()
+      }
+    } catch {
+      // 忽略非 JSON 消息
+    }
+  }
+
+  source.onerror = () => {
+    callbacks.onError?.('SSE 连接错误')
+    source.close()
+  }
+
+  return () => source.close()
+}

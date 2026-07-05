@@ -27,8 +27,11 @@ function makeGenerationId(): string {
   return `gen_${ts}_${rand}`
 }
 
+/** 生成任务状态监听器 */
+export type GenerationStatusListener = (status: GenerationStatus, record: GenerationRecord) => void
+
 /** 内存中的生成任务记录（M0 阶段不持久化，进程重启后丢失） */
-interface GenerationRecord {
+export interface GenerationRecord {
   id: string
   nodeId: string
   status: GenerationStatus
@@ -41,6 +44,42 @@ interface GenerationRecord {
 
 /** 任务存储（M0 内存实现，单进程足够） */
 const store = new Map<string, GenerationRecord>()
+
+/** 状态监听器存储 */
+const listeners = new Map<string, Set<GenerationStatusListener>>()
+
+/** 添加状态监听器 */
+export function addGenerationListener(id: string, listener: GenerationStatusListener): void {
+  let set = listeners.get(id)
+  if (!set) {
+    set = new Set()
+    listeners.set(id, set)
+  }
+  set.add(listener)
+}
+
+/** 移除状态监听器 */
+export function removeGenerationListener(id: string, listener: GenerationStatusListener): void {
+  const set = listeners.get(id)
+  if (!set) return
+  set.delete(listener)
+  if (set.size === 0) {
+    listeners.delete(id)
+  }
+}
+
+/** 通知所有监听器 */
+function notifyListeners(record: GenerationRecord): void {
+  const set = listeners.get(record.id)
+  if (!set) return
+  for (const listener of set) {
+    try {
+      listener(record.status, record)
+    } catch {
+      // 忽略监听器错误
+    }
+  }
+}
 
 /** 从 URL 推断图片扩展名 */
 function extFromImageUrl(url: string): string {
@@ -287,7 +326,7 @@ function validateCreateRequest(
   }
 }
 
-/** 创建图片生成任务 */
+/** 创建图片生成任务（异步执行） */
 async function createImageGeneration(
   req: GenerationRequest,
 ): Promise<GenerationResponse> {
@@ -301,8 +340,28 @@ async function createImageGeneration(
   }
   store.set(id, record)
 
+  // 异步执行生成任务
+  setImmediate(() => {
+    runImageGeneration(id, req).catch(() => {
+      // 忽略异步执行错误，已在 runImageGeneration 中处理
+    })
+  })
+
+  return toResponse(record)
+}
+
+/** 在后台运行图片生成 */
+async function runImageGeneration(
+  id: string,
+  req: GenerationRequest,
+): Promise<void> {
+  const record = store.get(id)
+  if (!record) return
+
   try {
     record.status = 'running'
+    notifyListeners(record)
+
     const results = await generateImage(req)
 
     // 顺序下载并保存每张图为 Asset（避免并发占用过多内存）
@@ -333,16 +392,16 @@ async function createImageGeneration(
         : `所有图片保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
+    notifyListeners(record)
   } catch (err) {
     record.status = 'error'
     record.error = err instanceof Error ? err.message : String(err)
     record.finishedAt = new Date().toISOString()
+    notifyListeners(record)
   }
-
-  return toResponse(record)
 }
 
-/** 创建视频生成任务 */
+/** 创建视频生成任务（异步执行） */
 async function createVideoGeneration(
   req: VideoGenerationRequest,
 ): Promise<GenerationResponse> {
@@ -356,8 +415,28 @@ async function createVideoGeneration(
   }
   store.set(id, record)
 
+  // 异步执行生成任务
+  setImmediate(() => {
+    runVideoGeneration(id, req).catch(() => {
+      // 忽略异步执行错误
+    })
+  })
+
+  return toResponse(record)
+}
+
+/** 在后台运行视频生成 */
+async function runVideoGeneration(
+  id: string,
+  req: VideoGenerationRequest,
+): Promise<void> {
+  const record = store.get(id)
+  if (!record) return
+
   try {
     record.status = 'running'
+    notifyListeners(record)
+
     const results = await generateVideo(req)
 
     // 顺序下载并保存每个视频为 Asset
@@ -387,13 +466,13 @@ async function createVideoGeneration(
         : `所有视频保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
+    notifyListeners(record)
   } catch (err) {
     record.status = 'error'
     record.error = err instanceof Error ? err.message : String(err)
     record.finishedAt = new Date().toISOString()
+    notifyListeners(record)
   }
-
-  return toResponse(record)
 }
 
 /**
