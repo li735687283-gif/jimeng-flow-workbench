@@ -68,11 +68,19 @@ interface AgentStore {
   /** 设置角色 */
   setRole: (role: AgentRole) => void
 
-  /** 更新对话上下文 */
-  setConversationContext: (ctx: Partial<AgentStore['conversationContext']>) => void
-
-  /** 重置全部状态 */
-  reset: () => void
+  /** 最近的生成结果预览（用于 Agent 面板画廊展示） */
+  generationResults: Array<{
+    id: string
+    assetId?: string
+    url?: string
+    type: 'image' | 'video'
+    prompt?: string
+    timestamp: string
+  }>
+  /** 添加生成结果到画廊 */
+  addGenerationResult: (result: { assetId?: string; url?: string; type: 'image' | 'video'; prompt?: string }) => void
+  /** 清除生成结果 */
+  clearGenerationResults: () => void
 }
 
 let msgSeq = 0
@@ -153,6 +161,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       conversationContext: { ...state.conversationContext, ...ctx },
     })),
 
+  generationResults: [],
+
+  addGenerationResult: (result) =>
+    set((state) => ({
+      generationResults: [
+        ...state.generationResults,
+        {
+          id: `gen_result_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          ...result,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    })),
+
+  clearGenerationResults: () => set({ generationResults: [] }),
+
   reset: () =>
     set((state) => ({
       messages: [],
@@ -161,6 +185,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       lastResponse: undefined,
       lastRequest: undefined,
       conversationContext: {},
+      generationResults: [],
       // role 不被重置，保持用户的选择
       role: state.role,
     })),

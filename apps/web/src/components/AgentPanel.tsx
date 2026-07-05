@@ -202,7 +202,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
   const conversationContext = useAgentStore((s) => s.conversationContext)
-  const setConversationContext = useAgentStore((s) => s.setConversationContext)
+  const generationResults = useAgentStore((s) => s.generationResults)
+  const addGenerationResult = useAgentStore((s) => s.addGenerationResult)
+  const clearGenerationResults = useAgentStore((s) => s.clearGenerationResults)
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
@@ -641,7 +643,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           setPendingImageRequest(null)
           setImageGenerationStatus('已生成并写入画布')
 
-          // 自动将第一张图设为参考图（风格一致性锁定）
+          // 添加结果到画廊
+          outputAssetIds.forEach((assetId) => {
+            addGenerationResult({ assetId, type: 'image', prompt: pendingImageRequest.prompt })
+          })
           if (outputAssetIds.length > 0) {
             useAgentStore.getState().setConversationContext({
               referenceAssetId: outputAssetIds[0],
@@ -811,6 +816,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           setPendingVideoRequest(null)
           setVideoGenerationStatus('已生成并写入画布')
           setSkillStep('done')
+
+          // 添加结果到画廊
+          assetIds.forEach((assetId) => {
+            addGenerationResult({ assetId, type: 'video', prompt: pendingVideoRequest.prompt })
+          })
           unsubscribe()
         },
         onError: (error) => {
@@ -1045,6 +1055,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               targetHandle: null,
             })
             newImageAssetIds[i] = assetIds[0]
+            // 添加结果到画廊
+            addGenerationResult({ assetId: assetIds[0], type: 'image', prompt: item.prompt })
           }
         }
 
@@ -1169,6 +1181,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           generationId: finalResponse.id,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
+        // 添加结果到画廊
+        assetIds.forEach((assetId) => {
+          addGenerationResult({ assetId, type: 'video', prompt: item.shotDescription })
+        })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         generateStore.setError(videoNodeId, message)
@@ -1851,6 +1867,52 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               >
                 <Wand2 size={12} /> 换个模型
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* 生成结果预览画廊 */}
+        {generationResults.length > 0 && (
+          <div className="agent-generation-gallery">
+            <div className="agent-gallery-header">
+              <span>生成结果</span>
+              <button
+                type="button"
+                className="agent-gallery-clear-btn"
+                onClick={clearGenerationResults}
+                title="清除预览"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="agent-gallery-grid">
+              {generationResults.map((result) => (
+                <div key={result.id} className="agent-gallery-item">
+                  {result.type === 'image' ? (
+                    <img
+                      src={`/api/assets/${result.assetId}/file`}
+                      alt={result.prompt || '生成图片'}
+                      className="agent-gallery-thumb"
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                  ) : (
+                    <video
+                      src={`/api/assets/${result.assetId}/file`}
+                      className="agent-gallery-thumb"
+                      preload="metadata"
+                      muted
+                      onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
+                      onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
+                    />
+                  )}
+                  <div className="agent-gallery-item-type">
+                    {result.type === 'image' ? <ImageIcon size={10} /> : <Film size={10} />}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
