@@ -10,12 +10,12 @@
   --text: #9ca3af;
   --text-h: #f3f4f6;
   --text-dim: #6b7280;
-  --accent: #3b82f6;
-  --accent-dim: #4a5568;
-  --edge-color: #5b6573;
-  --edge-color-active: #3b82f6;
+  --accent: #e5e5e7;
+  --accent-dim: #777982;
+  --edge-color: #686b73;
+  --edge-color-active: #d7d7da;
   --status-idle: #4a5568;
-  --status-running: #3b82f6;
+  --status-running: #d7d7da;
   --status-success: #10b981;
   --status-error: #ef4444;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);

@@ -73,6 +73,20 @@ export interface LlmChatResponse {
   }
 }
 
+/** POST /api/llm/transcriptions 请求体 */
+export interface LlmTranscribeRequest {
+  audioBase64: string
+  mimeType: string
+  filename?: string
+  model?: string
+}
+
+/** POST /api/llm/transcriptions 响应体 */
+export interface LlmTranscribeResponse {
+  text: string
+  model: string
+}
+
 /**
  * POST /api/text-nodes/:id/run 请求体。
  * 参考 PRD 10.6 请求示例。

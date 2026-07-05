@@ -117,9 +117,14 @@ export async function saveUploadFile(input: SaveUploadInput): Promise<Asset> {
   return asset
 }
 
-/** 返回资产文件的绝对路径 */
+/** 返回资产文件的绝对路径（含路径穿越校验） */
 export function getAssetFilePath(asset: Asset): string {
-  return resolve(WORKSPACE_DIR, asset.path)
+  const abs = resolve(WORKSPACE_DIR, asset.path)
+  // 防止 metadata 被篡改后逃逸 workspace 目录
+  if (!abs.startsWith(WORKSPACE_DIR + sep)) {
+    throw new Error('资产路径不合法')
+  }
+  return abs
 }
 
 /**
@@ -146,6 +151,8 @@ export async function getAsset(id: string): Promise<Asset | null> {
       const parsed = JSON.parse(content) as Asset
       if (parsed && parsed.id === id) return parsed
     } catch (err) {
+      // JSON 解析失败（SyntaxError）也视为不存在
+      if (err instanceof SyntaxError) continue
       const code = (err as NodeJS.ErrnoException).code
       if (code !== 'ENOENT') throw err
     }

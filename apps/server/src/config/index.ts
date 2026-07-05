@@ -54,6 +54,17 @@ function mergeWithDefaults(raw: unknown): Settings {
       }
       return
     }
+    // 字符串数组类型校验
+    if (Array.isArray(defaultValue)) {
+      if (Array.isArray(value)) {
+        const items = value
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean)
+        ;(result[key] as unknown) = Array.from(new Set(items))
+      }
+      return
+    }
     // 字符串类型校验
     if (typeof value === 'string') {
       ;(result[key] as unknown) = value

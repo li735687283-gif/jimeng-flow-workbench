@@ -1,19 +1,25 @@
-// 即梦 Flow 后端 - JimengCli_api client
-// 封装即梦图像/视频生成 HTTP 调用。
-// 参考 PRD 8.6（设置与密钥）、9.3（数据流）、10.3（生成请求示例）、12.1（配置错误）。
-//
-// - 独立 service，前端不直接依赖具体接口字段。
-// - 使用 Node 18+ 内置 fetch。
-// - M0 验证阶段：未配置 jimengBaseUrl 或调用失败时抛出带 code 的 Error。
+// 即梦 Flow 后端 - Dreamina CLI client
+// 通过即梦官方 dreamina CLI 调用图片/视频生成能力，不依赖火山引擎 API Key。
 
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtemp, readdir, stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import type {
   GenerationRequest,
   GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
 import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
+import type { AuthMode, Settings } from '@jimeng-flow/shared'
+import { getProjectRoot } from '../../config'
 import { getSettings } from '../settings'
-import type { Settings, AuthMode } from '@jimeng-flow/shared'
+import { getAsset, getAssetFilePath } from '../assets'
+
+const execFileAsync = promisify(execFile)
+const CLI_MAX_BUFFER = 10 * 1024 * 1024
+const QUERY_INTERVAL_MS = 5_000
 
 /** jimeng client 错误码（前端可据此区分配置错误与调用错误） */
 export type JimengErrorCode =
@@ -23,6 +29,8 @@ export type JimengErrorCode =
   | 'JIMENG_BAD_RESPONSE'
   | 'JIMENG_TIMEOUT'
   | 'JIMENG_UNKNOWN'
+  | 'INVALID_INPUT'
+  | 'NOT_FOUND'
 
 export class JimengError extends Error {
   code: JimengErrorCode
@@ -44,388 +52,384 @@ export interface JimengGenerateParams extends GenerationRequest {
   timeoutMs?: number
 }
 
-/** 上游 JimengCli_api 返回的单张图结构（合理推断，PRD 未严格定义） */
-interface JimengRemoteImage {
-  url?: string
-  uri?: string
-  image_url?: string
-  /** 远端返回的 seed（可选） */
-  seed?: number
-}
-
-/** 上游 JimengCli_api 响应结构（合理推断） */
-interface JimengApiResponse {
-  code?: number
-  message?: string
-  msg?: string
-  data?:
-    | {
-        images?: JimengRemoteImage[]
-        image_urls?: string[]
-        items?: JimengRemoteImage[]
-      }
-    | JimengRemoteImage[]
-    | null
-  /** 部分实现直接把图片数组放顶层 */
-  images?: JimengRemoteImage[]
-  image_urls?: string[]
-}
-
-/** 构造请求头（按 authMode 决定鉴权字段） */
-function buildHeaders(settings: Settings): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  }
-  const apiKey = settings.apiKey ?? ''
-  const authMode: AuthMode = settings.authMode ?? 'apiKey'
-  if (!apiKey) return headers
-  switch (authMode) {
-    case 'cookie':
-      headers['Cookie'] = apiKey
-      break
-    case 'token':
-      headers['Authorization'] = `Bearer ${apiKey}`
-      break
-    case 'apiKey':
-    default:
-      headers['Authorization'] = `Bearer ${apiKey}`
-      // 同时支持 X-API-Key 形式（部分实现用此头）
-      headers['X-API-Key'] = apiKey
-      break
-  }
-  return headers
-}
-
-/**
- * 构造发往 JimengCli_api 的请求体。
- * PRD 10.3 只规定前端 → 本地后端的 GenerationRequest 结构；
- * 本地后端 → JimengCli_api 的请求体为合理推断：
- *   - 透传 prompt、model、width、height、count、seed
- *   - inputImages 透传参考图路径/Asset id（由 JimengCli_api 决定如何解析）
- *   - mediaType 固定为 image
- */
-function buildJimengRequestBody(
-  params: JimengGenerateParams,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    prompt: params.prompt,
-    model: params.model,
-    width: params.width,
-    height: params.height,
-    count: params.count,
-    mediaType: 'image',
-  }
-  if (typeof params.seed === 'number' && Number.isFinite(params.seed)) {
-    body.seed = params.seed
-  } else {
-    body.seed = null
-  }
-  if (params.inputImages && params.inputImages.length > 0) {
-    body.inputImages = params.inputImages
-  }
-  return body
-}
-
-/**
- * 从 JimengCli_api 响应中抽取图片列表。
- * 兼容多种常见返回结构（data.items / data.images / data.image_urls / 顶层数组）。
- */
-function extractImages(res: JimengApiResponse): JimengRemoteImage[] {
-  const data = res.data
-  if (Array.isArray(data)) return data
-  if (data && typeof data === 'object') {
-    if (Array.isArray(data.images)) return data.images
-    if (Array.isArray(data.items)) return data.items
-    if (Array.isArray(data.image_urls)) {
-      return data.image_urls.map((url) => ({ url }))
-    }
-  }
-  if (Array.isArray(res.images)) return res.images
-  if (Array.isArray(res.image_urls)) {
-    return res.image_urls.map((url) => ({ url }))
-  }
-  return []
-}
-
-/**
- * 调用 JimengCli_api 生成图片。
- * 返回每张图的结果（含远端 URL；后续由 generations service 下载并保存为 Asset）。
- *
- * @throws JimengError（带 code）当未配置或调用失败时
- */
-export async function generateImage(
-  params: JimengGenerateParams,
-): Promise<GenerationResult[]> {
-  const settings = await getSettings()
-  const baseUrl = (settings.jimengBaseUrl ?? '').replace(/\/+$/, '')
-  if (!baseUrl) {
-    throw new JimengError(
-      'JIMENG_NOT_CONFIGURED',
-      '未配置 JimengCli_api 服务地址，请先在设置中配置 jimengBaseUrl',
-      400,
-    )
-  }
-  if (!settings.apiKey) {
-    throw new JimengError(
-      'JIMENG_AUTH_MISSING',
-      '未配置 JimengCli_api 鉴权信息，请先在设置中配置 apiKey',
-      400,
-    )
-  }
-
-  const url = `${baseUrl}/v1/images/generations`
-  const headers = buildHeaders(settings)
-  const body = buildJimengRequestBody(params)
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), params.timeoutMs ?? 120_000)
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      const summary = text.length > 500 ? `${text.slice(0, 500)}...` : text
-      throw new JimengError(
-        'JIMENG_HTTP_ERROR',
-        `JimengCli_api 调用失败：HTTP ${res.status} ${res.statusText}${summary ? ` - ${summary}` : ''}`,
-        res.status >= 400 && res.status < 500 ? res.status : 502,
-      )
-    }
-
-    const json = (await res.json()) as JimengApiResponse
-    // 上游返回业务级错误码
-    if (
-      typeof json.code === 'number' &&
-      json.code !== 0 &&
-      json.code !== 200
-    ) {
-      const msg = json.message || json.msg || `code=${json.code}`
-      throw new JimengError(
-        'JIMENG_BAD_RESPONSE',
-        `JimengCli_api 返回业务错误：${msg}`,
-        502,
-      )
-    }
-
-    const images = extractImages(json)
-    if (images.length === 0) {
-      throw new JimengError(
-        'JIMENG_BAD_RESPONSE',
-        'JimengCli_api 返回内容为空，未取到图片',
-        502,
-      )
-    }
-
-    const results: GenerationResult[] = images.map((img) => ({
-      remoteUrl: img.url || img.uri || img.image_url,
-      seed: typeof img.seed === 'number' ? img.seed : undefined,
-    }))
-
-    return results
-  } catch (err) {
-    if (err instanceof JimengError) throw err
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new JimengError(
-        'JIMENG_TIMEOUT',
-        'JimengCli_api 调用超时（默认 120s）',
-        504,
-      )
-    }
-    const msg = err instanceof Error ? err.message : String(err)
-    throw new JimengError(
-      'JIMENG_UNKNOWN',
-      `JimengCli_api 调用异常：${msg}`,
-      502,
-    )
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/** 上游 JimengCli_api 返回的单个视频结构（合理推断，PRD 未严格定义） */
-interface JimengRemoteVideo {
-  url?: string
-  uri?: string
-  video_url?: string
-  cover_url?: string
-  /** 远端返回的 seed（可选） */
-  seed?: number
-}
-
-/** 上游 JimengCli_api 视频响应结构（合理推断） */
-interface JimengVideoApiResponse {
-  code?: number
-  message?: string
-  msg?: string
-  data?:
-    | {
-        videos?: JimengRemoteVideo[]
-        video_urls?: string[]
-        items?: JimengRemoteVideo[]
-      }
-    | JimengRemoteVideo[]
-    | null
-  /** 部分实现直接把视频数组放顶层 */
-  videos?: JimengRemoteVideo[]
-  video_urls?: string[]
-}
-
 /** jimeng 视频调用参数：基于 VideoGenerationRequest，附超时设置 */
 export interface JimengGenerateVideoParams extends VideoGenerationRequest {
   timeoutMs?: number
 }
 
-/**
- * 构造发往 JimengCli_api 的视频生成请求体。
- * 按 PRD 10.3 视频请求示例透传字段；实际接入时若上游字段名不同可在此映射。
- */
-function buildJimengVideoRequestBody(
-  params: JimengGenerateVideoParams,
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    prompt: params.prompt,
-    model: params.model,
-    mode: params.mode,
-    aspect_ratio: params.aspectRatio,
-    resolution: params.resolution,
-    quality: params.quality,
-    duration: params.durationSeconds,
-    count: params.count,
-    generate_audio: params.generateAudio,
-    mediaType: 'video',
-  }
-  if (params.inputImages && params.inputImages.length > 0) {
-    body.inputImages = params.inputImages
-  }
-  return body
+interface CliRunResult {
+  stdout: string
+  stderr: string
 }
 
-/**
- * 从 JimengCli_api 视频响应中抽取视频列表。
- * 兼容多种常见返回结构（data.items / data.videos / data.video_urls / 顶层数组）。
- */
-function extractVideos(res: JimengVideoApiResponse): JimengRemoteVideo[] {
-  const data = res.data
-  if (Array.isArray(data)) return data
-  if (data && typeof data === 'object') {
-    if (Array.isArray(data.videos)) return data.videos
-    if (Array.isArray(data.items)) return data.items
-    if (Array.isArray(data.video_urls)) {
-      return data.video_urls.map((url) => ({ url }))
-    }
-  }
-  if (Array.isArray(res.videos)) return res.videos
-  if (Array.isArray(res.video_urls)) {
-    return res.video_urls.map((url) => ({ url }))
-  }
-  return []
+type MediaType = 'image' | 'video'
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+])
+
+const VIDEO_EXTENSIONS = new Set([
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.avi',
+  '.mkv',
+  '.m4v',
+])
+
+function getDreaminaPath(settings: Partial<Settings>): string {
+  return settings.dreaminaPath?.trim() || 'dreamina'
 }
 
-/**
- * 调用 JimengCli_api 生成视频。
- * 返回每个视频的结果（含远端 URL；后续由 generations service 下载并保存为 Asset）。
- *
- * @throws JimengError（带 code）当未配置或调用失败时
- */
-export async function generateVideo(
-  params: JimengGenerateVideoParams,
-): Promise<GenerationResult[]> {
-  const settings = await getSettings()
-  const baseUrl = (settings.jimengBaseUrl ?? '').replace(/\/+$/, '')
-  if (!baseUrl) {
-    throw new JimengError(
-      'JIMENG_NOT_CONFIGURED',
-      '未配置 JimengCli_api 服务地址，请先在设置中配置 jimengBaseUrl',
-      400,
-    )
-  }
-  if (!settings.apiKey) {
-    throw new JimengError(
-      'JIMENG_AUTH_MISSING',
-      '未配置 JimengCli_api 鉴权信息，请先在设置中配置 apiKey',
-      400,
-    )
-  }
+function summarizeOutput(stdout: string, stderr: string): string {
+  const text = [stdout, stderr].filter(Boolean).join('\n').trim()
+  return text.length > 1200 ? `${text.slice(0, 1200)}...` : text
+}
 
-  const url = `${baseUrl}/v1/videos/generations`
-  const headers = buildHeaders(settings)
-  const body = buildJimengVideoRequestBody(params)
-
-  const controller = new AbortController()
-  // 视频生成通常耗时更长，默认 300s
-  const timer = setTimeout(() => controller.abort(), params.timeoutMs ?? 300_000)
+async function runDreamina(
+  args: string[],
+  timeoutMs: number,
+  settings?: Settings,
+): Promise<CliRunResult> {
+  const resolvedSettings = settings ?? await getSettings()
+  const bin = getDreaminaPath(resolvedSettings)
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: controller.signal,
+    const { stdout, stderr } = await execFileAsync(bin, args, {
+      cwd: getProjectRoot(),
+      timeout: timeoutMs,
+      windowsHide: true,
+      maxBuffer: CLI_MAX_BUFFER,
     })
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      const summary = text.length > 500 ? `${text.slice(0, 500)}...` : text
-      throw new JimengError(
-        'JIMENG_HTTP_ERROR',
-        `JimengCli_api 视频接口调用失败：HTTP ${res.status} ${res.statusText}${summary ? ` - ${summary}` : ''}`,
-        res.status >= 400 && res.status < 500 ? res.status : 502,
-      )
-    }
-
-    const json = (await res.json()) as JimengVideoApiResponse
-    // 上游返回业务级错误码
-    if (
-      typeof json.code === 'number' &&
-      json.code !== 0 &&
-      json.code !== 200
-    ) {
-      const msg = json.message || json.msg || `code=${json.code}`
-      throw new JimengError(
-        'JIMENG_BAD_RESPONSE',
-        `JimengCli_api 视频接口返回业务错误：${msg}`,
-        502,
-      )
-    }
-
-    const videos = extractVideos(json)
-    if (videos.length === 0) {
-      throw new JimengError(
-        'JIMENG_BAD_RESPONSE',
-        'JimengCli_api 视频接口返回内容为空，未取到视频',
-        502,
-      )
-    }
-
-    const results: GenerationResult[] = videos.map((v) => ({
-      remoteUrl: v.url || v.uri || v.video_url,
-      seed: typeof v.seed === 'number' ? v.seed : undefined,
-    }))
-
-    return results
+    return { stdout: stdout ?? '', stderr: stderr ?? '' }
   } catch (err) {
-    if (err instanceof JimengError) throw err
-    if (err instanceof Error && err.name === 'AbortError') {
+    const e = err as Error & {
+      code?: string | number
+      stdout?: string
+      stderr?: string
+      killed?: boolean
+      signal?: string
+    }
+    const stdout = e.stdout ?? ''
+    const stderr = e.stderr ?? ''
+    if (e.killed || e.signal === 'SIGTERM') {
       throw new JimengError(
         'JIMENG_TIMEOUT',
-        'JimengCli_api 视频接口调用超时（默认 300s）',
+        `dreamina 命令超时：dreamina ${args.join(' ')}`,
         504,
       )
     }
-    const msg = err instanceof Error ? err.message : String(err)
+    if (e.code === 'ENOENT') {
+      throw new JimengError(
+        'JIMENG_NOT_CONFIGURED',
+        `未找到 dreamina CLI：${bin}。请安装即梦 CLI，或在设置中填写 dreamina.exe 的完整路径。`,
+        400,
+      )
+    }
+    const detail = summarizeOutput(stdout, stderr) || e.message
     throw new JimengError(
-      'JIMENG_UNKNOWN',
-      `JimengCli_api 视频接口调用异常：${msg}`,
+      'JIMENG_BAD_RESPONSE',
+      `dreamina 命令执行失败：${detail}`,
       502,
     )
-  } finally {
-    clearTimeout(timer)
   }
+}
+
+function parseSubmitId(text: string): string | null {
+  const patterns = [
+    /"submit_id"\s*:\s*"([^"]+)"/i,
+    /submit[_\s-]*id["'\s:=：]+([A-Za-z0-9_-]+)/i,
+    /submitId["'\s:=：]+([A-Za-z0-9_-]+)/i,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return null
+}
+
+function parseMediaUrls(text: string, mediaType: MediaType): string[] {
+  const urls = text.match(/https?:\/\/[^\s"'<>，。)）]+/g) ?? []
+  const exts = mediaType === 'image' ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS
+  return Array.from(new Set(urls.filter((url) => {
+    const lower = url.split('?')[0].split('#')[0].toLowerCase()
+    return Array.from(exts).some((ext) => lower.endsWith(ext))
+  })))
+}
+
+function hasFailed(text: string): boolean {
+  return /失败|failed|error|AigcComplianceConfirmationRequired/i.test(text)
+}
+
+function getResolutionType(width: number, height: number): string {
+  const maxSide = Math.max(width, height)
+  return maxSide >= 3000 ? '4k' : '2k'
+}
+
+function getImageModelVersion(model: string): string | null {
+  const match = model.match(/(\d+(?:\.\d+)?)/)
+  return match?.[1] ?? null
+}
+
+function getClosestRatio(width: number, height: number): string {
+  const current = width / height
+  const supported = ['21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16']
+  return supported.reduce((best, ratio) => {
+    const [w, h] = ratio.split(':').map(Number)
+    const value = w / h
+    const [bestW, bestH] = best.split(':').map(Number)
+    const bestValue = bestW / bestH
+    return Math.abs(value - current) < Math.abs(bestValue - current)
+      ? ratio
+      : best
+  }, '1:1')
+}
+
+function getVideoModelVersion(model: string): string {
+  const map: Record<string, string> = {
+    'seedance-2.0': 'seedance2.0',
+    'seedance-2.0-fast': 'seedance2.0fast',
+    'seedance-2.0-vip': 'seedance2.0_vip',
+    'seedance-2.0-fast-vip': 'seedance2.0fast_vip',
+    'seedance-2.0-mini': 'seedance2.0mini',
+    seedance2: 'seedance2.0',
+    seedance20: 'seedance2.0',
+    seedance2fast: 'seedance2.0fast',
+  }
+  return map[model] ?? model.replaceAll('-', '')
+}
+
+function getVideoResolution(resolution: string): string | null {
+  const normalized = resolution.toLowerCase()
+  if (normalized === '1080p' || normalized === '4k' || normalized === '720p') {
+    return normalized
+  }
+  return null
+}
+
+async function resolveInputPaths(inputImages: string[] | undefined): Promise<string[]> {
+  const paths: string[] = []
+  for (const input of inputImages ?? []) {
+    if (!input) continue
+    if (input.startsWith('asset_')) {
+      const asset = await getAsset(input)
+      if (!asset) {
+        throw new JimengError(
+          'INVALID_INPUT',
+          `找不到参考图 Asset：${input}`,
+          400,
+        )
+      }
+      paths.push(getAssetFilePath(asset))
+    } else {
+      paths.push(resolve(getProjectRoot(), input))
+    }
+  }
+  return paths
+}
+
+async function listDownloadedFiles(
+  dir: string,
+  mediaType: MediaType,
+): Promise<string[]> {
+  const exts = mediaType === 'image' ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS
+  const files: string[] = []
+
+  async function walk(current: string): Promise<void> {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = join(current, entry.name)
+      if (entry.isDirectory()) {
+        await walk(full)
+        continue
+      }
+      const lower = entry.name.toLowerCase()
+      const ext = lower.slice(lower.lastIndexOf('.'))
+      if (!exts.has(ext)) continue
+      const info = await stat(full)
+      if (info.size > 0) files.push(full)
+    }
+  }
+
+  await walk(dir)
+  return Array.from(new Set(files))
+}
+
+async function waitForResults(
+  submitId: string,
+  mediaType: MediaType,
+  downloadDir: string,
+  timeoutMs: number,
+  settings: Settings,
+): Promise<GenerationResult[]> {
+  const started = Date.now()
+  let lastOutput = ''
+
+  while (Date.now() - started < timeoutMs) {
+    const remaining = timeoutMs - (Date.now() - started)
+    const query = await runDreamina(
+      [
+        'query_result',
+        `--submit_id=${submitId}`,
+        `--download_dir=${downloadDir}`,
+      ],
+      Math.min(Math.max(remaining, 1_000), 60_000),
+      settings,
+    )
+    lastOutput = summarizeOutput(query.stdout, query.stderr)
+    const downloaded = await listDownloadedFiles(downloadDir, mediaType)
+    if (downloaded.length > 0) {
+      return downloaded.map((localPath) => ({ localPath }))
+    }
+
+    const urls = parseMediaUrls(`${query.stdout}\n${query.stderr}`, mediaType)
+    if (urls.length > 0) {
+      return urls.map((remoteUrl) => ({ remoteUrl }))
+    }
+
+    if (hasFailed(lastOutput)) {
+      throw new JimengError(
+        'JIMENG_BAD_RESPONSE',
+        `dreamina 任务失败：${lastOutput}`,
+        502,
+      )
+    }
+
+    await new Promise((resolveDelay) => {
+      setTimeout(resolveDelay, Math.min(QUERY_INTERVAL_MS, Math.max(remaining, 0)))
+    })
+  }
+
+  throw new JimengError(
+    'JIMENG_TIMEOUT',
+    `dreamina 任务仍未完成，请稍后用 submit_id 查询：${submitId}${lastOutput ? `。最近输出：${lastOutput}` : ''}`,
+    504,
+  )
+}
+
+async function submitAndCollect(
+  args: string[],
+  mediaType: MediaType,
+  timeoutMs: number,
+): Promise<GenerationResult[]> {
+  const settings = await getSettings()
+  const downloadDir = await mkdtemp(join(tmpdir(), 'dreamina-flow-'))
+  const submit = await runDreamina([...args, '--poll=0'], 60_000, settings)
+  const output = `${submit.stdout}\n${submit.stderr}`
+
+  const submitId = parseSubmitId(output)
+  const directUrls = parseMediaUrls(output, mediaType)
+  if (directUrls.length > 0 && !submitId) {
+    return directUrls.map((remoteUrl) => ({ remoteUrl }))
+  }
+  if (!submitId) {
+    throw new JimengError(
+      'JIMENG_BAD_RESPONSE',
+      `dreamina 未返回 submit_id：${summarizeOutput(submit.stdout, submit.stderr)}`,
+      502,
+    )
+  }
+
+  return waitForResults(
+    submitId,
+    mediaType,
+    downloadDir,
+    Math.max(timeoutMs - 60_000, 30_000),
+    settings,
+  )
+}
+
+export async function generateImage(
+  params: JimengGenerateParams,
+): Promise<GenerationResult[]> {
+  const inputPaths = await resolveInputPaths(params.inputImages)
+  const command = inputPaths.length > 0 ? 'image2image' : 'text2image'
+  const args = [
+    command,
+    `--prompt=${params.prompt}`,
+    `--ratio=${getClosestRatio(params.width, params.height)}`,
+    `--resolution_type=${getResolutionType(params.width, params.height)}`,
+    `--generate_num=${Math.max(1, Math.min(params.count ?? 1, 10))}`,
+  ]
+
+  const modelVersion = getImageModelVersion(params.model)
+  if (modelVersion) args.push(`--model_version=${modelVersion}`)
+  if (inputPaths.length > 0) {
+    args.push(`--images=${inputPaths.join(',')}`)
+  }
+
+  return submitAndCollect(args, 'image', params.timeoutMs ?? 300_000)
+}
+
+export async function generateVideo(
+  params: JimengGenerateVideoParams,
+): Promise<GenerationResult[]> {
+  const inputPaths = await resolveInputPaths(params.inputImages)
+  const modelVersion = getVideoModelVersion(params.model)
+  const requestedResolution = getVideoResolution(params.resolution)
+  const resolution =
+    modelVersion === 'seedance2.0_vip'
+      ? requestedResolution
+      : requestedResolution === '720p'
+        ? requestedResolution
+        : null
+  const ratio = params.aspectRatio === 'Auto' ? null : params.aspectRatio
+
+  let args: string[]
+  if (params.mode === 'all_reference' || params.mode === 'image_reference') {
+    if (inputPaths.length === 0) {
+      throw new JimengError(
+        'INVALID_INPUT',
+        '全能参考/图片参考模式至少需要一个上游图片',
+        400,
+      )
+    }
+    args = [
+      'multimodal2video',
+      `--prompt=${params.prompt}`,
+      `--duration=${params.durationSeconds}`,
+      `--model_version=${modelVersion}`,
+    ]
+    inputPaths.forEach((path) => args.push(`--image=${path}`))
+    if (ratio) args.push(`--ratio=${ratio}`)
+    if (resolution) args.push(`--video_resolution=${resolution}`)
+  } else if (inputPaths.length >= 2 || params.mode === 'first_last_frame') {
+    args = [
+      'multiframe2video',
+      `--images=${inputPaths.join(',')}`,
+      `--prompt=${params.prompt}`,
+      `--duration=${params.durationSeconds}`,
+    ]
+  } else if (inputPaths.length === 1) {
+    args = [
+      'image2video',
+      `--image=${inputPaths[0]}`,
+      `--prompt=${params.prompt}`,
+      `--duration=${params.durationSeconds}`,
+      `--model_version=${modelVersion}`,
+    ]
+    if (resolution) args.push(`--video_resolution=${resolution}`)
+  } else {
+    args = [
+      'text2video',
+      `--prompt=${params.prompt}`,
+      `--duration=${params.durationSeconds}`,
+      `--model_version=${modelVersion}`,
+    ]
+    if (ratio) args.push(`--ratio=${ratio}`)
+    if (resolution) args.push(`--video_resolution=${resolution}`)
+  }
+
+  return submitAndCollect(args, 'video', params.timeoutMs ?? 600_000)
 }
 
 /** jimeng 连接测试选项 */
@@ -433,66 +437,27 @@ export interface JimengTestOptions {
   jimengBaseUrl?: string
   authMode?: AuthMode
   apiKey?: string
+  dreaminaPath?: string
 }
 
-/**
- * 测试 JimengCli_api 连接与鉴权。
- * 依次尝试 /health、/v1/models、/，任一返回 2xx 即认为连接成功。
- * 返回结构便于前端展示成功/失败原因，不抛出异常。
- */
 export async function testJimengConnection(
   opts: JimengTestOptions,
 ): Promise<{ ok: boolean; message?: string }> {
-  const baseUrl = (opts.jimengBaseUrl ?? '').replace(/\/+$/, '')
-  if (!baseUrl) {
-    return { ok: false, message: '未配置 JimengCli_api 服务地址' }
-  }
-
-  const testSettings: Settings = {
+  const settings: Settings = {
     ...DEFAULT_SETTINGS,
-    jimengBaseUrl: baseUrl,
-    authMode: opts.authMode ?? 'apiKey',
-    apiKey: opts.apiKey ?? '',
+    dreaminaPath: opts.dreaminaPath || DEFAULT_SETTINGS.dreaminaPath,
   }
-  const headers = buildHeaders(testSettings)
-
-  const endpoints = ['/health', '/v1/models', '/']
-  let lastError = ''
-
-  for (const endpoint of endpoints) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 10_000)
-    try {
-      const res = await fetch(`${baseUrl}${endpoint}`, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-      })
-
-      if (res.ok) {
-        return { ok: true, message: '连接成功' }
-      }
-
-      const text = await res.text().catch(() => '')
-      const summary = text.length > 300 ? `${text.slice(0, 300)}...` : text
-      lastError = `HTTP ${res.status} ${res.statusText}${summary ? ` - ${summary}` : ''}`
-
-      if (res.status === 401 || res.status === 403) {
-        return {
-          ok: false,
-          message: `鉴权失败：${lastError}`,
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        lastError = '连接超时（10s）'
-      } else {
-        lastError = err instanceof Error ? err.message : String(err)
-      }
-    } finally {
-      clearTimeout(timer)
+  try {
+    const result = await runDreamina(['version'], 10_000, settings)
+    const output = summarizeOutput(result.stdout, result.stderr)
+    return {
+      ok: true,
+      message: output ? `dreamina CLI 可用：${output}` : 'dreamina CLI 可用',
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
     }
   }
-
-  return { ok: false, message: `无法连接到 JimengCli_api 服务：${lastError}` }
 }

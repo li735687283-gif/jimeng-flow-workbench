@@ -12,7 +12,7 @@ interface SettingsState {
   settings: Settings | null
   loading: boolean
   error: string | null
-  /** 派生：jimengBaseUrl 非空（生成相关链路可用） */
+  /** 派生：dreamina CLI 路径非空（生成相关链路可用） */
   isJimengConfigured: boolean
   /** 派生：llmBaseUrl 和 llmApiKey 都非空（LLM 文本节点可用） */
   isLlmConfigured: boolean
@@ -23,7 +23,11 @@ interface SettingsState {
 }
 
 function deriveJimengConfigured(s: Settings | null): boolean {
-  return !!s && typeof s.jimengBaseUrl === 'string' && s.jimengBaseUrl.trim().length > 0
+  return (
+    !!s &&
+    typeof s.dreaminaPath === 'string' &&
+    s.dreaminaPath.trim().length > 0
+  )
 }
 
 function deriveLlmConfigured(s: Settings | null): boolean {

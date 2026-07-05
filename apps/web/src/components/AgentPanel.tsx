@@ -1,663 +1,1098 @@
-// 即梦 Flow 前端 - Agent 面板组件
-// 选中的节点不是 text/video 时，或未选中节点时，在底部面板渲染。
-// 支持：输入想法 → 调用 API → 展示结构化结果 → 复制 → 写回 Prompt 节点。
-// 参考 PRD 7.4、7.5、8.7、8.8、9.4、10.5、11.4、13.5。
-// 集成约定：BottomPanel 在未选中节点或选中非 text/video 节点时渲染 <AgentPanel />。
-
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useReactFlow } from '@xyflow/react'
 import {
-  Sparkles,
-  AlertCircle,
-  Loader2,
-  Copy,
+  ArrowUp,
+  AtSign,
+  Bot,
   Check,
-  CornerDownRight,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  Mic,
+  MicOff,
+  Plus,
+  Sparkles,
   Wand2,
-  FileText,
+  X,
 } from 'lucide-react'
-import type {
-  PromptOptimizeRequest,
-  PromptOptimizeResponse,
-} from '@jimeng-flow/shared/agentMessage'
-import { useCanvasStore } from '../state/canvasStore'
-import { useAgentStore } from '../state/agentStore'
+import type { PromptOptimizeRequest } from '@jimeng-flow/shared/agentMessage'
+import {
+  IMAGE_COUNTS,
+  IMAGE_MODELS,
+  IMAGE_SIZES,
+  type GenerationRequest,
+  type GenerationResult,
+} from '@jimeng-flow/shared/generateNode'
 import { optimizePrompt } from '../api/agent'
+import { createGeneration } from '../api/generations'
+import { listLlmModels, transcribeAudio } from '../api/llm'
+import { useAgentStore } from '../state/agentStore'
+import { useCanvasStore } from '../state/canvasStore'
+import { useGenerateStore } from '../state/generateStore'
+import { useSettingsStore } from '../state/settingsStore'
+import type { BaseNodeData } from '../types/nodeTypes'
 
-/** 暗色风格调色板（与 TextComposer 一致，参考 PRD 13.1、13.5） */
-const COLORS = {
-  bg: '#1c1c20',
-  bgInput: '#26262c',
-  bgCard: '#232328',
-  border: '#34343c',
-  borderFocus: '#4a9eff',
-  text: '#e4e4e7',
-  textMuted: '#8a8a92',
-  textDim: '#6a6a72',
-  accent: '#4a9eff',
-  accentHover: '#3a8eef',
-  success: '#22c55e',
-  error: '#ef4444',
-  errorBg: 'rgba(239, 68, 68, 0.12)',
+type SpeechRecognitionResultLike = {
+  readonly length: number
+  item(index: number): { transcript: string }
+  [index: number]: { transcript: string }
 }
 
-const containerStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  width: '100%',
-  height: '100%',
-  background: COLORS.bg,
-  padding: '12px 16px',
-  boxSizing: 'border-box',
-  gap: 10,
-  overflow: 'hidden',
-}
-
-const inputRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'stretch',
-  gap: 10,
-  flexShrink: 0,
-}
-
-const textareaStyle: CSSProperties = {
-  flex: 1,
-  minHeight: 48,
-  background: COLORS.bgInput,
-  color: COLORS.text,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: 8,
-  padding: '10px 12px',
-  fontSize: 13,
-  fontFamily: 'inherit',
-  resize: 'none',
-  outline: 'none',
-  lineHeight: 1.5,
-  boxSizing: 'border-box',
-}
-
-const submitBtnStyle = (disabled: boolean, loading: boolean): CSSProperties => ({
-  flexShrink: 0,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '0 18px',
-  background: disabled || loading ? '#2a2a30' : COLORS.accent,
-  color: disabled || loading ? COLORS.textMuted : '#fff',
-  border: 'none',
-  borderRadius: 8,
-  cursor: disabled || loading ? 'not-allowed' : 'pointer',
-  fontSize: 13,
-  fontWeight: 500,
-  transition: 'background 0.15s',
-})
-
-const scrollAreaStyle: CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  overflowY: 'auto',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  paddingRight: 4,
-}
-
-const cardStyle: CSSProperties = {
-  background: COLORS.bgCard,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: 8,
-  padding: '10px 12px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-}
-
-const cardLabelStyle: CSSProperties = {
-  fontSize: 10,
-  color: COLORS.textMuted,
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-}
-
-const cardContentStyle: CSSProperties = {
-  fontSize: 12,
-  color: COLORS.text,
-  lineHeight: 1.6,
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word',
-}
-
-const copyBtnStyle: CSSProperties = {
-  background: 'transparent',
-  border: `1px solid ${COLORS.border}`,
-  color: COLORS.textMuted,
-  borderRadius: 4,
-  padding: '2px 6px',
-  cursor: 'pointer',
-  fontSize: 11,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  fontFamily: 'inherit',
-}
-
-const errorRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  background: COLORS.errorBg,
-  border: `1px solid ${COLORS.error}`,
-  borderRadius: 8,
-  padding: '8px 12px',
-  color: COLORS.error,
-  fontSize: 12,
-  flexShrink: 0,
-}
-
-const retryBtnStyle: CSSProperties = {
-  background: 'transparent',
-  border: `1px solid ${COLORS.error}`,
-  color: COLORS.error,
-  borderRadius: 6,
-  padding: '4px 10px',
-  fontSize: 12,
-  cursor: 'pointer',
-  marginLeft: 'auto',
-  fontFamily: 'inherit',
-}
-
-const footerRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  flexShrink: 0,
-  flexWrap: 'wrap',
-}
-
-const selectWrapperStyle: CSSProperties = {
-  position: 'relative',
-  flex: 1,
-  minWidth: 200,
-}
-
-const selectStyle: CSSProperties = {
-  width: '100%',
-  background: COLORS.bgInput,
-  color: COLORS.text,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: 6,
-  padding: '6px 10px',
-  fontSize: 12,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  outline: 'none',
-  boxSizing: 'border-box',
-  appearance: 'none',
-}
-
-const writeBackBtnStyle = (disabled: boolean): CSSProperties => ({
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '6px 14px',
-  background: disabled ? '#2a2a30' : COLORS.accent,
-  color: disabled ? COLORS.textMuted : '#fff',
-  border: 'none',
-  borderRadius: 6,
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  fontSize: 12,
-  fontWeight: 500,
-  fontFamily: 'inherit',
-  transition: 'background 0.15s',
-})
-
-const hintStyle: CSSProperties = {
-  color: COLORS.textDim,
-  fontSize: 11,
-  flexShrink: 0,
-}
-
-const titleRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 6,
-  color: COLORS.text,
-  fontSize: 12,
-  fontWeight: 500,
-  flexShrink: 0,
-}
-
-/** 复制按钮（带已复制状态反馈） */
-function CopyButton({ text, label }: { text: string; label?: string }) {
-  const [copied, setCopied] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
-
-  const onClick = async () => {
-    if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // 剪贴板不可用时静默失败
-    }
+type SpeechRecognitionEventLike = {
+  readonly resultIndex: number
+  readonly results: {
+    readonly length: number
+    item(index: number): SpeechRecognitionResultLike
+    [index: number]: SpeechRecognitionResultLike
   }
-
-  return (
-    <button type="button" style={copyBtnStyle} onClick={onClick} title="复制到剪贴板">
-      {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? '已复制' : label ?? '复制'}
-    </button>
-  )
 }
 
-/** 单个结果卡片 */
-function ResultCard({
-  label,
-  icon,
-  content,
-  copyable,
-}: {
+type SpeechRecognitionLike = {
+  lang: string
+  interimResults: boolean
+  continuous: boolean
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
+
+type SpeechWindow = Window & {
+  SpeechRecognition?: SpeechRecognitionConstructor
+  webkitSpeechRecognition?: SpeechRecognitionConstructor
+}
+
+const FALLBACK_MODELS = [
+  'gpt-4o-mini',
+  'gpt-4o',
+  'claude-3.5-sonnet',
+  'deepseek-chat',
+  'doubao-seed-1.6',
+]
+
+const MIN_PANEL_WIDTH = 360
+
+interface AgentPanelProps {
+  onClose?: () => void
+}
+
+interface AgentSkill {
+  id: string
   label: string
-  icon: React.ReactNode
-  content: React.ReactNode
-  copyable?: string
-}) {
-  return (
-    <div style={cardStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={cardLabelStyle}>
-          {icon}
-          {label}
-        </span>
-        {copyable && <CopyButton text={copyable} />}
-      </div>
-      <div style={cardContentStyle}>{content}</div>
-    </div>
-  )
+  description: string
+  instruction: string
 }
 
-export function AgentPanel() {
+interface PendingImageRequest {
+  id: string
+  prompt: string
+  contextNodeIds: string[]
+}
+
+interface ImageGenerationParams {
+  model: string
+  sizeId: string
+  count: number
+}
+
+const AGENT_SKILLS: AgentSkill[] = [
+  {
+    id: 'image-retouch',
+    label: '图片修改',
+    description: '围绕引用图片做局部修改、风格统一和图生图。',
+    instruction: '优先保留引用图片主体，按用户要求做可执行的图像修改。',
+  },
+  {
+    id: 'prompt-polish',
+    label: '提示词增强',
+    description: '把粗略想法整理成更稳定的生成提示词。',
+    instruction: '把用户需求改写成结构清晰、可直接用于生成的提示词。',
+  },
+  {
+    id: 'shot-design',
+    label: '镜头设计',
+    description: '补充景别、构图、光线、运动和叙事节奏。',
+    instruction: '从镜头语言、构图和光线角度增强输出。',
+  },
+]
+
+function uniqueModels(models: string[]): string[] {
+  return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)))
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('读取录音失败'))
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      resolve(result.includes(',') ? result.split(',')[1] : result)
+    }
+    reader.readAsDataURL(blob)
+  })
+}
+
+function nodeTitle(node: { id: string; type?: string; data: unknown }): string {
+  const data = node.data as { title?: string } | undefined
+  return data?.title ?? `${node.type ?? 'node'} ${node.id.slice(0, 4)}`
+}
+
+function getMentionQuery(value: string): string | null {
+  const match = value.match(/(?:^|\s)@([\u4e00-\u9fa5\w-]*)$/)
+  return match ? match[1] : null
+}
+
+function isImageGenerationIntent(value: string): boolean {
+  const text = value.trim()
+  if (!text) return false
+  return /(?:生成|做|画|创建|制作|出)(?:一张|一个|些|张)?[^。！？\n]{0,16}(?:图|图片|海报|插画|头像|封面|视觉|素材)/.test(text)
+}
+
+export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const nodes = useCanvasStore((s) => s.nodes)
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId)
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const addNode = useCanvasStore((s) => s.addNode)
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const onConnect = useCanvasStore((s) => s.onConnect)
-
   const messages = useAgentStore((s) => s.messages)
   const loading = useAgentStore((s) => s.loading)
   const error = useAgentStore((s) => s.error)
-  const lastResponse = useAgentStore((s) => s.lastResponse)
-  const lastRequest = useAgentStore((s) => s.lastRequest)
-  const submitPrompt = useAgentStore((s) => s.submitPrompt)
   const appendAssistant = useAgentStore((s) => s.appendAssistant)
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
+  const settings = useSettingsStore((s) => s.settings)
+  const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
+  const saveSettings = useSettingsStore((s) => s.saveSettings)
+  const { screenToFlowPosition } = useReactFlow()
 
-  const [userIdea, setUserIdea] = useState('')
-  const [targetPromptNodeId, setTargetPromptNodeId] = useState('')
-  const [writeBackNotice, setWriteBackNotice] = useState<string | null>(null)
-  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [draft, setDraft] = useState('')
+  const [panelWidth, setPanelWidth] = useState(420)
+  const [modelOpen, setModelOpen] = useState(false)
+  const [models, setModels] = useState<string[]>(FALLBACK_MODELS)
+  const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
+  const [actionMenuOpen, setActionMenuOpen] = useState(false)
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
+  const [pickingCanvasImage, setPickingCanvasImage] = useState(false)
+  const [pendingImageRequest, setPendingImageRequest] =
+    useState<PendingImageRequest | null>(null)
+  const [imageGenerationParams, setImageGenerationParams] =
+    useState<ImageGenerationParams>({
+      model: settings?.defaultModel || IMAGE_MODELS[2].id,
+      sizeId: settings?.defaultSize || IMAGE_SIZES[0].id,
+      count: 1,
+    })
+  const [imageGenerationStatus, setImageGenerationStatus] = useState('')
+  const [listening, setListening] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState('')
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const discardRecordingRef = useRef(false)
+
+  const currentModel = settings?.llmModel || FALLBACK_MODELS[0]
+  const preferredModels = useMemo(() => {
+    const configured = settings?.llmModels ?? []
+    if (configured.length === 0) return []
+    return uniqueModels([...configured, currentModel])
+  }, [currentModel, settings?.llmModels])
+  const mentionQuery = getMentionQuery(draft)
+  const maxPanelWidth =
+    typeof window === 'undefined'
+      ? 560
+      : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth / 3))
+
+  useEffect(() => {
+    let cancelled = false
+    const immediateModels = uniqueModels([
+      ...preferredModels,
+      currentModel,
+      ...FALLBACK_MODELS,
+    ])
+    setModels(immediateModels)
+
+    listLlmModels()
+      .then((items) => {
+        if (cancelled) return
+        const names = items
+          .map((item) => item.id || item.label)
+          .filter((name): name is string => !!name)
+        setModels(
+          uniqueModels([
+            ...preferredModels,
+            currentModel,
+            ...names,
+            ...FALLBACK_MODELS,
+          ]),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setModels(immediateModels)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentModel, preferredModels])
+
+  useEffect(() => {
+    setPanelWidth((value) => clamp(value, MIN_PANEL_WIDTH, maxPanelWidth))
+  }, [maxPanelWidth])
+
+  useEffect(() => {
+    setImageGenerationParams((params) => ({
+      ...params,
+      model: settings?.defaultModel || params.model,
+      sizeId: settings?.defaultSize || params.sizeId,
+    }))
+  }, [settings?.defaultModel, settings?.defaultSize])
 
   useEffect(() => {
     return () => {
-      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+      recognitionRef.current?.stop()
+      discardRecordingRef.current = true
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
     }
   }, [])
 
-  /** 可写回的 Prompt 节点（type==='agentPrompt' 或 'text'） */
-  const promptNodes = useMemo(() => {
-    return nodes.filter((n) => n.type === 'agentPrompt' || n.type === 'text')
-  }, [nodes])
+  const mentionOptions = useMemo(() => {
+    const query = (mentionQuery ?? '').toLowerCase()
+    return nodes
+      .filter((node) => {
+        const title = nodeTitle(node).toLowerCase()
+        return !query || title.includes(query) || node.id.toLowerCase().includes(query)
+      })
+      .slice(0, 8)
+  }, [mentionQuery, nodes])
 
-  /** 默认目标 Prompt 节点：优先当前选中节点，其次第一个可用节点 */
+  const activeSkills = useMemo(() => {
+    return activeSkillIds
+      .map((id) => AGENT_SKILLS.find((skill) => skill.id === id))
+      .filter((skill): skill is AgentSkill => !!skill)
+  }, [activeSkillIds])
+
+  const selectedMentionNodes = useMemo(() => {
+    return mentionedNodeIds
+      .map((id) => nodes.find((node) => node.id === id))
+      .filter((node): node is (typeof nodes)[number] => !!node)
+  }, [mentionedNodeIds, nodes])
+
+  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const move = (moveEvent: PointerEvent) => {
+      const nextWidth = window.innerWidth - moveEvent.clientX
+      setPanelWidth(clamp(nextWidth, MIN_PANEL_WIDTH, maxPanelWidth))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const chooseMention = (nodeId: string) => {
+    const node = nodes.find((item) => item.id === nodeId)
+    if (!node) return
+    const title = nodeTitle(node)
+    setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
+    setDraft((value) => value.replace(/(?:^|\s)@[\u4e00-\u9fa5\w-]*$/, (match) => {
+      const prefix = match.startsWith(' ') ? ' ' : ''
+      return `${prefix}@${title} `
+    }))
+  }
+
+  const removeMention = (nodeId: string) => {
+    setMentionedNodeIds((ids) => ids.filter((id) => id !== nodeId))
+  }
+
+  const toggleSkill = (skillId: string) => {
+    setActiveSkillIds((ids) =>
+      ids.includes(skillId)
+        ? ids.filter((id) => id !== skillId)
+        : [...ids, skillId],
+    )
+  }
+
+  const removeSkill = (skillId: string) => {
+    setActiveSkillIds((ids) => ids.filter((id) => id !== skillId))
+  }
+
+  const attachCanvasImage = useCallback((nodeId: string) => {
+    const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId)
+    if (!node || node.type !== 'image') return
+
+    setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
+    setDraft((value) =>
+      value.trim() ? value : '请根据引用图片进行修改：',
+    )
+    setVoiceStatus(`已引用 ${nodeTitle(node)}`)
+  }, [])
+
   useEffect(() => {
-    if (targetPromptNodeId) return
-    if (selectedNodeId) {
-      const sel = nodes.find((n) => n.id === selectedNodeId)
-      if (sel && (sel.type === 'agentPrompt' || sel.type === 'text')) {
-        setTargetPromptNodeId(selectedNodeId)
-        return
+    document.body.classList.toggle('agent-pick-image-active', pickingCanvasImage)
+
+    if (!pickingCanvasImage) {
+      return () => {
+        document.body.classList.remove('agent-pick-image-active')
       }
     }
-    if (promptNodes.length > 0) {
-      setTargetPromptNodeId(promptNodes[0].id)
+
+    const handlePick = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      const wrapper = target?.closest(
+        '[data-flow-node-type="image"]',
+      ) as HTMLElement | null
+      if (!wrapper) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      const nodeId = wrapper.dataset.flowNodeId
+      if (nodeId) attachCanvasImage(nodeId)
+      setPickingCanvasImage(false)
+      setActionMenuOpen(false)
+      setSkillPickerOpen(false)
     }
-  }, [selectedNodeId, nodes, promptNodes, targetPromptNodeId])
 
-  /** 提交 Prompt 优化 */
-  const submit = async () => {
-    const idea = userIdea.trim()
-    if (!idea || loading) return
+    const handleCancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPickingCanvasImage(false)
+    }
 
-    const contextNodeIds = promptNodes.map((n) => n.id)
-    submitPrompt({
-      userIdea: idea,
-      contextNodeIds,
-      selectedNodeId: selectedNodeId ?? undefined,
-      targetPromptNodeId: targetPromptNodeId || undefined,
-    })
+    document.addEventListener('click', handlePick, true)
+    window.addEventListener('keydown', handleCancel)
 
-    try {
-      const req: PromptOptimizeRequest = {
-        userIdea: idea,
+    return () => {
+      document.body.classList.remove('agent-pick-image-active')
+      document.removeEventListener('click', handlePick, true)
+      window.removeEventListener('keydown', handleCancel)
+    }
+  }, [attachCanvasImage, pickingCanvasImage])
+
+  const currentContextNodeIds = () =>
+    mentionedNodeIds.length > 0
+      ? mentionedNodeIds
+      : selectedNodeId
+        ? [selectedNodeId]
+        : []
+
+  const applySkillsToUserIdea = (userIdea: string) => {
+    if (activeSkills.length === 0) return userIdea
+    const skillText = activeSkills
+      .map((skill) => `技能「${skill.label}」：${skill.instruction}`)
+      .join('\n')
+    return `${skillText}\n\n用户需求：${userIdea}`
+  }
+
+  const appendUserMessage = (userIdea: string, contextNodeIds: string[]) => {
+    useAgentStore.setState((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: `agent_msg_${Date.now()}_${state.messages.length}`,
+          role: 'user' as const,
+          content: userIdea,
+          contextNodeIds,
+          selectedNodeId: selectedNodeId ?? undefined,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      lastRequest: {
+        userIdea,
         contextNodeIds,
         selectedNodeId: selectedNodeId ?? undefined,
-        targetPromptNodeId: targetPromptNodeId || undefined,
-      }
-      const res: PromptOptimizeResponse = await optimizePrompt(req)
-      appendAssistant(res)
-      setUserIdea('')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
-    }
+      },
+    }))
   }
 
-  /** 重试上次请求 */
-  const retry = async () => {
-    if (!lastRequest || loading) return
-    setLoading(true)
-    setError(undefined)
-    try {
-      const req: PromptOptimizeRequest = {
-        userIdea: lastRequest.userIdea,
-        contextNodeIds: lastRequest.contextNodeIds,
-        selectedNodeId: lastRequest.selectedNodeId,
-        targetPromptNodeId: lastRequest.targetPromptNodeId,
-      }
-      const res: PromptOptimizeResponse = await optimizePrompt(req)
-      appendAssistant(res)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
-    }
+  const getCanvasDropPosition = () => {
+    const canvasEl = document.querySelector('.react-flow') as HTMLElement | null
+    if (!canvasEl) return { x: 260, y: 220 }
+    const rect = canvasEl.getBoundingClientRect()
+    return screenToFlowPosition({
+      x: rect.left + rect.width * 0.5,
+      y: rect.top + rect.height * 0.48,
+    })
   }
 
-  /** 写回 Prompt 节点 */
-  const writeBack = () => {
-    if (!lastResponse || !targetPromptNodeId) return
-    const optimizedPrompt = lastResponse.optimizedPrompt
-    updateNodeData(targetPromptNodeId, {
-      input: optimizedPrompt,
-      content: optimizedPrompt,
-      promptCandidate: optimizedPrompt,
-      status: 'success',
-      updatedAt: new Date().toISOString(),
-    } as Record<string, unknown>)
-    setWriteBackNotice(`已写回节点 ${targetPromptNodeId}`)
-    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
-    noticeTimerRef.current = setTimeout(() => setWriteBackNotice(null), 2500)
-  }
+  const createImageNodesForResults = (
+    generateNodeId: string,
+    results: GenerationResult[],
+  ) => {
+    const current = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === generateNodeId)
+    const baseX = (current?.position?.x ?? 0) + 300
+    const baseY = current?.position?.y ?? 0
+    const assetIds: string[] = []
 
-  /** 创建 Prompt + Generate 改图分支，用户仍需手动点击生成 */
-  const createEditBranch = () => {
-    if (!lastResponse) return
-
-    const selected = selectedNodeId
-      ? nodes.find((n) => n.id === selectedNodeId)
-      : undefined
-    const basePosition = selected?.position ?? { x: 120, y: 120 }
-    const promptNodeId = addNode('text', {
-      x: basePosition.x + 280,
-      y: basePosition.y + 10,
-    })
-    const generateNodeId = addNode('generate', {
-      x: basePosition.x + 560,
-      y: basePosition.y + 10,
-    })
-    if (!promptNodeId || !generateNodeId) return
-
-    updateNodeData(promptNodeId, {
-      title: '改图 Prompt',
-      input: lastResponse.optimizedPrompt,
-      content: lastResponse.optimizedPrompt,
-      promptCandidate: lastResponse.optimizedPrompt,
-      status: 'success',
-      updatedAt: new Date().toISOString(),
-    } as Record<string, unknown>)
-
-    const selectedImageAssetId =
-      selected?.type === 'image'
-        ? (selected.data as { assetId?: string }).assetId
-        : undefined
-
-    updateNodeData(generateNodeId, {
-      prompt: lastResponse.optimizedPrompt,
-      promptSourceNodeId: promptNodeId,
-      inputImageAssetIds: selectedImageAssetId ? [selectedImageAssetId] : [],
-      status: 'idle',
-      updatedAt: new Date().toISOString(),
-    } as Record<string, unknown>)
-
-    onConnect({
-      source: promptNodeId,
-      target: generateNodeId,
-      sourceHandle: null,
-      targetHandle: null,
-    })
-    if (selected?.type === 'image') {
+    results.forEach((result, index) => {
+      if (!result.assetId) return
+      assetIds.push(result.assetId)
+      const imageNodeId = addNode('image', {
+        x: baseX + index * 260,
+        y: baseY,
+      })
+      if (!imageNodeId) return
+      updateNodeData(imageNodeId, {
+        assetId: result.assetId,
+      } as unknown as Partial<BaseNodeData>)
       onConnect({
-        source: selected.id,
+        source: generateNodeId,
+        target: imageNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+
+    return assetIds
+  }
+
+  const startAgentImageGeneration = async () => {
+    if (!pendingImageRequest) return
+    if (!isJimengConfigured) {
+      setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
+      return
+    }
+
+    const size =
+      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
+      IMAGE_SIZES[0]
+    const contextNodes = pendingImageRequest.contextNodeIds
+      .map((id) => nodes.find((node) => node.id === id))
+      .filter((node): node is (typeof nodes)[number] => !!node)
+    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
+    const inputImageAssetIds = imageContextNodes
+      .map((node) => (node.data as { assetId?: string }).assetId)
+      .filter((assetId): assetId is string => !!assetId)
+    const skillHint =
+      activeSkills.length > 0
+        ? `\n\n技能要求：${activeSkills
+            .map((skill) => `${skill.label}：${skill.instruction}`)
+            .join('；')}`
+        : ''
+    const prompt = `${pendingImageRequest.prompt}${skillHint}`
+
+    const generateNodeId = addNode('generate', getCanvasDropPosition())
+    if (!generateNodeId) return
+
+    imageContextNodes.forEach((node) => {
+      onConnect({
+        source: node.id,
         target: generateNodeId,
         sourceHandle: null,
         targetHandle: null,
       })
+    })
+
+    const request: GenerationRequest = {
+      flowId: 'local',
+      nodeId: generateNodeId,
+      mediaType: 'image',
+      prompt,
+      inputImages: inputImageAssetIds,
+      model: imageGenerationParams.model,
+      width: size.width,
+      height: size.height,
+      count: imageGenerationParams.count,
+      seed: null,
     }
 
-    setWriteBackNotice(
-      selected?.type === 'image'
-        ? '已创建改图分支，检查参数后可点击生成'
-        : '已创建 Prompt + Generate 分支',
-    )
-    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
-    noticeTimerRef.current = setTimeout(() => setWriteBackNotice(null), 2500)
+    const generateStore = useGenerateStore.getState()
+    generateStore.setLastRequest(generateNodeId, request)
+    generateStore.setStatus(generateNodeId, 'queued')
+    generateStore.setError(generateNodeId, undefined)
+    updateNodeData(generateNodeId, {
+      prompt,
+      model: imageGenerationParams.model,
+      width: size.width,
+      height: size.height,
+      count: imageGenerationParams.count,
+      seed: null,
+      inputImageAssetIds,
+      status: 'queued',
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+
+    setImageGenerationStatus('已在画布创建生成节点，正在生成...')
+
+    try {
+      const response = await createGeneration(request)
+      generateStore.setGenerationId(generateNodeId, response.id)
+      const results = response.results ?? []
+      const savedAssetIds = createImageNodesForResults(generateNodeId, results)
+      const outputAssetIds =
+        savedAssetIds.length > 0
+          ? savedAssetIds
+          : results
+              .map((result) => result.assetId)
+              .filter((assetId): assetId is string => !!assetId)
+
+      generateStore.setStatus(generateNodeId, response.status)
+      if (response.error) generateStore.setError(generateNodeId, response.error)
+      updateNodeData(generateNodeId, {
+        status: response.status,
+        error: response.error,
+        outputAssetIds,
+        generationId: response.id,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setPendingImageRequest(null)
+      setImageGenerationStatus('已生成并写入画布')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      generateStore.setError(generateNodeId, message)
+      updateNodeData(generateNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setImageGenerationStatus(message)
+    }
   }
 
-  const canSubmit = userIdea.trim().length > 0 && !loading
-  const canWriteBack = !!lastResponse && !!targetPromptNodeId && !loading
-  const canCreateBranch = !!lastResponse && !loading
+  const appendVoiceText = (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    setDraft((value) => `${value}${value.trim() ? ' ' : ''}${trimmed}`)
+  }
+
+  const startRecorderVoice = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setVoiceStatus('当前浏览器不支持语音输入')
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      mediaStreamRef.current = stream
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+      discardRecordingRef.current = false
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data)
+      }
+      recorder.onerror = () => {
+        setListening(false)
+        setVoiceStatus('录音失败，请重试')
+        stream.getTracks().forEach((track) => track.stop())
+      }
+      recorder.onstop = () => {
+        const discardRecording = discardRecordingRef.current
+        discardRecordingRef.current = false
+        const chunks = audioChunksRef.current
+        stream.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+        mediaRecorderRef.current = null
+        setListening(false)
+
+        if (discardRecording) {
+          audioChunksRef.current = []
+          return
+        }
+
+        if (chunks.length === 0) {
+          setVoiceStatus('没有录到声音')
+          return
+        }
+
+        setVoiceStatus('正在转文字...')
+        void (async () => {
+          try {
+            const mimeType = recorder.mimeType || 'audio/webm'
+            const audioBlob = new Blob(chunks, { type: mimeType })
+            const audioBase64 = await blobToBase64(audioBlob)
+            const result = await transcribeAudio({
+              audioBase64,
+              mimeType,
+              filename: 'voice.webm',
+            })
+            appendVoiceText(result.text)
+            setVoiceStatus('')
+          } catch (err) {
+            setVoiceStatus(err instanceof Error ? err.message : '语音转文字失败')
+          } finally {
+            audioChunksRef.current = []
+          }
+        })()
+      }
+
+      setVoiceStatus('正在听...')
+      setListening(true)
+      recorder.start()
+    } catch (err) {
+      setListening(false)
+      setVoiceStatus(
+        err instanceof DOMException && err.name === 'NotAllowedError'
+          ? '麦克风权限未授权'
+          : '无法启动麦克风',
+      )
+    }
+  }
+
+  const toggleVoice = async () => {
+    if (listening) {
+      recognitionRef.current?.stop()
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+      setListening(false)
+      return
+    }
+
+    const SpeechRecognitionCtor =
+      (window as SpeechWindow).SpeechRecognition ??
+      (window as SpeechWindow).webkitSpeechRecognition
+
+    if (!SpeechRecognitionCtor) {
+      await startRecorderVoice()
+      return
+    }
+
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = 'zh-CN'
+    recognition.interimResults = false
+    recognition.continuous = false
+    recognition.onresult = (event) => {
+      let text = ''
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results.item(i)
+        text += result.item(0).transcript
+      }
+      appendVoiceText(text)
+    }
+    recognition.onerror = () => {
+      setVoiceStatus('语音识别失败，请重试')
+      setListening(false)
+    }
+    recognition.onend = () => {
+      setListening(false)
+      setVoiceStatus((status) => (status === '正在听...' ? '' : status))
+    }
+    recognitionRef.current = recognition
+    setVoiceStatus('正在听...')
+    setListening(true)
+    try {
+      recognition.start()
+    } catch {
+      setListening(false)
+      setVoiceStatus('语音输入启动失败')
+    }
+  }
+
+  const submit = async () => {
+    const userIdea = draft.trim()
+    if (!userIdea || loading) return
+
+    const contextNodeIds = currentContextNodeIds()
+
+    appendUserMessage(userIdea, contextNodeIds)
+    setDraft('')
+    setMentionedNodeIds([])
+    setVoiceStatus('')
+
+    if (isImageGenerationIntent(userIdea)) {
+      setPendingImageRequest({
+        id: `image_intent_${Date.now()}`,
+        prompt: userIdea,
+        contextNodeIds,
+      })
+      setImageGenerationStatus('')
+      return
+    }
+
+    const request: PromptOptimizeRequest = {
+      userIdea: applySkillsToUserIdea(userIdea),
+      contextNodeIds,
+      selectedNodeId: selectedNodeId ?? undefined,
+      model: currentModel,
+    }
+
+    setLoading(true)
+    setError(undefined)
+
+    try {
+      const response = await optimizePrompt(request)
+      appendAssistant(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const changeModel = (model: string) => {
+    setModelOpen(false)
+    void saveSettings({ llmModel: model }).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : String(err))
+    })
+  }
 
   return (
-    <div style={containerStyle}>
-      {/* 标题行 */}
-      <div style={titleRowStyle}>
-        <Wand2 size={14} strokeWidth={1.6} />
-        Agent 面板
-        <span style={{ color: COLORS.textDim, fontSize: 11, fontWeight: 400 }}>
-          · 把粗略想法整理成可执行的生图 Prompt
-        </span>
-      </div>
+    <aside className="agent-chat-panel" style={{ width: panelWidth }}>
+      <div
+        className="agent-resize-handle"
+        onPointerDown={startResize}
+        title="拖动调整 Agent 宽度"
+      />
 
-      {/* 输入区 */}
-      <div style={inputRowStyle}>
-        <textarea
-          style={textareaStyle}
-          placeholder="输入粗略想法，例如：保留人物姿势，把背景改成霓虹雨夜，服装更高级一点"
-          value={userIdea}
-          onChange={(e) => setUserIdea(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault()
-              void submit()
-            }
-          }}
-          disabled={loading}
-        />
-        <button
-          type="button"
-          style={submitBtnStyle(!canSubmit, loading)}
-          disabled={!canSubmit}
-          onClick={() => void submit()}
-        >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-          {loading ? '优化中' : '优化 Prompt'}
-        </button>
-      </div>
-
-      {/* 错误信息 + 重试 */}
-      {error && (
-        <div style={errorRowStyle}>
-          <AlertCircle size={14} style={{ flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{error}</span>
-          <button type="button" style={retryBtnStyle} onClick={() => void retry()}>
-            重试
+      <header className="agent-chat-header">
+        <div className="agent-title">
+          <Bot size={15} />
+          <span>AI创作搭档</span>
+        </div>
+        <div className="agent-header-actions">
+          <button type="button" className="agent-header-btn" title="新对话">
+            <Plus size={14} />
+          </button>
+          <button
+            type="button"
+            className="agent-header-btn"
+            title="关闭 Agent"
+            onClick={onClose}
+          >
+            <X size={14} />
           </button>
         </div>
-      )}
+      </header>
 
-      {/* 结果展示区（滚动） */}
-      <div style={scrollAreaStyle}>
-        {lastResponse ? (
-          <>
-            <ResultCard
-              label="思考说明"
-              icon={<Sparkles size={11} />}
-              content={lastResponse.reasoning || '（无）'}
-            />
-            <ResultCard
-              label="优化后的 Prompt"
-              icon={<FileText size={11} />}
-              content={lastResponse.optimizedPrompt}
-              copyable={lastResponse.optimizedPrompt}
-            />
-            <ResultCard
-              label="负面约束"
-              icon={<AlertCircle size={11} />}
-              content={lastResponse.negativePrompt || '（无）'}
-              copyable={lastResponse.negativePrompt}
-            />
-            <ResultCard
-              label="建议参数"
-              icon={<Sparkles size={11} />}
-              content={
-                <SuggestedParamsView params={lastResponse.suggestedParams} />
-              }
-            />
-            <ResultCard
-              label="建议动作"
-              icon={<CornerDownRight size={11} />}
-              content={
-                lastResponse.proposedActions.length > 0 ? (
-                  <ul style={{ margin: 0, paddingLeft: 16 }}>
-                    {lastResponse.proposedActions.map((a) => (
-                      <li key={a.id} style={{ marginBottom: 2 }}>
-                        <strong>{a.label}</strong>
-                        <span style={{ color: COLORS.textMuted }}> · {a.type}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  '（无）'
-                )
-              }
-            />
-            {lastResponse.usedContextNodeIds.length > 0 && (
-              <div style={{ ...cardContentStyle, color: COLORS.textMuted, fontSize: 11 }}>
-                Agent 使用了以下节点上下文：{lastResponse.usedContextNodeIds.join(', ')}
+      <div className="agent-chat-scroll">
+        <div className="agent-bubble assistant">
+          <div className="agent-pill">你可以干什么</div>
+          <p>
+            我是你的创作搭档，专注帮你把想法变成画布上能看见的内容。可以从剧本、故事、企划案、文案切入，也可以围绕图片、视频和节点继续扩展。
+          </p>
+          <strong>脚本与故事</strong>
+          <p>从零写剧本、拆分镜脚本、诊断已有剧本问题并给出改法。</p>
+          <strong>视觉设计</strong>
+          <p>生成图片提示词、统一画面风格、设计角色卡、场景卡和镜头语言。</p>
+          <strong>视频与音乐</strong>
+          <p>生成视频片段、写歌词、生成配音或 BGM 方向。</p>
+        </div>
+
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`agent-bubble ${message.role === 'user' ? 'user' : 'assistant'}`}
+          >
+            <p>{message.content}</p>
+            {message.optimizedPrompt && (
+              <div className="agent-result-card">
+                <span>优化后的 Prompt</span>
+                <p>{message.optimizedPrompt}</p>
               </div>
             )}
-          </>
-        ) : (
-          !loading && (
-            <div style={{ ...cardContentStyle, color: COLORS.textDim, textAlign: 'center', paddingTop: 20 }}>
-              输入想法后点击"优化 Prompt"，Agent 会返回结构化的提示词建议。
-            </div>
-          )
+          </div>
+        ))}
+
+        {loading && (
+          <div className="agent-bubble assistant compact">
+            <Loader2 size={14} className="animate-spin" />
+            正在思考...
+          </div>
         )}
 
-        {/* 历史对话（简略展示） */}
-        {messages.length > 0 && (
-          <div style={{ ...cardContentStyle, color: COLORS.textDim, fontSize: 11, borderTop: `1px solid ${COLORS.border}`, paddingTop: 8 }}>
-            对话历史（{messages.length} 条）
+        {error && <div className="agent-error">{error}</div>}
+
+        {pendingImageRequest && (
+          <div className="agent-bubble assistant agent-image-request">
+            <div className="agent-card-title">
+              <Sparkles size={14} />
+              <span>生成图片前确认一下参数</span>
+            </div>
+            <p className="agent-card-desc">
+              我会把这个需求变成画布上的即梦生成节点，并按下面参数开始生成。
+            </p>
+
+            <div className="agent-image-fields">
+              <label>
+                <span>模型</span>
+                <select
+                  value={imageGenerationParams.model}
+                  onChange={(event) =>
+                    setImageGenerationParams((params) => ({
+                      ...params,
+                      model: event.target.value,
+                    }))
+                  }
+                >
+                  {IMAGE_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>比例 / 尺寸</span>
+                <select
+                  value={imageGenerationParams.sizeId}
+                  onChange={(event) =>
+                    setImageGenerationParams((params) => ({
+                      ...params,
+                      sizeId: event.target.value,
+                    }))
+                  }
+                >
+                  {IMAGE_SIZES.map((size) => (
+                    <option key={size.id} value={size.id}>
+                      {size.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="agent-count-field">
+                <span>数量</span>
+                <div>
+                  {IMAGE_COUNTS.map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      className={
+                        imageGenerationParams.count === count ? 'active' : ''
+                      }
+                      onClick={() =>
+                        setImageGenerationParams((params) => ({
+                          ...params,
+                          count,
+                        }))
+                      }
+                    >
+                      {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {pendingImageRequest.contextNodeIds.length > 0 && (
+              <div className="agent-card-context">
+                已引用 {pendingImageRequest.contextNodeIds.length} 个画布节点
+              </div>
+            )}
+
+            {imageGenerationStatus && (
+              <div className="agent-card-status">{imageGenerationStatus}</div>
+            )}
+
+            <div className="agent-card-actions">
+              <button
+                type="button"
+                className="agent-card-secondary"
+                onClick={() => setPendingImageRequest(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="agent-card-primary"
+                onClick={() => void startAgentImageGeneration()}
+                disabled={!isJimengConfigured}
+                title={!isJimengConfigured ? '未配置 dreamina CLI' : '生成到画布'}
+              >
+                生成到画布
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* 底部：目标节点选择 + 写回 */}
-      <div style={footerRowStyle}>
-        <div style={selectWrapperStyle}>
-          <select
-            style={selectStyle}
-            value={targetPromptNodeId}
-            onChange={(e) => setTargetPromptNodeId(e.target.value)}
-            disabled={loading || promptNodes.length === 0}
-            title="选择要写回的 Prompt 节点"
-          >
-            {promptNodes.length === 0 && <option value="">无可用 Prompt 节点</option>}
-            {promptNodes.map((n) => {
-              const title =
-                (n.data as unknown as { title?: string } | undefined)?.title ??
-                n.id
-              return (
-                <option key={n.id} value={n.id}>
-                  {title}（{n.type}）
-                </option>
-              )
-            })}
-          </select>
-        </div>
-        <button
-          type="button"
-          style={writeBackBtnStyle(!canWriteBack)}
-          disabled={!canWriteBack}
-          onClick={writeBack}
-          title="把优化后的 Prompt 写回目标节点"
-        >
-          <CornerDownRight size={12} />
-          写回 Prompt 节点
-        </button>
-        <button
-          type="button"
-          style={writeBackBtnStyle(!canCreateBranch)}
-          disabled={!canCreateBranch}
-          onClick={createEditBranch}
-          title="创建新的 Prompt + 即梦生成分支"
-        >
-          <Sparkles size={12} />
-          创建改图分支
-        </button>
-        {writeBackNotice && (
-          <span style={{ color: COLORS.success, fontSize: 11 }}>{writeBackNotice}</span>
+      <footer className="agent-composer">
+        {activeSkills.length > 0 && (
+          <div className="agent-skill-chips">
+            {activeSkills.map((skill) => (
+              <button
+                type="button"
+                key={skill.id}
+                className="agent-skill-chip"
+                onClick={() => removeSkill(skill.id)}
+                title="移除技能"
+              >
+                <Wand2 size={11} />
+                {skill.label}
+                <X size={11} />
+              </button>
+            ))}
+          </div>
         )}
-      </div>
 
-      <div style={hintStyle}>
-        Ctrl/⌘ + Enter 快速提交 · Agent 仅做 Prompt 优化，不会自动生成图片 · 实际调用需在设置中配置 LLM API key
-      </div>
-    </div>
-  )
-}
+        {selectedMentionNodes.length > 0 && (
+          <div className="mention-chips">
+            {selectedMentionNodes.map((node) => (
+              <button
+                type="button"
+                key={node.id}
+                className="mention-chip"
+                onClick={() => removeMention(node.id)}
+                title="移除引用"
+              >
+                @{nodeTitle(node)}
+                <X size={11} />
+              </button>
+            ))}
+          </div>
+        )}
 
-/** 建议参数展示 */
-function SuggestedParamsView({
-  params,
-}: {
-  params: PromptOptimizeResponse['suggestedParams']
-}) {
-  const entries = Object.entries(params ?? {}).filter(
-    ([, v]) => v !== undefined && v !== null,
-  )
-  if (entries.length === 0) return <span>（无）</span>
-  return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-      {entries.map(([k, v]) => (
-        <span key={k}>
-          <strong style={{ color: COLORS.textMuted }}>{k}:</strong> {String(v)}
-        </span>
-      ))}
-    </div>
+        {mentionQuery !== null && mentionOptions.length > 0 && (
+          <div className="mention-popover">
+            <div className="mention-popover-title">引用画布节点</div>
+            {mentionOptions.map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                className="mention-option"
+                onClick={() => chooseMention(node.id)}
+              >
+                <AtSign size={13} />
+                <span>{nodeTitle(node)}</span>
+                <small>{node.type}</small>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <textarea
+          className="agent-input"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+              event.preventDefault()
+              void submit()
+            }
+          }}
+          placeholder="描述操作使用 @ 引用..."
+          disabled={loading}
+        />
+
+        <div className="agent-composer-actions">
+          <div className="agent-action-picker">
+            <button
+              type="button"
+              className={`agent-round-btn ${actionMenuOpen || pickingCanvasImage ? 'active' : ''}`}
+              title="添加能力"
+              onClick={() => {
+                setActionMenuOpen((open) => !open)
+                setSkillPickerOpen(false)
+              }}
+            >
+              <Plus size={15} />
+            </button>
+
+            {actionMenuOpen && (
+              <div className="agent-action-menu">
+                <button
+                  type="button"
+                  className="agent-action-option"
+                  onClick={() => {
+                    setPickingCanvasImage(true)
+                    setActionMenuOpen(false)
+                    setVoiceStatus('点击画布上的图片节点进行引用')
+                  }}
+                >
+                  <ImageIcon size={14} />
+                  <span>
+                    引用画布图片
+                    <small>点选图片节点</small>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className="agent-action-option"
+                  onClick={() => setSkillPickerOpen((open) => !open)}
+                >
+                  <Wand2 size={14} />
+                  <span>
+                    添加技能
+                    <small>让 Agent 带着能力工作</small>
+                  </span>
+                </button>
+
+                {skillPickerOpen && (
+                  <div className="agent-skill-menu">
+                    {AGENT_SKILLS.map((skill) => (
+                      <button
+                        type="button"
+                        key={skill.id}
+                        className={
+                          activeSkillIds.includes(skill.id) ? 'selected' : ''
+                        }
+                        onClick={() => toggleSkill(skill.id)}
+                      >
+                        <Sparkles size={12} />
+                        <span>
+                          {skill.label}
+                          <small>{skill.description}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="agent-model-picker">
+            <button
+              type="button"
+              className="agent-model-btn"
+              onClick={() => setModelOpen((open) => !open)}
+            >
+              {currentModel}
+              <ChevronDown size={13} />
+            </button>
+            {modelOpen && (
+              <div className="agent-model-menu">
+                {models.map((model) => (
+                  <button
+                    type="button"
+                    key={model}
+                    className="agent-model-option"
+                    onClick={() => changeModel(model)}
+                  >
+                    <span>{model}</span>
+                    {model === currentModel && <Check size={13} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <span className="voice-status">{voiceStatus}</span>
+          <button
+            type="button"
+            className={`agent-round-btn ${listening ? 'active' : ''}`}
+            onClick={() => void toggleVoice()}
+            title={listening ? '停止语音输入' : '语音输入'}
+          >
+            {listening ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
+          <button
+            type="button"
+            className="agent-send-btn"
+            onClick={() => void submit()}
+            disabled={!draft.trim() || loading}
+            title="发送"
+          >
+            <ArrowUp size={15} />
+          </button>
+        </div>
+      </footer>
+    </aside>
   )
 }
 

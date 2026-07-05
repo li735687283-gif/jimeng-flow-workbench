@@ -4,8 +4,8 @@ import type { EdgeProps } from '@xyflow/react'
 import { Scissors } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 
-const EDGE_COLOR_DEFAULT = '#5b6573'
-const EDGE_COLOR_ACTIVE = '#3b82f6'
+const EDGE_COLOR_DEFAULT = '#6f7278'
+const EDGE_COLOR_ACTIVE = '#e2e2e4'
 
 export function CutEdge({
   id,
@@ -57,9 +57,20 @@ export function CutEdge({
         d={edgePath}
         fill="none"
         stroke={isActive ? EDGE_COLOR_ACTIVE : EDGE_COLOR_DEFAULT}
-        strokeWidth={2}
-        style={{ pointerEvents: 'none' }}
+        strokeWidth={2.4}
+        strokeLinecap="round"
+        style={{ opacity: isActive ? 0.95 : 0.82, pointerEvents: 'none' }}
         className="cut-edge-visible"
+      />
+      <path
+        d={edgePath}
+        fill="none"
+        stroke={EDGE_COLOR_ACTIVE}
+        strokeWidth={1.25}
+        strokeLinecap="round"
+        strokeDasharray="16 44"
+        style={{ opacity: isActive ? 0.42 : 0.16, pointerEvents: 'none' }}
+        className="cut-edge-flow"
       />
       {/* 透明加粗命中热区 */}
       <path

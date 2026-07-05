@@ -89,7 +89,7 @@ const BTN_BASE: CSSProperties = {
 
 const BTN_ACTIVE: CSSProperties = {
   ...BTN_BASE,
-  color: '#9ecbff',
+  color: '#f4f4f5',
 }
 
 const BTN_DISABLED: CSSProperties = {
@@ -172,6 +172,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       title={nodeData.title}
       status={nodeData.status}
       selected={selected}
+      nodeId={id}
+      nodeType="image"
     >
       <div className="image-node-container" style={CONTAINER_STYLE}>
         <div className="node-preview-area image-node-preview" style={PREVIEW_STYLE}>

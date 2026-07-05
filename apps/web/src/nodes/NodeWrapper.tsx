@@ -16,6 +16,8 @@ interface NodeWrapperProps {
   title: string
   status?: NodeStatus
   selected?: boolean
+  nodeId?: string
+  nodeType?: string
   children?: ReactNode
 }
 
@@ -25,8 +27,8 @@ interface MagneticHandleProps {
   className: string
 }
 
-const MAGNET_RADIUS_FLOW = 44
-const MAGNET_PULL_FLOW = 18
+const MAGNET_RADIUS_FLOW = 30
+const MAGNET_PULL_FLOW = 10
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -89,7 +91,7 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
   return (
     <div
       ref={zoneRef}
-      className={`node-handle-zone ${className}${active ? ' magnetic' : ''}`}
+      className={`node-handle-zone nodrag nopan ${className}${active ? ' magnetic' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={reset}
       style={
@@ -112,11 +114,15 @@ export function NodeWrapper({
   title,
   status = 'idle',
   selected = false,
+  nodeId,
+  nodeType,
   children,
 }: NodeWrapperProps) {
   return (
     <div
       className={`node-wrapper status-${status}${selected ? ' selected' : ''}`}
+      data-flow-node-id={nodeId}
+      data-flow-node-type={nodeType}
     >
       <div className="node-title">
         <Icon size={12} strokeWidth={1.8} />

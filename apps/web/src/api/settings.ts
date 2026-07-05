@@ -3,6 +3,7 @@
 // Vite proxy 已把 /api 转发到后端 8787，前端直接用相对路径即可。
 
 import type { Settings } from '@jimeng-flow/shared'
+import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 
 /** 测试连接结果 */
 export interface TestConnectionResult {
@@ -39,8 +40,8 @@ export async function saveSettings(settings: Partial<Settings>): Promise<Setting
 }
 
 /**
- * 测试 JimengCli_api 连接（不保存配置）。
- * @param settings 当前表单中的 jimengBaseUrl、authMode、apiKey 等字段
+ * 测试 dreamina CLI 是否可用（不保存配置）。
+ * @param settings 当前表单中的 dreaminaPath 字段
  */
 export async function testJimengConnection(
   settings: Partial<Settings>,
@@ -51,7 +52,7 @@ export async function testJimengConnection(
     body: JSON.stringify(settings),
   })
   if (!res.ok) {
-    throw new Error(`测试 JimengCli_api 连接失败：${res.status} ${res.statusText}`)
+    throw new Error(`检测 dreamina CLI 失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as TestConnectionResult
 }
@@ -72,4 +73,20 @@ export async function testLlmConnection(
     throw new Error(`测试 LLM 连接失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as TestConnectionResult
+}
+
+/** 使用当前表单配置拉取中转站模型列表（不保存配置） */
+export async function listLlmModelsForSettings(
+  settings: Partial<Settings>,
+): Promise<LlmModelInfo[]> {
+  const res = await fetch('/api/settings/llm-models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) {
+    throw new Error(`拉取模型列表失败：${res.status} ${res.statusText}`)
+  }
+  const data = (await res.json()) as LlmModelInfo[]
+  return Array.isArray(data) ? data : []
 }

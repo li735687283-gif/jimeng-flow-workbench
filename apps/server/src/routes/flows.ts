@@ -41,6 +41,7 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
             statusCode: 404,
             error: 'Not Found',
             message: (err as Error).message,
+            code: 'FLOW_NOT_FOUND',
           })
         }
         throw err
@@ -99,6 +100,7 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
             statusCode: 404,
             error: 'Not Found',
             message: (err as Error).message,
+            code: 'FLOW_NOT_FOUND',
           })
         }
         throw err

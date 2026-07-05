@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { Node } from '@xyflow/react'
 import {
@@ -132,6 +132,15 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const edges = useCanvasStore((s) => s.edges)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 组件卸载时清除 notice timer
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    }
+  }, [])
+
   const callState = useGenerateStore(
     (s) => s.states[nodeId] ?? IDLE_CALL_STATE,
   )
@@ -149,7 +158,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const set = (partial: Partial<VideoNodeData>) =>
     updateNodeData(nodeId, partial)
 
-  const is4kDisabled = d.model === 'seedance-2.0-mini'
+  const isVipModel = d.model === 'seedance-2.0-vip'
   const modeLabel =
     VIDEO_MODES.find((m) => m.id === d.mode)?.label ?? d.mode
   const running = callState.status === 'queued' || callState.status === 'running'
@@ -161,14 +170,16 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const hasInputImage = resolvedInputImages.length > 0
   const submitDisabled = running || !isJimengConfigured
 
+  /** 显示通知，自动清除前一个 timer，在 delayMs 后自动消失 */
+  const showNotice = (msg: string, delayMs = 4000) => {
+    setNotice(msg)
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = setTimeout(() => setNotice(null), delayMs)
+  }
+
   const makeRequest = (): VideoGenerationRequest | null => {
     const prompt = resolvedPrompt.trim()
-    if (!prompt) {
-      const msg = 'Prompt 为空，请输入视频描述或连接上游文本节点'
-      updateNodeData(nodeId, { status: 'error', error: msg })
-      useGenerateStore.getState().patch(nodeId, { status: 'error', error: msg })
-      return null
-    }
+    if (!prompt) return null
 
     const mode =
       hasInputImage && d.mode === 'text_to_video' ? 'image_to_video' : d.mode
@@ -229,14 +240,21 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
     })
 
     if (res.status === 'success') {
-      setNotice(`视频生成完成，共 ${assetIds.length} 个结果`)
+      showNotice(`视频生成完成，共 ${assetIds.length} 个结果`)
     } else {
-      setNotice(res.error ?? '视频生成失败')
+      showNotice(res.error ?? '视频生成失败')
     }
   }
 
   const handleSubmit = async () => {
     if (running) return
+    const prompt = resolvedPrompt.trim()
+    if (!prompt) {
+      const msg = 'Prompt 为空，请输入视频描述或连接上游文本节点'
+      updateNodeData(nodeId, { status: 'error', error: msg })
+      useGenerateStore.getState().patch(nodeId, { status: 'error', error: msg })
+      return
+    }
     const req = makeRequest()
     if (!req) return
     applyRunning(req)
@@ -250,14 +268,20 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         status: 'error',
         error: msg,
       })
-      setNotice(`视频生成失败：${msg}`)
-    } finally {
-      window.setTimeout(() => setNotice(null), 4000)
+      showNotice(`视频生成失败：${msg}`)
+      return
     }
   }
 
   const handleRetry = async () => {
     if (running) return
+    const prompt = resolvedPrompt.trim()
+    if (!prompt) {
+      const msg = 'Prompt 为空，请输入视频描述或连接上游文本节点'
+      updateNodeData(nodeId, { status: 'error', error: msg })
+      useGenerateStore.getState().patch(nodeId, { status: 'error', error: msg })
+      return
+    }
     const last = callState.lastRequest
     const req =
       last && last.mediaType === 'video'
@@ -281,9 +305,8 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         status: 'error',
         error: msg,
       })
-      setNotice(`视频生成失败：${msg}`)
-    } finally {
-      window.setTimeout(() => setNotice(null), 4000)
+      showNotice(`视频生成失败：${msg}`)
+      return
     }
   }
 
@@ -399,10 +422,12 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
               <option
                 key={r}
                 value={r}
-                disabled={r === '4K' && is4kDisabled}
+                disabled={(r === '1080P' || r === '4K') && !isVipModel}
               >
                 {r}
-                {r === '4K' && is4kDisabled ? '（不可用）' : ''}
+                {(r === '1080P' || r === '4K') && !isVipModel
+                  ? '（仅 VIP）'
+                  : ''}
               </option>
             ))}
           </select>
@@ -583,7 +608,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
 
       {!isJimengConfigured && (
         <div style={{ fontSize: 11, color: '#ef4444' }}>
-          未配置 JimengCli_api 时无法生成，请前往设置
+          未配置 dreamina CLI 时无法生成，请前往设置
         </div>
       )}
 
@@ -602,7 +627,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       )}
 
       <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-        {hasInputImage ? '已读取上游图片，按图生视频提交' : '未连接图片时按文生视频提交'} · 文本可来自上游 Text 节点
+        {hasInputImage ? '已读取上游图片，按图生视频提交' : '未连接图片时按文生视频提交'} · 使用本机 dreamina CLI 登录态
       </div>
     </div>
   )

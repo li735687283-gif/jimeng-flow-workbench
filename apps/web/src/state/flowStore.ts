@@ -138,14 +138,17 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
 
   updateFlowName: async (name) => {
-    const { currentFlowId } = get()
+    const { currentFlowId, currentFlowName: oldName } = get()
     if (!currentFlowId) return
+    // 乐观更新 UI
     set({ currentFlowName: name, error: null })
     try {
       const updated = await flowsApi.updateFlow(currentFlowId, { name })
       set({ currentFlowName: updated.name, lastSavedAt: Date.now() })
     } catch (err) {
+      // API 失败时回滚名称
       set({
+        currentFlowName: oldName,
         error: err instanceof Error ? err.message : String(err),
       })
       throw err

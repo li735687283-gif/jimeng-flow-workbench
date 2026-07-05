@@ -16,6 +16,7 @@ import type {
   OnConnectEnd,
   OnConnectStart,
 } from '@xyflow/react'
+import { Plus } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 import { useAssetStore } from '../../state/assetStore'
 import { uploadAsset } from '../../api/assets'
@@ -92,7 +93,7 @@ export function CanvasView() {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const setAsset = useAssetStore((s) => s.setAsset)
   const zoom = useStore((s) => s.transform[2])
-  const connectionRadius = Math.round(clamp(42 * zoom, 22, 84))
+  const connectionRadius = Math.round(clamp(28 * zoom, 16, 56))
 
   const { screenToFlowPosition } = useReactFlow()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -313,8 +314,9 @@ export function CanvasView() {
         panOnDrag={[1]}
         connectionRadius={connectionRadius}
         deleteKeyCode={['Delete', 'Backspace']}
-        fitView
-        fitViewOptions={{ maxZoom: 1 }}
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        minZoom={0.35}
+        maxZoom={1.6}
         proOptions={{ hideAttribution: true }}
       >
         <Background
@@ -325,6 +327,24 @@ export function CanvasView() {
         />
         <Controls showInteractive={false} />
       </ReactFlow>
+
+      {nodes.length === 0 && (
+        <div className="canvas-empty-state">
+          <button
+            type="button"
+            className="canvas-empty-plus"
+            onClick={() => handleCreateNode('text', screenToFlowPosition({
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            }))}
+            title="添加文本节点"
+          >
+            <Plus size={28} strokeWidth={1.5} />
+          </button>
+          <div className="canvas-empty-title">双击画布开始创作</div>
+          <div className="canvas-empty-subtitle">或使用底部按钮添加节点</div>
+        </div>
+      )}
 
       <SelectionToolbar selectedNodeIds={selectedNodeIds} />
 

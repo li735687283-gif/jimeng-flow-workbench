@@ -5,6 +5,7 @@ import { Play, Film, Link2, Image as ImageIcon, AlertCircle } from 'lucide-react
 import { NodeWrapper } from './NodeWrapper'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
+import { getAssetFileUrl } from '../api/assets'
 import {
   VIDEO_MODES,
   mergeVideoDefaults,
@@ -69,8 +70,8 @@ const statusBadgeStyle = (status: string): CSSProperties => {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 3,
-      background: 'rgba(74, 158, 255, 0.12)',
-      color: '#4a9eff',
+      background: 'rgba(255, 255, 255, 0.1)',
+      color: '#ededee',
       fontSize: 10,
       padding: '2px 6px',
       borderRadius: 4,
@@ -164,7 +165,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         >
           {firstAssetId ? (
             <video
-              src={`/api/assets/${firstAssetId}/file`}
+              src={getAssetFileUrl(firstAssetId)}
               controls
               muted
               style={{

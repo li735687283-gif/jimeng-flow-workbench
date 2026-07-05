@@ -7,7 +7,7 @@ import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import type { Settings } from '@jimeng-flow/shared'
 import { getSettings, updateSettings } from '../services/settings'
 import { testJimengConnection } from '../services/jimeng'
-import { testLlmConnection } from '../services/llm'
+import { listModels, testLlmConnection } from '../services/llm'
 
 const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // GET /api/settings
@@ -34,8 +34,10 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       'jimengBaseUrl',
       'authMode',
       'apiKey',
+      'dreaminaPath',
       'llmBaseUrl',
       'llmModel',
+      'llmModels',
       'llmApiKey',
       'outputDir',
       'defaultModel',
@@ -63,12 +65,13 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   })
 
   // POST /api/settings/test-jimeng
-  // 使用当前表单中的 jimengBaseUrl + auth 信息测试连接，不保存配置。
+  // 使用当前表单中的 dreaminaPath 检测即梦官方 CLI，不保存配置。
   app.post<{ Body: Partial<Settings> }>('/api/settings/test-jimeng', async (req) => {
     const result = await testJimengConnection({
       jimengBaseUrl: req.body.jimengBaseUrl,
       authMode: req.body.authMode,
       apiKey: req.body.apiKey,
+      dreaminaPath: req.body.dreaminaPath,
     })
     return result
   })
@@ -81,6 +84,17 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       llmApiKey: req.body.llmApiKey,
     })
     return result
+  })
+
+  // POST /api/settings/llm-models
+  // 使用当前表单中的 llmBaseUrl + llmApiKey 拉取模型列表，不保存配置。
+  app.post<{ Body: Partial<Settings> }>('/api/settings/llm-models', async (req) => {
+    const models = await listModels({
+      baseUrl: req.body.llmBaseUrl,
+      apiKey: req.body.llmApiKey,
+      timeoutMs: 10_000,
+    })
+    return models
   })
 }
 

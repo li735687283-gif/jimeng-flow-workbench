@@ -5,7 +5,7 @@
 //
 // 集成约定：BottomPanel 在选中节点 type==='generate' 时渲染 <GenerateComposer nodeId={...} />。
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Node } from '@xyflow/react'
 import {
@@ -45,7 +45,7 @@ const COLORS = {
   text: '#e4e4e7',
   textMuted: '#8a8a92',
   textDim: '#5a5a62',
-  accent: '#4a9eff',
+  accent: '#d7d7da',
   error: '#ef4444',
   errorBg: 'rgba(239, 68, 68, 0.12)',
 }
@@ -251,7 +251,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   )
   const cancelWaiting = useGenerateStore((s) => s.cancelWaiting)
 
-  // JimengCli_api 是否已配置（jimengBaseUrl 非空），未配置时禁用生成
+  // dreamina CLI 是否已配置，未配置时禁用生成
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
 
   // 本地 seed 输入（字符串，空表示随机）
@@ -267,6 +267,10 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
     }
     // 仅依赖 nodeId 与 seedValue，避免反复触发
   }, [nodeId, seedValue])
+
+  // 内存上游查询结果，避免每次渲染都 O(n*m) 遍历
+  const upstreamPromptResult = useMemo(() => findUpstreamPrompt(nodeId, nodes, edges), [nodeId, nodes, edges])
+  const upstreamImageAssetIdsList = useMemo(() => findUpstreamImageAssetIds(nodeId, nodes, edges), [nodeId, nodes, edges])
 
   if (!node) {
     return (
@@ -285,7 +289,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
     updateNodeData(nodeId, partial as unknown as Partial<BaseNodeData>)
 
   const running = callState.status === 'queued' || callState.status === 'running'
-  // 生成按钮禁用：运行中或未配置 JimengCli_api
+  // 生成按钮禁用：运行中或未配置 dreamina CLI
   const submitDisabled = running || !isJimengConfigured
 
   /** 自动创建 Image 节点并连线（每张结果一个节点，水平排列） */
@@ -320,9 +324,8 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
     let prompt = d.prompt
     let promptSourceNodeId = d.promptSourceNodeId
     if (!prompt.trim()) {
-      const upstream = findUpstreamPrompt(nodeId, nodes, edges)
-      prompt = upstream.prompt
-      promptSourceNodeId = upstream.sourceNodeId
+      prompt = upstreamPromptResult.prompt
+      promptSourceNodeId = upstreamPromptResult.sourceNodeId
     }
     if (!prompt.trim()) {
       setError(nodeId, 'Prompt 为空，请先在节点输入或连接上游文本节点')
@@ -333,7 +336,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
     const inputImageAssetIds =
       d.inputImageAssetIds.length > 0
         ? d.inputImageAssetIds
-        : findUpstreamImageAssetIds(nodeId, nodes, edges)
+        : upstreamImageAssetIdsList
 
     // seed：空字符串 → null（随机）
     const trimmedSeed = seedInput.trim()
@@ -450,10 +453,10 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
     IMAGE_SIZES.find((s) => s.id === selectedSizeId)?.label ?? selectedSizeId
   const modelLabel =
     IMAGE_MODELS.find((m) => m.id === d.model)?.label ?? d.model
-  const hasUpstreamPrompt = !!findUpstreamPrompt(nodeId, nodes, edges).prompt
+  const hasUpstreamPrompt = !!upstreamPromptResult.prompt
   const hasInputImage =
     d.inputImageAssetIds.length > 0 ||
-    findUpstreamImageAssetIds(nodeId, nodes, edges).length > 0
+    upstreamImageAssetIdsList.length > 0
 
   return (
     <div style={containerStyle}>
@@ -631,12 +634,12 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
 
       {!isJimengConfigured && (
         <div style={{ ...hintStyle, color: COLORS.error }}>
-          未配置 JimengCli_api 时无法生成，请前往设置
+          未配置 dreamina CLI 时无法生成，请前往设置
         </div>
       )}
 
       <div style={hintStyle}>
-        Ctrl/⌘ + Enter 快速提交 · 文生图：仅 Prompt · 图生图：连接 Image 节点 · 实际调用需在设置中配置 JimengCli_api
+        Ctrl/⌘ + Enter 快速提交 · 文生图：仅 Prompt · 图生图：连接 Image 节点 · 使用本机 dreamina CLI 登录态
       </div>
     </div>
   )

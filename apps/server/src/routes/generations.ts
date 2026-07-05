@@ -44,7 +44,14 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     '/api/generations',
     { bodyLimit: 4 * 1024 * 1024 },
     async (req, reply) => {
-      const body = req.body ?? ({} as GenerationRequest)
+      const body = req.body
+      if (!body || typeof body !== 'object') {
+        return reply.code(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: '请求体不能为空',
+        })
+      }
       try {
         const res = await createGeneration(body)
         return reply.code(201).send(res as GenerationResponse)

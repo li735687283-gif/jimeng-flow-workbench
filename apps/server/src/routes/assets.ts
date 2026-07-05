@@ -80,7 +80,13 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
 
       let fileBuffer: Buffer
       try {
+        // Node.js Buffer.from 对无效 base64 静默跳过，需主动校验
+        const cleaned = dataBase64.replace(/\s/g, '')
         fileBuffer = Buffer.from(dataBase64, 'base64')
+        // 验证 base64 解码后再编码是否一致
+        if (fileBuffer.length > 0 && fileBuffer.toString('base64') !== cleaned.replace(/=+$/, '')) {
+          throw new Error('非法 base64 字符')
+        }
       } catch {
         return reply.code(400).send({
           statusCode: 400,

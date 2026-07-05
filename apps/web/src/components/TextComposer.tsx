@@ -3,11 +3,12 @@
 // 参考 PRD 7.6、8.9、13.8（文本节点 UI 参考）、12.2（错误处理）。
 // 集成约定：BottomPanel 在选中节点 type==='text' 时渲染 <TextComposer nodeId={...} />。
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Send, AlertCircle, Loader2, ChevronDown } from 'lucide-react'
 import type { LlmModelInfo, TextNodeData } from '@jimeng-flow/shared/textNode'
 import { useCanvasStore } from '../state/canvasStore'
+import { useSettingsStore } from '../state/settingsStore'
 import { useTextNodeStore } from '../state/textNodeStore'
 import { listLlmModels, runTextNode } from '../api/llm'
 
@@ -21,11 +22,11 @@ const COLORS = {
   bg: '#1c1c20',
   bgInput: '#26262c',
   border: '#34343c',
-  borderFocus: '#4a9eff',
+  borderFocus: '#d7d7da',
   text: '#e4e4e7',
   textMuted: '#8a8a92',
-  accent: '#4a9eff',
-  accentHover: '#3a8eef',
+  accent: '#d7d7da',
+  accentHover: '#f1f1f2',
   error: '#ef4444',
   errorBg: 'rgba(239, 68, 68, 0.12)',
 }
@@ -140,25 +141,42 @@ const hintStyle: CSSProperties = {
   flexShrink: 0,
 }
 
+/** 稳定的空状态引用，避免 Zustand selector 返回新对象导致无限重渲染 */
+const EMPTY_CALL_STATE = Object.freeze({ loading: false })
+
+function uniqueModels(models: string[]): string[] {
+  return Array.from(new Set(models.map((item) => item.trim()).filter(Boolean)))
+}
+
 export function TextComposer({ nodeId }: TextComposerProps) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const settings = useSettingsStore((s) => s.settings)
 
   const setLoading = useTextNodeStore((s) => s.setLoading)
   const setError = useTextNodeStore((s) => s.setError)
   const setLastRequest = useTextNodeStore((s) => s.setLastRequest)
-  // 避免 selector 返回新对象导致 React getSnapshot 无限循环
   const callStateRaw = useTextNodeStore((s) => s.states[nodeId])
-  const callState = callStateRaw ?? { loading: false }
+  const callState = callStateRaw ?? EMPTY_CALL_STATE
 
   const [models, setModels] = useState<LlmModelInfo[]>([])
   const [model, setModel] = useState('')
   const [message, setMessage] = useState('')
   const [modelsLoading, setModelsLoading] = useState(true)
   const fetchedRef = useRef(false)
+  const preferredModels = useMemo(() => {
+    const configured = settings?.llmModels ?? []
+    if (configured.length === 0) return []
+    return uniqueModels([...configured, settings?.llmModel ?? ''])
+  }, [settings?.llmModel, settings?.llmModels])
 
   // 拉取模型列表（仅一次）
   useEffect(() => {
+    if (preferredModels.length > 0) {
+      setModels(preferredModels.map((id) => ({ id, label: id })))
+      setModelsLoading(false)
+      return
+    }
     if (fetchedRef.current) return
     fetchedRef.current = true
     listLlmModels()
@@ -169,7 +187,7 @@ export function TextComposer({ nodeId }: TextComposerProps) {
       .catch(() => {
         setModelsLoading(false)
       })
-  }, [])
+  }, [preferredModels])
 
   // 初始化选中模型：优先节点已记录的模型，否则取列表第一项
   useEffect(() => {
@@ -180,10 +198,14 @@ export function TextComposer({ nodeId }: TextComposerProps) {
       setModel(nodeModel)
       return
     }
+    if (settings?.llmModel) {
+      setModel(settings.llmModel)
+      return
+    }
     if (models.length > 0) {
       setModel(models[0].id)
     }
-  }, [models, modelsLoading, node, model])
+  }, [models, modelsLoading, node, model, settings?.llmModel])
 
   // 节点切换时重置输入
   useEffect(() => {

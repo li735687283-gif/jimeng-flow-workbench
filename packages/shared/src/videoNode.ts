@@ -78,8 +78,9 @@ export type VideoGenerationResult = GenerationResult
 export const VIDEO_MODELS = [
   { id: 'seedance-2.0', label: 'Seedance 2.0' },
   { id: 'seedance-2.0-fast', label: 'Seedance 2.0 Fast' },
+  { id: 'seedance-2.0-vip', label: 'Seedance 2.0 VIP' },
+  { id: 'seedance-2.0-fast-vip', label: 'Seedance 2.0 Fast VIP' },
   { id: 'seedance-2.0-mini', label: 'Seedance 2.0 Mini' },
-  { id: 'kling', label: 'Kling' },
 ] as const
 
 /** 视频模式选项（参考 PRD 13.11） */

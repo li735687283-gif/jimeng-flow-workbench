@@ -88,12 +88,14 @@ export interface GenerationRequest {
 
 /** 单张生成图结果 */
 export interface GenerationResult {
-  /** 该张图的临时 URL 或最终 Asset id（取决于上游 JimengCli_api 返回结构） */
+  /** 该张图的临时 URL 或最终 Asset id（取决于 dreamina 返回结构） */
   url?: string
-  /** 图片远端 URL（如果 JimengCli_api 返回的是远端 URL） */
+  /** 图片远端 URL（如果 dreamina 返回的是远端 URL） */
   remoteUrl?: string
   /** 本地保存后的 Asset id（保存成功后才有） */
   assetId?: string
+  /** CLI 下载到本机的临时文件路径（后端保存 Asset 前使用） */
+  localPath?: string
   /** 该张图对应的 seed（若上游返回） */
   seed?: number
 }
@@ -119,11 +121,12 @@ export interface GenerationResponse {
   finishedAt?: string
 }
 
-/** 可选图片模型列表（参考 reference-model-menu.png、PRD 13.10） */
+/** 可选图片模型列表（对齐 dreamina CLI model_version） */
 export const IMAGE_MODELS = [
-  { id: 'jimeng-3.0', label: '即梦 3.0', description: '高质量通用模型' },
-  { id: 'jimeng-2.0', label: '即梦 2.0', description: '快速生成模型' },
-  { id: 'jimeng', label: '即梦（默认）', description: '默认即梦模型' },
+  { id: 'jimeng-5.0', label: '即梦 5.0', description: 'CLI model_version=5.0' },
+  { id: 'jimeng-4.7', label: '即梦 4.7', description: 'CLI model_version=4.7' },
+  { id: 'jimeng-3.0', label: '即梦 3.0', description: 'CLI model_version=3.0' },
+  { id: 'jimeng', label: '即梦（默认）', description: '使用 CLI 默认模型' },
 ] as const
 
 /** 可选图片尺寸（参考 reference-quality-ratio-menu.png、PRD 11.3 defaultSize） */

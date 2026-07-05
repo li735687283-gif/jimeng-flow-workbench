@@ -8,6 +8,8 @@
 //   <root>/workspace/outputs/yyyy-mm-dd/<assetId>.json   元数据（由 saveUploadFile 写入）
 
 import { randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { extname } from 'node:path'
 import type {
   GenerationRequest,
   GenerationResponse,
@@ -57,6 +59,23 @@ function extFromVideoUrl(url: string): string {
     return `.${m[1].toLowerCase()}`
   }
   return '.mp4'
+}
+
+function mimeFromImageExt(ext: string): string {
+  const normalized = ext.toLowerCase()
+  if (normalized === '.jpg' || normalized === '.jpeg') return 'image/jpeg'
+  if (normalized === '.webp') return 'image/webp'
+  if (normalized === '.gif') return 'image/gif'
+  if (normalized === '.bmp') return 'image/bmp'
+  return 'image/png'
+}
+
+function mimeFromVideoExt(ext: string): string {
+  const normalized = ext.toLowerCase()
+  if (normalized === '.webm') return 'video/webm'
+  if (normalized === '.mov') return 'video/quicktime'
+  if (normalized === '.avi') return 'video/x-msvideo'
+  return 'video/mp4'
 }
 
 /** 从 URL 下载图片二进制 */
@@ -118,6 +137,33 @@ async function saveImageGenerationResult(
   result: GenerationResult,
   req: GenerationRequest,
 ): Promise<GenerationResult> {
+  if (result.localPath) {
+    const ext = extname(result.localPath) || '.png'
+    const buffer = await readFile(result.localPath)
+    const asset = await saveUploadFile({
+      fileBuffer: buffer,
+      originalName: `generation-${req.nodeId}${ext}`,
+      mimeType: mimeFromImageExt(ext),
+      prompt: req.prompt,
+      sourceNodeId: req.nodeId,
+      inputAssetIds: req.inputImages,
+      provider: 'dreamina',
+      params: {
+        model: req.model,
+        width: req.width,
+        height: req.height,
+        count: req.count,
+        seed: req.seed ?? null,
+        localPath: result.localPath,
+      },
+    })
+    return {
+      ...result,
+      assetId: asset.id,
+      url: asset.id,
+    }
+  }
+
   const remoteUrl = result.remoteUrl || result.url
   if (!remoteUrl) {
     throw new Error('生成结果缺少 url，无法保存')
@@ -131,7 +177,7 @@ async function saveImageGenerationResult(
     prompt: req.prompt,
     sourceNodeId: req.nodeId,
     inputAssetIds: req.inputImages,
-    provider: 'jimeng',
+    provider: 'dreamina',
     params: {
       model: req.model,
       width: req.width,
@@ -153,6 +199,36 @@ async function saveVideoGenerationResult(
   result: GenerationResult,
   req: VideoGenerationRequest,
 ): Promise<GenerationResult> {
+  if (result.localPath) {
+    const ext = extname(result.localPath) || '.mp4'
+    const buffer = await readFile(result.localPath)
+    const asset = await saveUploadFile({
+      fileBuffer: buffer,
+      originalName: `generation-${req.nodeId}${ext}`,
+      mimeType: mimeFromVideoExt(ext),
+      prompt: req.prompt,
+      sourceNodeId: req.nodeId,
+      inputAssetIds: req.inputImages,
+      provider: 'dreamina',
+      params: {
+        model: req.model,
+        mode: req.mode,
+        aspectRatio: req.aspectRatio,
+        resolution: req.resolution,
+        quality: req.quality,
+        durationSeconds: req.durationSeconds,
+        count: req.count,
+        generateAudio: req.generateAudio,
+        localPath: result.localPath,
+      },
+    })
+    return {
+      ...result,
+      assetId: asset.id,
+      url: asset.id,
+    }
+  }
+
   const remoteUrl = result.remoteUrl || result.url
   if (!remoteUrl) {
     throw new Error('生成结果缺少 url，无法保存')
@@ -166,7 +242,7 @@ async function saveVideoGenerationResult(
     prompt: req.prompt,
     sourceNodeId: req.nodeId,
     inputAssetIds: req.inputImages,
-    provider: 'jimeng',
+    provider: 'dreamina',
     params: {
       model: req.model,
       mode: req.mode,
@@ -204,10 +280,10 @@ function validateCreateRequest(
   req: GenerationRequest | VideoGenerationRequest,
 ): void {
   if (!req.prompt || !req.prompt.trim()) {
-    throw new JimengError('JIMENG_BAD_RESPONSE', 'Prompt 不能为空', 400)
+    throw new JimengError('INVALID_INPUT', 'Prompt 不能为空', 400)
   }
   if (!req.nodeId) {
-    throw new JimengError('JIMENG_BAD_RESPONSE', 'nodeId 不能为空', 400)
+    throw new JimengError('INVALID_INPUT', 'nodeId 不能为空', 400)
   }
 }
 
@@ -231,10 +307,13 @@ async function createImageGeneration(
 
     // 顺序下载并保存每张图为 Asset（避免并发占用过多内存）
     const saved: GenerationResult[] = []
+    let successCount = 0
+    const errors: string[] = []
     for (const r of results) {
       try {
         const s = await saveImageGenerationResult(r, req)
         saved.push(s)
+        successCount++
       } catch (err) {
         // 单张下载/保存失败：保留 remoteUrl，不阻断整体
         const msg = err instanceof Error ? err.message : String(err)
@@ -242,15 +321,16 @@ async function createImageGeneration(
           ...r,
           assetId: undefined,
         })
-        // 记录到 record.error 但不改变 status（部分成功）
-        if (!record.error) record.error = `部分图片保存失败：${msg}`
+        errors.push(msg)
       }
     }
 
     record.results = saved
-    record.status = saved.length > 0 ? 'success' : 'error'
-    if (record.status === 'error' && !record.error) {
-      record.error = '所有图片保存失败'
+    record.status = successCount > 0 ? 'success' : 'error'
+    if (errors.length > 0) {
+      record.error = successCount > 0
+        ? `部分图片保存失败（${successCount}/${results.length} 成功）：${errors.join('；')}`
+        : `所有图片保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
   } catch (err) {
@@ -282,24 +362,29 @@ async function createVideoGeneration(
 
     // 顺序下载并保存每个视频为 Asset
     const saved: GenerationResult[] = []
+    let successCount = 0
+    const errors: string[] = []
     for (const r of results) {
       try {
         const s = await saveVideoGenerationResult(r, req)
         saved.push(s)
+        successCount++
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         saved.push({
           ...r,
           assetId: undefined,
         })
-        if (!record.error) record.error = `部分视频保存失败：${msg}`
+        errors.push(msg)
       }
     }
 
     record.results = saved
-    record.status = saved.length > 0 ? 'success' : 'error'
-    if (record.status === 'error' && !record.error) {
-      record.error = '所有视频保存失败'
+    record.status = successCount > 0 ? 'success' : 'error'
+    if (errors.length > 0) {
+      record.error = successCount > 0
+        ? `部分视频保存失败（${successCount}/${results.length} 成功）：${errors.join('；')}`
+        : `所有视频保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
   } catch (err) {
@@ -350,7 +435,7 @@ export async function retryGeneration(
   const rec = store.get(id)
   if (!rec) {
     throw new JimengError(
-      'JIMENG_BAD_RESPONSE',
+      'NOT_FOUND',
       `生成任务 ${id} 不存在`,
       404,
     )

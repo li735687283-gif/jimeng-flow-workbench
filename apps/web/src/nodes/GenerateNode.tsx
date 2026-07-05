@@ -22,6 +22,7 @@ import {
 import type { BaseNodeData } from '../types/nodeTypes'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
+import { getAssetFileUrl } from '../api/assets'
 
 /** 暗色风格调色板 */
 const COLORS = {
@@ -31,8 +32,8 @@ const COLORS = {
   text: '#e4e4e7',
   textMuted: '#8a8a92',
   textDim: '#5a5a62',
-  accent: '#4a9eff',
-  accentBg: 'rgba(74, 158, 255, 0.12)',
+  accent: '#ededee',
+  accentBg: 'rgba(255, 255, 255, 0.09)',
   error: '#ef4444',
   errorBg: 'rgba(239, 68, 68, 0.12)',
   success: '#22c55e',
@@ -259,7 +260,7 @@ export function GenerateNode({ id, data, selected }: NodeProps) {
         >
           {hasResult ? (
             <img
-              src={`/api/assets/${encodeURIComponent(firstAssetId)}/file`}
+              src={getAssetFileUrl(firstAssetId)}
               alt={nodeData.title}
               style={{
                 display: 'block',

@@ -6,6 +6,7 @@
 
 import type {
   LlmModelInfo,
+  LlmTranscribeResponse,
   LlmOutputFormat,
   TextContentType,
 } from '@jimeng-flow/shared/textNode'
@@ -61,6 +62,10 @@ interface OpenAiModel {
 
 interface OpenAiModelsResponse {
   data?: OpenAiModel[]
+}
+
+interface OpenAiTranscriptionResponse {
+  text?: string
 }
 
 /** 默认模型列表（GET /models 失败时兜底，参考 PRD 7.6 提到的 GVLM、Qwen VL） */
@@ -200,7 +205,8 @@ async function callChatCompletions(
   const body = buildChatRequestBody(model, messages, opts)
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000)
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -241,6 +247,11 @@ async function callChatCompletions(
       : undefined
 
     return { content, contentType, promptCandidate, usage }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`LLM 调用超时（${timeoutMs / 1000}s）`)
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }
@@ -303,6 +314,7 @@ export async function listModels(
   const apiKey = opts?.apiKey ?? settings.llmApiKey ?? ''
 
   if (!baseUrl || !apiKey) {
+    // 配置未就绪时返回默认模型列表（前端可据此判断未配置）
     return DEFAULT_MODELS
   }
 
@@ -318,18 +330,111 @@ export async function listModels(
       signal: controller.signal,
     })
     if (!res.ok) {
+      // 记录警告但不暴露给前端，避免在 UI 中刷错误
+      console.warn(`[llm/models] LLM 返回非 2xx: HTTP ${res.status} ${res.statusText}`)
       return DEFAULT_MODELS
     }
     const json = (await res.json()) as OpenAiModelsResponse
     const list = json.data ?? []
-    if (list.length === 0) return DEFAULT_MODELS
+    if (list.length === 0) {
+      console.warn('[llm/models] LLM 返回空模型列表')
+      return DEFAULT_MODELS
+    }
     return list.map((m) => ({
       id: m.id,
       label: m.id,
       estimatedLatency: guessLatency(m.id),
     }))
-  } catch {
+  } catch (err) {
+    console.warn(`[llm/models] 获取模型列表失败：${err instanceof Error ? err.message : String(err)}`)
     return DEFAULT_MODELS
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export interface TranscribeAudioOptions {
+  audioBase64: string
+  mimeType: string
+  filename?: string
+  model?: string
+  timeoutMs?: number
+}
+
+function audioFilename(mimeType: string, filename?: string): string {
+  if (filename?.trim()) return filename.trim()
+  if (mimeType.includes('wav')) return 'voice.wav'
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'voice.mp3'
+  if (mimeType.includes('mp4')) return 'voice.mp4'
+  if (mimeType.includes('ogg')) return 'voice.ogg'
+  return 'voice.webm'
+}
+
+/**
+ * 调用 OpenAI-compatible Audio Transcriptions。
+ * 浏览器不支持 Web Speech 时，前端录音后走这里转文字。
+ */
+export async function transcribeAudio(
+  opts: TranscribeAudioOptions,
+): Promise<LlmTranscribeResponse> {
+  const settings = await getSettings()
+  const baseUrl = (settings.llmBaseUrl ?? '').replace(/\/+$/, '')
+  const apiKey = settings.llmApiKey ?? ''
+  const model = opts.model?.trim() || 'whisper-1'
+
+  if (!baseUrl) {
+    throw new Error('LLM base URL 未配置，请先在设置中配置 llmBaseUrl')
+  }
+  if (!apiKey) {
+    throw new Error('LLM API key 未配置，请先在设置中配置 llmApiKey')
+  }
+  if (!opts.audioBase64) {
+    throw new Error('音频内容为空')
+  }
+
+  const buffer = Buffer.from(opts.audioBase64, 'base64')
+  const blob = new Blob([new Uint8Array(buffer)], {
+    type: opts.mimeType || 'audio/webm',
+  })
+  const form = new FormData()
+  form.append('file', blob, audioFilename(opts.mimeType, opts.filename))
+  form.append('model', model)
+  form.append('language', 'zh')
+
+  const controller = new AbortController()
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const res = await fetch(`${baseUrl}/audio/transcriptions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: form,
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      const summary = text.length > 300 ? `${text.slice(0, 300)}...` : text
+      throw new Error(
+        `语音转文字失败：HTTP ${res.status} ${res.statusText}${summary ? ` - ${summary}` : ''}`,
+      )
+    }
+
+    const json = (await res.json()) as OpenAiTranscriptionResponse
+    const text = json.text?.trim()
+    if (!text) {
+      throw new Error('语音转文字返回为空')
+    }
+
+    return { text, model }
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`语音转文字超时（${timeoutMs / 1000}s）`)
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }

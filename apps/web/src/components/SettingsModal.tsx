@@ -1,15 +1,16 @@
 // 即梦 Flow 前端 - SettingsModal 设置弹窗组件
 // 暗色主题，固定遮罩 + 居中卡片。
-// 字段分组：JimengCli_api、LLM Provider、输出、默认参数。
+// 字段分组：Dreamina CLI、LLM Provider。
 // 加载时拉取 GET /api/settings；保存时 PUT /api/settings，成功后更新 store 并关闭。
 // 参考 PRD 7.1、8.6、11.3、12.1。
 
-import { useEffect, useState } from 'react'
-import { Settings as SettingsIcon, X } from 'lucide-react'
-import type { AuthMode, Settings } from '@jimeng-flow/shared'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, RefreshCw, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import type { Settings } from '@jimeng-flow/shared'
+import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import { useSettingsStore } from '../state/settingsStore'
-import { testJimengConnection, testLlmConnection } from '../api/settings'
+import { listLlmModelsForSettings, testJimengConnection, testLlmConnection } from '../api/settings'
 
 export interface SettingsModalProps {
   open: boolean
@@ -19,13 +20,10 @@ export interface SettingsModalProps {
 // 表单状态：以完整 Settings 形式保存，避免字段缺失
 type FormState = Settings
 
-const AUTH_MODES: AuthMode[] = ['apiKey', 'cookie', 'token']
-
 const sectionStyle: React.CSSProperties = {
   borderBottom: '1px solid #2a2a2a',
   padding: '16px 0',
 }
-const sectionLastStyle: React.CSSProperties = { padding: '16px 0' }
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: '13px',
   fontWeight: 600,
@@ -59,9 +57,68 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
 }
-const selectStyle: React.CSSProperties = {
-  ...inputStyle,
-  appearance: 'auto',
+
+const subtleButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '6px',
+  padding: '7px 10px',
+  borderRadius: '6px',
+  border: '1px solid #3a3a3a',
+  background: '#242424',
+  color: '#d7d7d7',
+  cursor: 'pointer',
+  fontSize: '12px',
+  fontFamily: 'inherit',
+  whiteSpace: 'nowrap',
+}
+
+const iconButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 34,
+  height: 34,
+  borderRadius: '6px',
+  border: '1px solid #333',
+  background: '#202020',
+  color: '#b8b8b8',
+  cursor: 'pointer',
+}
+
+const helperTextStyle: React.CSSProperties = {
+  color: '#777',
+  fontSize: 11,
+}
+
+function uniqueModelIds(models: string[]): string[] {
+  return Array.from(
+    new Set(
+      models
+        .map((model) => model.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function normalizeModelOptions(
+  availableModels: LlmModelInfo[],
+  selectedModels: string[],
+  defaultModel: string,
+): LlmModelInfo[] {
+  const map = new Map<string, LlmModelInfo>()
+  for (const model of availableModels) {
+    const id = (model.id || model.label || '').trim()
+    if (!id) continue
+    map.set(id, { ...model, id, label: model.label || id })
+  }
+  for (const id of uniqueModelIds([...selectedModels, defaultModel])) {
+    if (!map.has(id)) {
+      map.set(id, { id, label: id })
+    }
+  }
+  return Array.from(map.values())
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
@@ -82,6 +139,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     ok: boolean
     message: string
   } | null>(null)
+  const [availableLlmModels, setAvailableLlmModels] = useState<LlmModelInfo[]>([])
+  const [loadingLlmModels, setLoadingLlmModels] = useState(false)
+  const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
+  const autoFetchedModelsRef = useRef(false)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
@@ -90,6 +151,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setSaveError(null)
     setJimengTestResult(null)
     setLlmTestResult(null)
+    setLlmModelsMessage(null)
+    autoFetchedModelsRef.current = false
     loadSettings().catch((err: unknown) => {
       setLoadError(err instanceof Error ? err.message : String(err))
     })
@@ -102,6 +165,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }, [settings])
 
+  useEffect(() => {
+    if (!open || !settings || autoFetchedModelsRef.current) return
+    if (!settings.llmBaseUrl.trim() || !settings.llmApiKey.trim()) return
+    autoFetchedModelsRef.current = true
+    void refreshLlmModels(settings, { silent: true })
+  }, [open, settings])
+
   if (!open) return null
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -112,7 +182,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setSubmitting(true)
     setSaveError(null)
     try {
-      await saveSettings(form)
+      const cleanedModels = uniqueModelIds([
+        ...(form.llmModels ?? []),
+        form.llmModel,
+      ])
+      const nextForm = {
+        ...form,
+        llmModel: form.llmModel.trim() || cleanedModels[0] || DEFAULT_SETTINGS.llmModel,
+        llmModels: cleanedModels.length > 0 ? cleanedModels : [DEFAULT_SETTINGS.llmModel],
+      }
+      await saveSettings(nextForm)
       onClose()
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -164,6 +243,47 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }
 
+  async function refreshLlmModels(
+    target: Partial<Settings> = form,
+    opts?: { silent?: boolean },
+  ) {
+    setLoadingLlmModels(true)
+    if (!opts?.silent) setLlmModelsMessage(null)
+    try {
+      const models = await listLlmModelsForSettings(target)
+      setAvailableLlmModels(models)
+      if (!opts?.silent) {
+        setLlmModelsMessage(`已拉取 ${models.length} 个模型，可从下方添加常用项`)
+      }
+    } catch (err: unknown) {
+      setLlmModelsMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingLlmModels(false)
+    }
+  }
+
+  const addLlmModelRow = () => {
+    const used = new Set(form.llmModels ?? [])
+    const next = availableLlmModels.find((model) => !used.has(model.id))?.id ?? ''
+    update('llmModels', [...(form.llmModels ?? []), next])
+  }
+
+  const updateLlmModelRow = (index: number, modelId: string) => {
+    const next = [...(form.llmModels ?? [])]
+    next[index] = modelId
+    update('llmModels', uniqueModelIds(next))
+    if (!form.llmModel.trim()) update('llmModel', modelId)
+  }
+
+  const removeLlmModelRow = (index: number) => {
+    const next = (form.llmModels ?? []).filter((_, itemIndex) => itemIndex !== index)
+    const cleaned = uniqueModelIds(next)
+    update('llmModels', cleaned)
+    if (form.llmModel && !cleaned.includes(form.llmModel)) {
+      update('llmModel', cleaned[0] ?? '')
+    }
+  }
+
   const renderTestResult = (result: { ok: boolean; message: string } | null) => {
     if (!result) return null
     return (
@@ -188,8 +308,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     )
   }
 
+  const llmModelOptions = normalizeModelOptions(
+    availableLlmModels,
+    form.llmModels ?? [],
+    form.llmModel,
+  )
+  const selectedLlmModels = form.llmModels ?? []
+  const defaultModelOptions = uniqueModelIds([
+    ...selectedLlmModels,
+    form.llmModel,
+  ])
+
   return (
     <div
+      className="settings-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -202,13 +334,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       onClick={handleCancel}
     >
       <div
+        className="settings-modal-content"
         style={{
           background: '#1a1a1a',
           color: '#e8e8e8',
           borderRadius: '10px',
-          width: '640px',
+          width: '760px',
           maxWidth: 'calc(100vw - 32px)',
-          maxHeight: 'calc(100vh - 64px)',
+          maxHeight: 'min(680px, calc(100vh - 64px))',
           overflow: 'auto',
           boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
           border: '1px solid #2a2a2a',
@@ -269,7 +402,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           )}
 
-          {/* JimengCli_api */}
+          {/* Dreamina CLI */}
           <section style={sectionStyle}>
             <div
               style={{
@@ -279,7 +412,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 alignItems: 'center',
               }}
             >
-              <span>JimengCli_api 服务</span>
+              <span>即梦官方 CLI</span>
               <button
                 type="button"
                 onClick={handleTestJimeng}
@@ -294,53 +427,24 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   fontSize: '12px',
                 }}
               >
-                {testingJimeng ? '测试中...' : '测试连接'}
+                {testingJimeng ? '检测中...' : '检测 CLI'}
               </button>
             </div>
             {renderTestResult(jimengTestResult)}
-            <div style={gridStyle}>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-jimeng-base">
-                  Base URL
-                </label>
-                <input
-                  id="set-jimeng-base"
-                  style={inputStyle}
-                  value={form.jimengBaseUrl}
-                  onChange={(e) => update('jimengBaseUrl', e.target.value)}
-                  placeholder="http://localhost:3000"
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-auth-mode">
-                  鉴权方式
-                </label>
-                <select
-                  id="set-auth-mode"
-                  style={selectStyle}
-                  value={form.authMode}
-                  onChange={(e) => update('authMode', e.target.value as AuthMode)}
-                >
-                  {AUTH_MODES.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
-                <label style={labelStyle} htmlFor="set-api-key">
-                  API Key / Cookie / Token
-                </label>
-                <input
-                  id="set-api-key"
-                  style={inputStyle}
-                  type="password"
-                  value={form.apiKey}
-                  onChange={(e) => update('apiKey', e.target.value)}
-                  placeholder="根据鉴权方式填写"
-                />
-              </div>
+            <div style={fieldStyle}>
+              <label style={labelStyle} htmlFor="set-dreamina-path">
+                dreamina 命令路径
+              </label>
+              <input
+                id="set-dreamina-path"
+                style={inputStyle}
+                value={form.dreaminaPath}
+                onChange={(e) => update('dreaminaPath', e.target.value)}
+                placeholder="dreamina 或 C:\\Users\\...\\dreamina.exe"
+              />
+              <span style={{ color: '#777', fontSize: 11 }}>
+                生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
+              </span>
             </div>
           </section>
 
@@ -386,18 +490,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   placeholder="https://api.openai.com/v1"
                 />
               </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-llm-model">
-                  默认模型
-                </label>
-                <input
-                  id="set-llm-model"
-                  style={inputStyle}
-                  value={form.llmModel}
-                  onChange={(e) => update('llmModel', e.target.value)}
-                  placeholder="gpt-4o-mini"
-                />
-              </div>
               <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
                 <label style={labelStyle} htmlFor="set-llm-key">
                   API Key
@@ -411,144 +503,132 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   placeholder="sk-..."
                 />
               </div>
+              <div style={{ ...fieldStyle, gridColumn: '1 / span 2', gap: '10px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                  }}
+                >
+                  <div>
+                    <div style={{ ...labelStyle, marginBottom: 3 }}>常用模型</div>
+                    <div style={helperTextStyle}>
+                      先从中转站拉取模型池，再用加号添加你常用的模型；保存后 Agent 和文本节点只优先显示这些模型。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    style={{
+                      ...subtleButtonStyle,
+                      opacity: loadingLlmModels ? 0.65 : 1,
+                      cursor: loadingLlmModels ? 'not-allowed' : 'pointer',
+                    }}
+                    disabled={loadingLlmModels}
+                    onClick={() => void refreshLlmModels()}
+                  >
+                    <RefreshCw size={13} className={loadingLlmModels ? 'animate-spin' : undefined} />
+                    {loadingLlmModels ? '拉取中' : '刷新模型'}
+                  </button>
+                </div>
+
+                {llmModelsMessage && (
+                  <div style={{ ...helperTextStyle, color: llmModelsMessage.includes('失败') ? '#ff9a9a' : '#8d8d8d' }}>
+                    {llmModelsMessage}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {selectedLlmModels.length === 0 && (
+                    <div
+                      style={{
+                        padding: '10px',
+                        border: '1px dashed #383838',
+                        borderRadius: '8px',
+                        color: '#777',
+                        fontSize: 12,
+                      }}
+                    >
+                      暂未添加常用模型。点击下方加号添加一栏。
+                    </div>
+                  )}
+
+                  {selectedLlmModels.map((modelId, index) => (
+                    <div
+                      key={`${modelId}-${index}`}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 34px',
+                        gap: '8px',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <select
+                        style={inputStyle}
+                        value={modelId}
+                        onChange={(e) => updateLlmModelRow(index, e.target.value)}
+                      >
+                        <option value="" disabled>
+                          选择一个模型
+                        </option>
+                        {llmModelOptions.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label || model.id}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        style={iconButtonStyle}
+                        onClick={() => removeLlmModelRow(index)}
+                        aria-label="移除常用模型"
+                        title="移除常用模型"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    style={{
+                      ...subtleButtonStyle,
+                      width: '100%',
+                      justifyContent: 'center',
+                      borderStyle: 'dashed',
+                    }}
+                    onClick={addLlmModelRow}
+                  >
+                    <Plus size={14} />
+                    添加一个常用模型
+                  </button>
+                </div>
+
+                <div style={fieldStyle}>
+                  <label style={labelStyle} htmlFor="set-llm-model">
+                    默认模型
+                  </label>
+                  <select
+                    id="set-llm-model"
+                    style={inputStyle}
+                    value={form.llmModel}
+                    onChange={(e) => update('llmModel', e.target.value)}
+                  >
+                    {defaultModelOptions.length === 0 && (
+                      <option value="">请先添加常用模型</option>
+                    )}
+                    {defaultModelOptions.map((modelId) => (
+                      <option key={modelId} value={modelId}>
+                        {modelId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
           </section>
 
-          {/* 输出 */}
-          <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>输出</div>
-            <div style={gridStyle}>
-              <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
-                <label style={labelStyle} htmlFor="set-output-dir">
-                  输出目录（相对项目根）
-                </label>
-                <input
-                  id="set-output-dir"
-                  style={inputStyle}
-                  value={form.outputDir}
-                  onChange={(e) => update('outputDir', e.target.value)}
-                  placeholder="./workspace/outputs"
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* 默认参数 */}
-          <section style={sectionLastStyle}>
-            <div style={sectionTitleStyle}>默认参数</div>
-            <div style={gridStyle}>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-default-model">
-                  图片模型
-                </label>
-                <input
-                  id="set-default-model"
-                  style={inputStyle}
-                  value={form.defaultModel}
-                  onChange={(e) => update('defaultModel', e.target.value)}
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-default-size">
-                  图片尺寸
-                </label>
-                <input
-                  id="set-default-size"
-                  style={inputStyle}
-                  value={form.defaultSize}
-                  onChange={(e) => update('defaultSize', e.target.value)}
-                  placeholder="1024x1024"
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-model">
-                  视频模型
-                </label>
-                <input
-                  id="set-video-model"
-                  style={inputStyle}
-                  value={form.defaultVideoModel}
-                  onChange={(e) => update('defaultVideoModel', e.target.value)}
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-ratio">
-                  视频比例
-                </label>
-                <input
-                  id="set-video-ratio"
-                  style={inputStyle}
-                  value={form.defaultVideoAspectRatio}
-                  onChange={(e) => update('defaultVideoAspectRatio', e.target.value)}
-                  placeholder="16:9"
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-res">
-                  视频分辨率
-                </label>
-                <input
-                  id="set-video-res"
-                  style={inputStyle}
-                  value={form.defaultVideoResolution}
-                  onChange={(e) => update('defaultVideoResolution', e.target.value)}
-                  placeholder="720P"
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-quality">
-                  视频清晰度
-                </label>
-                <input
-                  id="set-video-quality"
-                  style={inputStyle}
-                  value={form.defaultVideoQuality}
-                  onChange={(e) => update('defaultVideoQuality', e.target.value)}
-                  placeholder="standard"
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-duration">
-                  视频时长（秒）
-                </label>
-                <input
-                  id="set-video-duration"
-                  style={inputStyle}
-                  type="number"
-                  min={1}
-                  value={form.defaultVideoDurationSeconds}
-                  onChange={(e) =>
-                    update('defaultVideoDurationSeconds', Number(e.target.value) || 0)
-                  }
-                />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-count">
-                  视频数量
-                </label>
-                <input
-                  id="set-video-count"
-                  style={inputStyle}
-                  type="number"
-                  min={1}
-                  value={form.defaultVideoCount}
-                  onChange={(e) => update('defaultVideoCount', Number(e.target.value) || 0)}
-                />
-              </div>
-              <div style={{ ...fieldStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-                <input
-                  id="set-video-audio"
-                  type="checkbox"
-                  checked={form.defaultVideoGenerateAudio}
-                  onChange={(e) => update('defaultVideoGenerateAudio', e.target.checked)}
-                  style={{ width: 'auto' }}
-                />
-                <label style={{ ...labelStyle, cursor: 'pointer' }} htmlFor="set-video-audio">
-                  视频默认生成音频
-                </label>
-              </div>
-            </div>
-          </section>
         </div>
 
         {/* Footer */}

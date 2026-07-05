@@ -6,6 +6,8 @@ import type {
   LlmChatRequest,
   LlmChatResponse,
   LlmModelInfo,
+  LlmTranscribeRequest,
+  LlmTranscribeResponse,
   TextNodeRunRequest,
 } from '@jimeng-flow/shared/textNode'
 
@@ -43,6 +45,29 @@ export async function chatWithLlm(
     throw new Error(message)
   }
   return (await res.json()) as LlmChatResponse
+}
+
+/** POST /api/llm/transcriptions - 音频转文字 */
+export async function transcribeAudio(
+  req: LlmTranscribeRequest,
+): Promise<LlmTranscribeResponse> {
+  const res = await fetch('/api/llm/transcriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let message = `语音转文字失败：${res.status} ${res.statusText}`
+    try {
+      const parsed = JSON.parse(text) as { message?: string }
+      if (parsed.message) message = parsed.message
+    } catch {
+      // 非 JSON 错误体，保留默认 message
+    }
+    throw new Error(message)
+  }
+  return (await res.json()) as LlmTranscribeResponse
 }
 
 /** POST /api/text-nodes/:id/run - 关联文本节点的 LLM 调用（响应带 nodeId） */
