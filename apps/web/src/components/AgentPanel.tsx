@@ -248,6 +248,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [listening, setListening] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [voiceAutoSend, setVoiceAutoSend] = useState(() => {
+    return typeof window !== 'undefined' && localStorage.getItem('agentVoiceAutoSend') === 'true'
+  })
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -1260,7 +1263,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               mimeType,
               filename: 'voice.webm',
             })
-            appendVoiceText(result.text)
+            const text = result.text.trim()
+            if (text) {
+              const newDraft = draft.trim() ? `${draft} ${text}` : text
+              setDraft(newDraft)
+              if (voiceAutoSend) {
+                setTimeout(() => submit(newDraft), 120)
+              }
+            }
             setVoiceStatus('')
           } catch (err) {
             setVoiceStatus(err instanceof Error ? err.message : '语音转文字失败')
@@ -1401,8 +1411,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
   }
 
-  const submit = async () => {
-    const userIdea = draft.trim()
+  const submit = async (overrideDraft?: string) => {
+    const userIdea = (overrideDraft ?? draft).trim()
     if (!userIdea || loading) return
 
     const contextNodeIds = currentContextNodeIds()
@@ -2380,6 +2390,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
 
           <span className="voice-status">{voiceStatus}</span>
+          <button
+            type="button"
+            className={`agent-round-btn ${voiceAutoSend ? 'active' : ''}`}
+            onClick={() => {
+              const next = !voiceAutoSend
+              setVoiceAutoSend(next)
+              localStorage.setItem('agentVoiceAutoSend', String(next))
+            }}
+            title={voiceAutoSend ? '关闭语音自动发送' : '开启语音自动发送'}
+            style={{ opacity: voiceAutoSend ? 1 : 0.5 }}
+          >
+            <Sparkles size={13} />
+          </button>
           <button
             type="button"
             className={`agent-round-btn ${listening ? 'active' : ''}`}
