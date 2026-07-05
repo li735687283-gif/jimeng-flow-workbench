@@ -22,6 +22,69 @@ export const AGENT_ROLES: AgentRoleInfo[] = [
   { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', icon: '✂️', color: '#10b981' },
 ]
 
+/** Agent 创作模板 */
+export interface AgentTemplate {
+  id: string
+  name: string
+  description: string
+  icon: string
+  prompt: string
+  /** 推荐角色模式 */
+  defaultRole?: AgentRole
+}
+
+/** 预设创作模板 */
+export const AGENT_TEMPLATES: AgentTemplate[] = [
+  {
+    id: 'product_poster',
+    name: '产品海报',
+    description: '生成产品宣传海报，突出核心卖点，现代简约风格',
+    icon: '📢',
+    prompt: '帮我设计一个产品宣传海报，需要突出产品的核心卖点，使用现代简约风格，画面干净、有冲击力，适合商业推广',
+    defaultRole: 'visual',
+  },
+  {
+    id: 'storyboard',
+    name: '故事分镜',
+    description: '写短视频脚本并拆分4-6个镜头分镜',
+    icon: '🎬',
+    prompt: '帮我写一个30秒的短视频脚本，并拆分成4-6个镜头分镜，每个镜头包含详细的画面描述和提示词',
+    defaultRole: 'director',
+  },
+  {
+    id: 'character_design',
+    name: '角色设计',
+    description: '设计独特角色形象，含外貌、服装、性格标签',
+    icon: '👤',
+    prompt: '帮我设计一个独特的角色形象，包括外貌特征、服装搭配、性格标签和背景故事，生成角色卡',
+    defaultRole: 'visual',
+  },
+  {
+    id: 'social_cover',
+    name: '社交封面',
+    description: '生成社交媒体封面图，适合小红书/Instagram',
+    icon: '📱',
+    prompt: '帮我生成一张社交媒体封面图，适合放在小红书或Instagram，风格时尚、色彩鲜明、有吸引力',
+    defaultRole: 'visual',
+  },
+  {
+    id: 'product_video',
+    name: '产品视频',
+    description: '生成产品展示短视频，含动态镜头和转场',
+    icon: '🎥',
+    prompt: '帮我做一个产品展示短视频，包含动态镜头、产品细节特写和流畅的转场效果，时长5-10秒',
+    defaultRole: 'editor',
+  },
+  {
+    id: 'scene_concept',
+    name: '场景概念',
+    description: '生成场景概念图，含光影、构图和氛围设计',
+    icon: '🏞️',
+    prompt: '帮我生成一个场景概念图，包含精心设计的光影效果、构图布局和氛围营造，适合作为电影或游戏场景参考',
+    defaultRole: 'visual',
+  },
+]
+
 /**
  * Agent 对话消息数据模型。
  * 参考 PRD 11.4。

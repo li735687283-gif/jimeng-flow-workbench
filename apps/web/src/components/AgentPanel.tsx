@@ -19,7 +19,7 @@ import {
   Film,
 } from 'lucide-react'
 import type { PromptOptimizeRequest, AgentMessage, StoryboardData, AgentRole } from '@jimeng-flow/shared/agentMessage'
-import { AGENT_ROLES } from '@jimeng-flow/shared/agentMessage'
+import { AGENT_ROLES, AGENT_TEMPLATES } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
   IMAGE_MODELS,
@@ -213,6 +213,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
+  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<string[]>(FALLBACK_MODELS)
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
@@ -337,6 +338,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [rolePickerOpen])
+
+  useEffect(() => {
+    if (!templatePickerOpen) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.agent-template-dropdown') && !target.closest('.agent-template-btn')) {
+        setTemplatePickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [templatePickerOpen])
 
   const mentionOptions = useMemo(() => {
     const query = (mentionQuery ?? '').toLowerCase()
@@ -2411,6 +2424,138 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           >
             {listening ? <MicOff size={15} /> : <Mic size={15} />}
           </button>
+          <button
+            type="button"
+            className={`agent-round-btn ${templatePickerOpen ? 'active' : ''}`}
+            onClick={() => setTemplatePickerOpen((open) => !open)}
+            title="创作模板"
+          >
+            <Wand2 size={14} />
+          </button>
+          {templatePickerOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 8px)',
+                right: 0,
+                zIndex: 50,
+                width: 260,
+                background: '#1e293b',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 10,
+                padding: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              }}
+            >
+              <div style={{ fontSize: 11, color: '#94a3b8', padding: '4px 8px 8px', fontWeight: 600 }}>
+                创作模板
+              </div>
+              {AGENT_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    setTemplatePickerOpen(false)
+                    if (t.defaultRole) {
+                      setRole(t.defaultRole)
+                    }
+                    setDraft(t.prompt)
+                    setTimeout(() => submit(t.prompt), 80)
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#e2e8f0',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
+                    <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className={`agent-round-btn agent-template-btn ${templatePickerOpen ? 'active' : ''}`}
+              onClick={() => setTemplatePickerOpen((open) => !open)}
+              title="创作模板"
+            >
+              <Wand2 size={14} />
+            </button>
+            {templatePickerOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 8px)',
+                  right: 0,
+                  zIndex: 50,
+                  width: 260,
+                  background: '#1e293b',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 10,
+                  padding: 8,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                }}
+              >
+                <div style={{ fontSize: 11, color: '#94a3b8', padding: '4px 8px 8px', fontWeight: 600 }}>
+                  创作模板
+                </div>
+                {AGENT_TEMPLATES.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTemplatePickerOpen(false)
+                      if (t.defaultRole) {
+                        setRole(t.defaultRole)
+                      }
+                      setDraft(t.prompt)
+                      setTimeout(() => submit(t.prompt), 80)
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#e2e8f0',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
+                      <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
             className="agent-send-btn"
