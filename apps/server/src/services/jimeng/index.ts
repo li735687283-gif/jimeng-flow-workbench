@@ -462,6 +462,28 @@ export async function generateVideo(
   return submitAndCollect(args, 'video', params.timeoutMs ?? 600_000)
 }
 
+export interface RemoveBgParams {
+  inputImage: string
+  timeoutMs?: number
+}
+
+export async function removeBackground(
+  params: RemoveBgParams,
+): Promise<GenerationResult[]> {
+  const inputPaths = await resolveInputPaths([params.inputImage])
+  if (inputPaths.length === 0) {
+    throw new JimengError('INVALID_INPUT', '缺少输入图片', 400)
+  }
+  const outputDir = await mkdtemp(join(tmpdir(), 'dreamina-rembg-'))
+  const outputPath = join(outputDir, 'output.png')
+  try {
+    await execFileAsync('rembg', ['i', inputPaths[0], outputPath], { timeout: params.timeoutMs ?? 60_000 })
+    return [{ localPath: outputPath }]
+  } catch (err) {
+    throw new JimengError('JIMENG_BAD_RESPONSE', `rembg 执行失败：${err instanceof Error ? err.message : String(err)}`, 502)
+  }
+}
+
 /** jimeng 连接测试选项 */
 export interface JimengTestOptions {
   jimengBaseUrl?: string

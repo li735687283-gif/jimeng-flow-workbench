@@ -3065,3 +3065,445 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* =========================================
+   新增 Agent 面板样式
+   ========================================= */
+
+/* 1. 思考过程折叠区域 */
+
+/* 思考过程折叠头 */
+.agent-thinking-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: #9b9ea7;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.agent-thinking-header:hover {
+  background: rgba(255,255,255,0.05);
+  color: #d7d8de;
+}
+.agent-thinking-header svg {
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.agent-thinking-header.expanded svg {
+  transform: rotate(90deg);
+}
+
+/* 思考过程展开内容 */
+.agent-thinking-content {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: #8a8c94;
+  font-size: 11px;
+  line-height: 1.6;
+  animation: bubble-in 0.18s ease both;
+}
+
+/* 2. 技能加载状态行 */
+
+/* 技能加载状态容器 */
+.agent-skill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 6px 0;
+  color: #9b9ea7;
+  font-size: 12px;
+}
+
+/* 状态圆点 */
+.agent-skill-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agent-skill-status-dot.done {
+  background: #10b981;
+}
+.agent-skill-status-dot.running {
+  background: #f59e0b;
+  animation: skill-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+/* 状态文字 */
+.agent-skill-status-label {
+  color: #b9bbc3;
+}
+.agent-skill-status-action {
+  margin-left: 4px;
+  color: #d7d8de;
+  font-weight: 500;
+}
+.agent-skill-status-state {
+  margin-left: auto;
+  color: #858892;
+  font-size: 11px;
+}
+
+/* 3. 视频生成确认卡片 */
+
+/* 视频确认卡片 - 复用图片确认卡片样式 */
+.agent-video-request {
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.045);
+}
+
+/* 视频参数横排胶囊标签 */
+.agent-video-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-video-param-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.08);
+  color: #cfd0d5;
+  font-size: 11px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.agent-video-param-tag strong {
+  color: #9b9ea7;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.agent-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #d7d8de;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.agent-msg-action-btn:hover {
+  background: rgba(255,255,255,0.12);
+  transform: translateY(-1px);
+}
+
+/* 错误区域操作按钮 */
+.agent-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* 视频描述文本 */
+.agent-video-desc {
+  margin: 8px 0 10px !important;
+  color: #a8abb4;
+  font-size: 12px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 4. 视频字段控件 */
+
+/* 复用 agent-image-fields 的样式 */
+.agent-video-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+}
+.agent-video-fields label,
+.agent-video-count-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.agent-video-fields label span,
+.agent-video-count-field > span {
+  color: #858892;
+  font-size: 10px;
+}
+.agent-video-fields select {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 9px;
+  background: #1f2026;
+  color: #eeeeef;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.agent-video-count-field div {
+  display: flex;
+  gap: 6px;
+}
+.agent-video-count-field button {
+  width: 34px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: #1f2026;
+  color: #cfd0d5;
+  font-family: inherit;
+  cursor: pointer;
+}
+.agent-video-count-field button.active {
+  background: #eeeeef;
+  color: #17181c;
+}
+
+/* =========================================
+   分镜/故事板卡片样式
+   ========================================= */
+
+.agent-storyboard-card {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.045);
+  animation: bubble-in var(--motion-base) var(--ease-out-soft) both;
+}
+
+.agent-storyboard-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f4f4f5;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agent-storyboard-title svg {
+  color: #a8a8a8;
+  flex-shrink: 0;
+}
+
+.agent-storyboard-style {
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9b9ea7;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.agent-storyboard-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.agent-storyboard-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.agent-shot-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #d7d8de;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.agent-shot-desc {
+  color: #b9bbc3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-shot-prompt {
+  color: #858892;
+  font-size: 11px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.agent-storyboard-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.agent-storyboard-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: none;
+  background: #eeeeef;
+  color: #17181c;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.agent-storyboard-actions button:hover {
+  background: #fff;
+  transform: translateY(-1px);
+}
+
+/* =========================================
+   角色/风格一致性锁定
+   ========================================= */
+
+.agent-reference-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.agent-reference-lock button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: #6ee7b7;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* ===== 生成结果预览画廊 ===== */
+.agent-generation-gallery {
+  margin: 12px 16px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.agent-gallery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.agent-gallery-header > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.agent-gallery-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.agent-gallery-clear-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+}
+
+.agent-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.agent-gallery-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.agent-gallery-item:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.agent-gallery-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.agent-gallery-item-type {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #e2e8f0;
+  font-size: 10px;
+}
+

@@ -7,7 +7,23 @@ import { create } from 'zustand'
 import type {
   PromptOptimizeResponse,
   AgentMessage,
+  AgentRole,
 } from '@jimeng-flow/shared/agentMessage'
+
+interface AgentConversationContext {
+  /** 最近一次生成操作的类型 */
+  lastActionType?: 'image' | 'video' | 'text'
+  /** 最近一次生成的节点 id */
+  lastGeneratedNodeIds?: string[]
+  /** 最近一次生成的 assetIds */
+  lastGeneratedAssetIds?: string[]
+  /** 最近一次使用的提示词 */
+  lastPrompt?: string
+  /** 最近一次使用的参数 */
+  lastParams?: Record<string, unknown>
+  /** 已锁定的参考图 assetId（用于风格一致性） */
+  referenceAssetId?: string
+}
 
 interface AgentStore {
   /** 对话消息列表（user 与 assistant 交替） */
@@ -24,7 +40,14 @@ interface AgentStore {
     contextNodeIds: string[]
     selectedNodeId?: string
     targetPromptNodeId?: string
+    role?: AgentRole
   }
+
+  /** 当前 Agent 角色模式 */
+  role: AgentRole
+
+  /** 同一会话内的对话上下文记忆（用于引用"那张图"、"刚才的"等） */
+  conversationContext: AgentConversationContext
 
   /** 提交 Prompt 优化请求（不实际调用 API，仅记录请求参数；API 调用在组件中完成） */
   submitPrompt: (params: {
@@ -32,6 +55,7 @@ interface AgentStore {
     contextNodeIds?: string[]
     selectedNodeId?: string
     targetPromptNodeId?: string
+    role?: AgentRole
   }) => AgentMessage
 
   /** 追加 assistant 消息并保存响应 */
@@ -43,8 +67,24 @@ interface AgentStore {
   /** 设置错误 */
   setError: (error?: string) => void
 
-  /** 重置全部状态 */
-  reset: () => void
+  /** 设置角色 */
+  setRole: (role: AgentRole) => void
+  /** 更新同一会话内的上下文记忆 */
+  setConversationContext: (ctx: Partial<AgentConversationContext>) => void
+
+  /** 最近的生成结果预览（用于 Agent 面板画廊展示） */
+  generationResults: Array<{
+    id: string
+    assetId?: string
+    url?: string
+    type: 'image' | 'video'
+    prompt?: string
+    timestamp: string
+  }>
+  /** 添加生成结果到画廊 */
+  addGenerationResult: (result: { assetId?: string; url?: string; type: 'image' | 'video'; prompt?: string }) => void
+  /** 清除生成结果 */
+  clearGenerationResults: () => void
 }
 
 let msgSeq = 0
@@ -53,14 +93,17 @@ function nextId(): string {
   return `agent_msg_${Date.now()}_${msgSeq}`
 }
 
-export const useAgentStore = create<AgentStore>((set) => ({
+export const useAgentStore = create<AgentStore>((set, get) => ({
   messages: [],
   loading: false,
   error: undefined,
   lastResponse: undefined,
   lastRequest: undefined,
+  role: (typeof window !== 'undefined' && localStorage.getItem('agentRole') as AgentRole) || 'general',
+  conversationContext: {},
 
-  submitPrompt: ({ userIdea, contextNodeIds, selectedNodeId, targetPromptNodeId }) => {
+  submitPrompt: ({ userIdea, contextNodeIds, selectedNodeId, targetPromptNodeId, role }) => {
+    const currentRole = role || get().role
     const userMsg: AgentMessage = {
       id: nextId(),
       role: 'user',
@@ -78,6 +121,7 @@ export const useAgentStore = create<AgentStore>((set) => ({
         contextNodeIds: contextNodeIds ?? [],
         selectedNodeId,
         targetPromptNodeId,
+        role: currentRole,
       },
     }))
     return userMsg
@@ -88,6 +132,10 @@ export const useAgentStore = create<AgentStore>((set) => ({
       id: nextId(),
       role: 'assistant',
       content: response.reasoning,
+      thinking: response.thinking,
+      intent: response.intent,
+      suggestedParams: response.suggestedParams,
+      storyboard: response.storyboard,
       contextNodeIds: response.usedContextNodeIds,
       optimizedPrompt: response.optimizedPrompt,
       proposedActions: response.proposedActions,
@@ -105,12 +153,45 @@ export const useAgentStore = create<AgentStore>((set) => ({
 
   setError: (error) => set({ loading: false, error }),
 
+  setRole: (role) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('agentRole', role)
+    }
+    set({ role })
+  },
+
+  setConversationContext: (ctx) =>
+    set((state) => ({
+      conversationContext: { ...state.conversationContext, ...ctx },
+    })),
+
+  generationResults: [],
+
+  addGenerationResult: (result) =>
+    set((state) => ({
+      generationResults: [
+        ...state.generationResults,
+        {
+          id: `gen_result_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          ...result,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    })),
+
+  clearGenerationResults: () => set({ generationResults: [] }),
+
   reset: () =>
-    set({
+    set((state) => ({
       messages: [],
       loading: false,
       error: undefined,
       lastResponse: undefined,
       lastRequest: undefined,
-    }),
+      conversationContext: {},
+      generationResults: [],
+      // role 不被重置，保持用户的选择
+      role: state.role,
+    })),
 }))
+
