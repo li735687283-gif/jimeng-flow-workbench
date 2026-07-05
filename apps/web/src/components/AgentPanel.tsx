@@ -6,6 +6,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  ChevronRight,
   Image as ImageIcon,
   Loader2,
   Mic,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Wand2,
   X,
+  Film,
 } from 'lucide-react'
 import type { PromptOptimizeRequest } from '@jimeng-flow/shared/agentMessage'
 import {
@@ -23,6 +25,16 @@ import {
   type GenerationRequest,
   type GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
+import {
+  VIDEO_MODELS,
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_RESOLUTIONS,
+  VIDEO_DURATIONS,
+  VIDEO_COUNTS,
+  type VideoGenerationRequest,
+  type VideoAspectRatio,
+  type VideoResolution,
+} from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
 import { createGeneration } from '../api/generations'
 import { listLlmModels, transcribeAudio } from '../api/llm'
@@ -98,6 +110,22 @@ interface ImageGenerationParams {
   count: number
 }
 
+interface PendingVideoRequest {
+  id: string
+  prompt: string
+  contextNodeIds: string[]
+  sourceImageNodeIds?: string[]
+}
+
+interface VideoGenerationParams {
+  model: string
+  aspectRatio: VideoAspectRatio
+  resolution: VideoResolution
+  durationSeconds: number
+  count: number
+  quality: 'standard' | 'high'
+}
+
 const AGENT_SKILLS: AgentSkill[] = [
   {
     id: 'image-retouch',
@@ -149,12 +177,6 @@ function getMentionQuery(value: string): string | null {
   return match ? match[1] : null
 }
 
-function isImageGenerationIntent(value: string): boolean {
-  const text = value.trim()
-  if (!text) return false
-  return /(?:生成|做|画|创建|制作|出)(?:一张|一个|些|张)?[^。！？\n]{0,16}(?:图|图片|海报|插画|头像|封面|视觉|素材)/.test(text)
-}
-
 export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const nodes = useCanvasStore((s) => s.nodes)
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId)
@@ -190,6 +212,20 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       count: 1,
     })
   const [imageGenerationStatus, setImageGenerationStatus] = useState('')
+  const [pendingVideoRequest, setPendingVideoRequest] =
+    useState<PendingVideoRequest | null>(null)
+  const [videoGenerationParams, setVideoGenerationParams] =
+    useState<VideoGenerationParams>({
+      model: VIDEO_MODELS[0].id,
+      aspectRatio: '16:9',
+      resolution: '720P',
+      durationSeconds: 5,
+      count: 1,
+      quality: 'standard',
+    })
+  const [videoGenerationStatus, setVideoGenerationStatus] = useState('')
+  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'done'>('idle')
+  const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [listening, setListening] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
@@ -550,6 +586,21 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       } as unknown as Partial<BaseNodeData>)
       setPendingImageRequest(null)
       setImageGenerationStatus('已生成并写入画布')
+
+      // 如果 intent 是 image_then_video，图片生成完成后自动触发视频生成
+      const lastIntent = useAgentStore.getState().lastResponse?.intent
+      if (lastIntent === 'image_then_video') {
+        setTimeout(() => {
+          setPendingVideoRequest({
+            id: `video_auto_${Date.now()}`,
+            prompt: pendingImageRequest.prompt,
+            contextNodeIds: pendingImageRequest.contextNodeIds,
+            sourceImageNodeIds: outputAssetIds,
+          })
+          setVideoGenerationStatus('')
+          setSkillStep('video')
+        }, 400)
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       generateStore.setError(generateNodeId, message)
@@ -559,6 +610,122 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
       setImageGenerationStatus(message)
+    }
+  }
+
+  const startAgentVideoGeneration = async () => {
+    if (!pendingVideoRequest) return
+    if (!isJimengConfigured) {
+      setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
+      return
+    }
+
+    const contextNodes = pendingVideoRequest.contextNodeIds
+      .map((id) => nodes.find((node) => node.id === id))
+      .filter((node): node is (typeof nodes)[number] => !!node)
+    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
+    const inputImageAssetIds = imageContextNodes
+      .map((node) => (node.data as { assetId?: string }).assetId)
+      .filter((assetId): assetId is string => !!assetId)
+    // 如果有自动关联的图片结果，也加入参考
+    if (pendingVideoRequest.sourceImageNodeIds) {
+      pendingVideoRequest.sourceImageNodeIds.forEach((id) => {
+        const n = nodes.find((node) => node.id === id)
+        if (n && n.type === 'image') {
+          const assetId = (n.data as { assetId?: string }).assetId
+          if (assetId && !inputImageAssetIds.includes(assetId)) {
+            inputImageAssetIds.push(assetId)
+          }
+        }
+      })
+    }
+
+    const skillHint =
+      activeSkills.length > 0
+        ? `\n\n技能要求：${activeSkills
+            .map((skill) => `${skill.label}：${skill.instruction}`)
+            .join('；')}`
+        : ''
+    const prompt = `${pendingVideoRequest.prompt}${skillHint}`
+
+    const videoNodeId = addNode('video', getCanvasDropPosition())
+    if (!videoNodeId) return
+
+    imageContextNodes.forEach((node) => {
+      onConnect({
+        source: node.id,
+        target: videoNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      })
+    })
+
+    const request: VideoGenerationRequest = {
+      flowId: 'local',
+      nodeId: videoNodeId,
+      mediaType: 'video',
+      mode: inputImageAssetIds.length > 0 ? 'image_to_video' : 'text_to_video',
+      prompt,
+      inputImages: inputImageAssetIds,
+      model: videoGenerationParams.model,
+      aspectRatio: videoGenerationParams.aspectRatio,
+      resolution: videoGenerationParams.resolution,
+      quality: videoGenerationParams.quality,
+      durationSeconds: videoGenerationParams.durationSeconds,
+      count: videoGenerationParams.count,
+      generateAudio: true,
+    }
+
+    const generateStore = useGenerateStore.getState()
+    generateStore.setLastRequest(videoNodeId, request)
+    generateStore.setStatus(videoNodeId, 'queued')
+    generateStore.setError(videoNodeId, undefined)
+    updateNodeData(videoNodeId, {
+      prompt,
+      model: videoGenerationParams.model,
+      aspectRatio: videoGenerationParams.aspectRatio,
+      resolution: videoGenerationParams.resolution,
+      quality: videoGenerationParams.quality,
+      durationSeconds: videoGenerationParams.durationSeconds,
+      count: videoGenerationParams.count,
+      mode: request.mode,
+      inputImageAssetIds,
+      status: 'queued',
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+
+    setVideoGenerationStatus('已在画布创建视频节点，正在生成...')
+
+    try {
+      const response = await createGeneration(request)
+      generateStore.setGenerationId(videoNodeId, response.id)
+      const results = response.results ?? []
+      const assetIds = results
+        .map((result) => result.assetId)
+        .filter((assetId): assetId is string => !!assetId)
+
+      generateStore.setStatus(videoNodeId, response.status)
+      if (response.error) generateStore.setError(videoNodeId, response.error)
+      updateNodeData(videoNodeId, {
+        status: response.status,
+        error: response.error,
+        assetIds,
+        generationId: response.id,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setPendingVideoRequest(null)
+      setVideoGenerationStatus('已生成并写入画布')
+      setSkillStep('done')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      generateStore.setError(videoNodeId, message)
+      updateNodeData(videoNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setVideoGenerationStatus(message)
     }
   }
 
@@ -703,17 +870,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     setDraft('')
     setMentionedNodeIds([])
     setVoiceStatus('')
+    setSkillStep('idle')
 
-    if (isImageGenerationIntent(userIdea)) {
-      setPendingImageRequest({
-        id: `image_intent_${Date.now()}`,
-        prompt: userIdea,
-        contextNodeIds,
-      })
-      setImageGenerationStatus('')
-      return
-    }
-
+    // 先走 LLM 优化，由 LLM 判断意图
     const request: PromptOptimizeRequest = {
       userIdea: applySkillsToUserIdea(userIdea),
       contextNodeIds,
@@ -723,11 +882,44 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     setLoading(true)
     setError(undefined)
+    setSkillStep('loading')
 
     try {
       const response = await optimizePrompt(request)
       appendAssistant(response)
+
+      // 根据后端返回的 intent 决定加载哪种技能
+      const intent = response.intent
+      if (intent === 'image' || intent === 'image_then_video') {
+        setSkillStep('image')
+        setPendingImageRequest({
+          id: `image_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || userIdea,
+          contextNodeIds,
+        })
+        setImageGenerationStatus('')
+        // 如果是 image_then_video，在图片生成完成后会自动触发视频
+        if (intent === 'image_then_video') {
+          // 延迟显示技能切换状态
+          setTimeout(() => setSkillStep('video'), 600)
+        } else {
+          setTimeout(() => setSkillStep('done'), 600)
+        }
+      } else if (intent === 'video') {
+        setSkillStep('video')
+        setPendingVideoRequest({
+          id: `video_intent_${Date.now()}`,
+          prompt: response.optimizedPrompt || userIdea,
+          contextNodeIds,
+        })
+        setVideoGenerationStatus('')
+        setTimeout(() => setSkillStep('done'), 600)
+      } else {
+        // text 纯文本对话，不需要生成
+        setSkillStep('done')
+      }
     } catch (err) {
+      setSkillStep('idle')
       setError(err instanceof Error ? err.message : String(err))
     }
   }
@@ -787,6 +979,31 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             className={`agent-bubble ${message.role === 'user' ? 'user' : 'assistant'}`}
           >
             <p>{message.content}</p>
+            {message.role === 'assistant' && message.thinking && (
+              <div>
+                <button
+                  type="button"
+                  className={`agent-thinking-header ${expandedThinkingIds.has(message.id) ? 'expanded' : ''}`}
+                  onClick={() => {
+                    setExpandedThinkingIds((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(message.id)) {
+                        next.delete(message.id)
+                      } else {
+                        next.add(message.id)
+                      }
+                      return next
+                    })
+                  }}
+                >
+                  <ChevronRight size={12} />
+                  思考过程
+                </button>
+                {expandedThinkingIds.has(message.id) && (
+                  <div className="agent-thinking-content">{message.thinking}</div>
+                )}
+              </div>
+            )}
             {message.optimizedPrompt && (
               <div className="agent-result-card">
                 <span>优化后的 Prompt</span>
@@ -800,6 +1017,29 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-bubble assistant compact">
             <Loader2 size={14} className="animate-spin" />
             正在思考...
+          </div>
+        )}
+
+        {/* 技能加载状态 */}
+        {skillStep !== 'idle' && skillStep !== 'done' && (
+          <div className="agent-skill-status">
+            <span className="agent-skill-status-dot done" />
+            <span className="agent-skill-status-label">加载技能</span>
+            <span className="agent-skill-status-state">完成</span>
+          </div>
+        )}
+        {skillStep === 'image' && (
+          <div className="agent-skill-status">
+            <span className="agent-skill-status-dot running" />
+            <span className="agent-skill-status-label">生成图片</span>
+            <span className="agent-skill-status-state">执行中...</span>
+          </div>
+        )}
+        {skillStep === 'video' && (
+          <div className="agent-skill-status">
+            <span className="agent-skill-status-dot running" />
+            <span className="agent-skill-status-label">生成视频</span>
+            <span className="agent-skill-status-state">执行中...</span>
           </div>
         )}
 
@@ -900,6 +1140,163 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 type="button"
                 className="agent-card-primary"
                 onClick={() => void startAgentImageGeneration()}
+                disabled={!isJimengConfigured}
+                title={!isJimengConfigured ? '未配置 dreamina CLI' : '生成到画布'}
+              >
+                生成到画布
+              </button>
+            </div>
+          </div>
+        )}
+
+        {pendingVideoRequest && (
+          <div className="agent-bubble assistant agent-video-request">
+            <div className="agent-card-title">
+              <Film size={14} />
+              <span>视频生成确认</span>
+            </div>
+            <p className="agent-video-desc">
+              {pendingVideoRequest.prompt}
+            </p>
+
+            <div className="agent-video-params">
+              <span className="agent-video-param-tag">
+                <strong>模型</strong> {VIDEO_MODELS.find((m) => m.id === videoGenerationParams.model)?.label ?? videoGenerationParams.model}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>比例</strong> {videoGenerationParams.aspectRatio}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>分辨率</strong> {videoGenerationParams.resolution}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>时长</strong> {videoGenerationParams.durationSeconds}s
+              </span>
+            </div>
+
+            <div className="agent-video-fields" style={{ marginTop: 10 }}>
+              <label>
+                <span>模型</span>
+                <select
+                  value={videoGenerationParams.model}
+                  onChange={(event) =>
+                    setVideoGenerationParams((params) => ({
+                      ...params,
+                      model: event.target.value,
+                    }))
+                  }
+                >
+                  {VIDEO_MODELS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>比例</span>
+                <select
+                  value={videoGenerationParams.aspectRatio}
+                  onChange={(event) =>
+                    setVideoGenerationParams((params) => ({
+                      ...params,
+                      aspectRatio: event.target.value as VideoAspectRatio,
+                    }))
+                  }
+                >
+                  {VIDEO_ASPECT_RATIOS.map((ratio) => (
+                    <option key={ratio} value={ratio}>
+                      {ratio}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>分辨率</span>
+                <select
+                  value={videoGenerationParams.resolution}
+                  onChange={(event) =>
+                    setVideoGenerationParams((params) => ({
+                      ...params,
+                      resolution: event.target.value as VideoResolution,
+                    }))
+                  }
+                >
+                  {VIDEO_RESOLUTIONS.map((res) => (
+                    <option key={res} value={res}>
+                      {res}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>时长</span>
+                <select
+                  value={videoGenerationParams.durationSeconds}
+                  onChange={(event) =>
+                    setVideoGenerationParams((params) => ({
+                      ...params,
+                      durationSeconds: Number(event.target.value),
+                    }))
+                  }
+                >
+                  {VIDEO_DURATIONS.map((dur) => (
+                    <option key={dur} value={dur}>
+                      {dur}s
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="agent-video-count-field">
+                <span>数量</span>
+                <div>
+                  {VIDEO_COUNTS.map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      className={
+                        videoGenerationParams.count === count ? 'active' : ''
+                      }
+                      onClick={() =>
+                        setVideoGenerationParams((params) => ({
+                          ...params,
+                          count,
+                        }))
+                      }
+                    >
+                      {count}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {pendingVideoRequest.contextNodeIds.length > 0 && (
+              <div className="agent-card-context">
+                已引用 {pendingVideoRequest.contextNodeIds.length} 个画布节点
+              </div>
+            )}
+
+            {videoGenerationStatus && (
+              <div className="agent-card-status">{videoGenerationStatus}</div>
+            )}
+
+            <div className="agent-card-actions">
+              <button
+                type="button"
+                className="agent-card-secondary"
+                onClick={() => setPendingVideoRequest(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="agent-card-primary"
+                onClick={() => void startAgentVideoGeneration()}
                 disabled={!isJimengConfigured}
                 title={!isJimengConfigured ? '未配置 dreamina CLI' : '生成到画布'}
               >

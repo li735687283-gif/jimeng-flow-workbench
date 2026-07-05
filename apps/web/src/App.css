@@ -2017,3 +2017,191 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* =========================================
+   新增 Agent 面板样式
+   ========================================= */
+
+/* 1. 思考过程折叠区域 */
+
+/* 思考过程折叠头 */
+.agent-thinking-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: #9b9ea7;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.agent-thinking-header:hover {
+  background: rgba(255,255,255,0.05);
+  color: #d7d8de;
+}
+.agent-thinking-header svg {
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.agent-thinking-header.expanded svg {
+  transform: rotate(90deg);
+}
+
+/* 思考过程展开内容 */
+.agent-thinking-content {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  color: #8a8c94;
+  font-size: 11px;
+  line-height: 1.6;
+  animation: bubble-in 0.18s ease both;
+}
+
+/* 2. 技能加载状态行 */
+
+/* 技能加载状态容器 */
+.agent-skill-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 6px 0;
+  color: #9b9ea7;
+  font-size: 12px;
+}
+
+/* 状态圆点 */
+.agent-skill-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.agent-skill-status-dot.done {
+  background: #10b981;
+}
+.agent-skill-status-dot.running {
+  background: #f59e0b;
+  animation: skill-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes skill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.9); }
+}
+
+/* 状态文字 */
+.agent-skill-status-label {
+  color: #b9bbc3;
+}
+.agent-skill-status-action {
+  margin-left: 4px;
+  color: #d7d8de;
+  font-weight: 500;
+}
+.agent-skill-status-state {
+  margin-left: auto;
+  color: #858892;
+  font-size: 11px;
+}
+
+/* 3. 视频生成确认卡片 */
+
+/* 视频确认卡片 - 复用图片确认卡片样式 */
+.agent-video-request {
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  background: rgba(255,255,255,0.045);
+}
+
+/* 视频参数横排胶囊标签 */
+.agent-video-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-video-param-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.08);
+  color: #cfd0d5;
+  font-size: 11px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.agent-video-param-tag strong {
+  color: #9b9ea7;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* 视频描述文本 */
+.agent-video-desc {
+  margin: 8px 0 10px !important;
+  color: #a8abb4;
+  font-size: 12px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 4. 视频字段控件 */
+
+/* 复用 agent-image-fields 的样式 */
+.agent-video-fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 9px;
+}
+.agent-video-fields label,
+.agent-video-count-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.agent-video-fields label span,
+.agent-video-count-field > span {
+  color: #858892;
+  font-size: 10px;
+}
+.agent-video-fields select {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 9px;
+  background: #1f2026;
+  color: #eeeeef;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.agent-video-count-field div {
+  display: flex;
+  gap: 6px;
+}
+.agent-video-count-field button {
+  width: 34px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  background: #1f2026;
+  color: #cfd0d5;
+  font-family: inherit;
+  cursor: pointer;
+}
+.agent-video-count-field button.active {
+  background: #eeeeef;
+  color: #17181c;
+}

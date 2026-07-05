@@ -23,10 +23,23 @@ export interface AgentMessage {
   optimizedPrompt?: string
   /** 建议动作列表（role==='assistant' 时） */
   proposedActions?: AgentProposedAction[]
+  /** Agent 详细思考过程（可折叠展示给用户） */
+  thinking?: string
+  /** Agent 判断的用户意图 */
+  intent?: AgentIntent
   createdAt: string
 }
 
-/** Agent 建议的参数（参考 PRD 8.7、10.5） */
+/**
+ * Agent 判断的用户意图类型。
+ * 参考：前端根据 intent 展示不同的技能加载和生成确认卡片。
+ */
+export type AgentIntent = 'image' | 'video' | 'text' | 'image_then_video'
+
+/**
+ * Agent 建议的参数（参考 PRD 8.7、10.5）
+ */
+
 export interface AgentSuggestedParams {
   width?: number
   height?: number
@@ -72,6 +85,10 @@ export interface PromptOptimizeRequest {
 export interface PromptOptimizeResponse {
   /** Agent 思考说明（自然语言，给用户看） */
   reasoning: string
+  /** Agent 详细思考过程（可折叠展示给用户） */
+  thinking?: string
+  /** Agent 判断的用户意图：image / video / text / image_then_video */
+  intent?: AgentIntent
   /** 优化后的提示词 */
   optimizedPrompt: string
   /** 负面约束（需要避免的内容） */

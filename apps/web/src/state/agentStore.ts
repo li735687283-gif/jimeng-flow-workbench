@@ -88,6 +88,8 @@ export const useAgentStore = create<AgentStore>((set) => ({
       id: nextId(),
       role: 'assistant',
       content: response.reasoning,
+      thinking: response.thinking,
+      intent: response.intent,
       contextNodeIds: response.usedContextNodeIds,
       optimizedPrompt: response.optimizedPrompt,
       proposedActions: response.proposedActions,
