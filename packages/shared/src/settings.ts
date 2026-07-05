@@ -30,6 +30,8 @@ export interface Settings {
 
   /** 默认图片模型 */
   defaultModel: string;
+  /** 常用图片模型列表；图片节点只显示这些常用即梦图片模型 */
+  imageModels: string[];
   /** 默认图片尺寸，例如 1024x1024 */
   defaultSize: string;
 
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   outputDir: "./workspace/outputs",
 
   defaultModel: "jimeng",
+  imageModels: ["jimeng"],
   defaultSize: "1024x1024",
 
   defaultVideoModel: "seedance-2.0",

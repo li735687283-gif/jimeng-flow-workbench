@@ -1,23 +1,23 @@
 @import '@xyflow/react/dist/style.css';
 
 :root {
-  --bg-base: #0d0e12;
-  --bg-panel: #16171d;
-  --bg-card: #1f2028;
-  --bg-card-hover: #262830;
-  --border: #2e303a;
-  --border-light: #3a3d4a;
-  --text: #9ca3af;
-  --text-h: #f3f4f6;
-  --text-dim: #6b7280;
-  --accent: #e5e5e7;
-  --accent-dim: #777982;
-  --edge-color: #686b73;
-  --edge-color-active: #d7d7da;
-  --status-idle: #4a5568;
-  --status-running: #d7d7da;
-  --status-success: #10b981;
-  --status-error: #ef4444;
+  --bg-base: #0f0f0f;
+  --bg-panel: #191919;
+  --bg-card: #222222;
+  --bg-card-hover: #2a2a2a;
+  --border: #333333;
+  --border-light: #404040;
+  --text: #a3a3a3;
+  --text-h: #f4f4f4;
+  --text-dim: #737373;
+  --accent: #e6e6e6;
+  --accent-dim: #7b7b7b;
+  --edge-color: #6d6d6d;
+  --edge-color-active: #d8d8d8;
+  --status-idle: #5a5a5a;
+  --status-running: #d8d8d8;
+  --status-success: #d8d8d8;
+  --status-error: #a8a8a8;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   --shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.45);
 

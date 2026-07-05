@@ -15,10 +15,18 @@ import type {
   GenerationResponse,
   GenerationResult,
   GenerationStatus,
+  ImageGenerationRun,
+} from '@jimeng-flow/shared/generateNode'
+import type { Flow, FlowNode } from '@jimeng-flow/shared/flow'
+import {
+  appendImageGenerationRun,
+  isJimengImageModel,
 } from '@jimeng-flow/shared/generateNode'
 import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
 import { generateImage, generateVideo, JimengError } from './jimeng'
+import { generateOpenAiCompatibleImage } from './openaiImage'
 import { saveUploadFile } from './assets'
+import { getFlow, updateFlow } from './flows'
 
 /** 生成任务 ID：gen_<timestamp>_<random> */
 function makeGenerationId(): string {
@@ -41,6 +49,125 @@ interface GenerationRecord {
 
 /** 任务存储（M0 内存实现，单进程足够） */
 const store = new Map<string, GenerationRecord>()
+
+interface ImageGenerationFlowPatch {
+  nodeId: string
+  generationId: string
+  prompt: string
+  model: string
+  width: number
+  height: number
+  count: number
+  seed?: number | null
+  inputImageAssetIds?: string[]
+  quality?: string
+  ratio?: string
+  resolution?: string
+  assetIds: string[]
+  status: GenerationStatus
+  error?: string
+  createdAt?: string
+  updatedAt: string
+}
+
+function buildImageGenerationRun(
+  patch: ImageGenerationFlowPatch,
+): ImageGenerationRun {
+  const generationRun: ImageGenerationRun = {
+    id: patch.generationId,
+    generationId: patch.generationId,
+    status: patch.status,
+    assetIds: patch.assetIds,
+    prompt: patch.prompt,
+    model: patch.model,
+    width: patch.width,
+    height: patch.height,
+    count: patch.count,
+    seed: patch.seed ?? null,
+    inputImageAssetIds: patch.inputImageAssetIds ?? [],
+    createdAt: patch.createdAt ?? patch.updatedAt,
+    finishedAt: patch.updatedAt,
+  }
+  if (patch.quality) generationRun.quality = patch.quality
+  if (patch.ratio) generationRun.ratio = patch.ratio
+  if (patch.resolution) generationRun.resolution = patch.resolution
+  if (patch.error) generationRun.error = patch.error
+  return generationRun
+}
+
+function applyImageGenerationPatchToNode(
+  node: FlowNode,
+  patch: ImageGenerationFlowPatch,
+): FlowNode {
+  const generationRun = buildImageGenerationRun(patch)
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      status: patch.status,
+      error: patch.error,
+      outputAssetIds: patch.assetIds,
+      assetId: patch.assetIds[0] ?? node.data.assetId,
+      generationId: patch.generationId,
+      prompt: patch.prompt,
+      model: patch.model,
+      width: patch.width,
+      height: patch.height,
+      count: patch.count,
+      seed: patch.seed ?? null,
+      inputImageAssetIds: patch.inputImageAssetIds ?? [],
+      quality: patch.quality ?? node.data.quality,
+      ratio: patch.ratio ?? node.data.ratio,
+      resolution: patch.resolution ?? node.data.resolution,
+      generationRuns: appendImageGenerationRun(
+        node.data.generationRuns,
+        generationRun,
+      ),
+      updatedAt: patch.updatedAt,
+    },
+  }
+}
+
+function createRecoveredImageNode(flow: Flow, patch: ImageGenerationFlowPatch): FlowNode {
+  const maxX = flow.nodes.reduce(
+    (value, node) => Math.max(value, node.position?.x ?? 0),
+    0,
+  )
+  const imageNodeCount = flow.nodes.filter((node) => node.type === 'image').length
+  return applyImageGenerationPatchToNode(
+    {
+      id: patch.nodeId,
+      type: 'image',
+      position: {
+        x: maxX + 420,
+        y: 160,
+      },
+      data: {
+        title: `图片节点 ${imageNodeCount + 1}`,
+        status: 'idle',
+      },
+    },
+    patch,
+  )
+}
+
+export function applyImageGenerationResultToFlow(
+  flow: Flow,
+  patch: ImageGenerationFlowPatch,
+): Flow {
+  let matched = false
+  const nodes = flow.nodes.map((node) => {
+    if (node.id !== patch.nodeId) return node
+    matched = true
+    return applyImageGenerationPatchToNode(node, patch)
+  })
+
+  if (matched) return { ...flow, nodes }
+  return {
+    ...flow,
+    nodes: [...nodes, createRecoveredImageNode(flow, patch)],
+  }
+}
 
 /** 从 URL 推断图片扩展名 */
 function extFromImageUrl(url: string): string {
@@ -70,12 +197,64 @@ function mimeFromImageExt(ext: string): string {
   return 'image/png'
 }
 
+function extFromImageMime(mimeType: string): string {
+  const normalized = mimeType.toLowerCase()
+  if (normalized === 'image/jpeg') return '.jpg'
+  if (normalized === 'image/webp') return '.webp'
+  if (normalized === 'image/gif') return '.gif'
+  if (normalized === 'image/bmp') return '.bmp'
+  return '.png'
+}
+
+function imageProviderForModel(model: string): string {
+  return isJimengImageModel(model) ? 'dreamina' : 'openai-compatible'
+}
+
 function mimeFromVideoExt(ext: string): string {
   const normalized = ext.toLowerCase()
   if (normalized === '.webm') return 'video/webm'
   if (normalized === '.mov') return 'video/quicktime'
   if (normalized === '.avi') return 'video/x-msvideo'
   return 'video/mp4'
+}
+
+async function persistImageGenerationResultToFlow(
+  req: GenerationRequest,
+  record: GenerationRecord,
+): Promise<void> {
+  const flowId = req.flowId?.trim()
+  if (!flowId || flowId === 'local') return
+
+  const assetIds =
+    record.results
+      ?.map((result) => result.assetId)
+      .filter((assetId): assetId is string => !!assetId) ?? []
+
+  try {
+    const flow = await getFlow(flowId)
+    const next = applyImageGenerationResultToFlow(flow, {
+      nodeId: req.nodeId,
+      generationId: record.id,
+      prompt: req.prompt,
+      model: req.model,
+      width: req.width,
+      height: req.height,
+      count: req.count,
+      seed: req.seed ?? null,
+      inputImageAssetIds: req.inputImages ?? [],
+      assetIds,
+      status: record.status,
+      error: record.error,
+      createdAt: record.createdAt,
+      updatedAt: record.finishedAt ?? new Date().toISOString(),
+    })
+
+    if (next !== flow) {
+      await updateFlow(flowId, { nodes: next.nodes })
+    }
+  } catch (err) {
+    console.warn('[generations] 写回图片生成结果到 flow 失败:', err)
+  }
 }
 
 /** 从 URL 下载图片二进制 */
@@ -137,6 +316,8 @@ async function saveImageGenerationResult(
   result: GenerationResult,
   req: GenerationRequest,
 ): Promise<GenerationResult> {
+  const provider = imageProviderForModel(req.model)
+
   if (result.localPath) {
     const ext = extname(result.localPath) || '.png'
     const buffer = await readFile(result.localPath)
@@ -147,7 +328,7 @@ async function saveImageGenerationResult(
       prompt: req.prompt,
       sourceNodeId: req.nodeId,
       inputAssetIds: req.inputImages,
-      provider: 'dreamina',
+      provider,
       params: {
         model: req.model,
         width: req.width,
@@ -155,6 +336,33 @@ async function saveImageGenerationResult(
         count: req.count,
         seed: req.seed ?? null,
         localPath: result.localPath,
+      },
+    })
+    return {
+      ...result,
+      assetId: asset.id,
+      url: asset.id,
+    }
+  }
+
+  if (result.base64Data) {
+    const mimeType = result.mimeType || 'image/png'
+    const ext = extFromImageMime(mimeType)
+    const asset = await saveUploadFile({
+      fileBuffer: Buffer.from(result.base64Data, 'base64'),
+      originalName: `generation-${req.nodeId}${ext}`,
+      mimeType,
+      prompt: req.prompt,
+      sourceNodeId: req.nodeId,
+      inputAssetIds: req.inputImages,
+      provider,
+      params: {
+        model: req.model,
+        width: req.width,
+        height: req.height,
+        count: req.count,
+        seed: req.seed ?? null,
+        responseType: 'base64',
       },
     })
     return {
@@ -177,7 +385,7 @@ async function saveImageGenerationResult(
     prompt: req.prompt,
     sourceNodeId: req.nodeId,
     inputAssetIds: req.inputImages,
-    provider: 'dreamina',
+    provider,
     params: {
       model: req.model,
       width: req.width,
@@ -303,7 +511,9 @@ async function createImageGeneration(
 
   try {
     record.status = 'running'
-    const results = await generateImage(req)
+    const results = isJimengImageModel(req.model)
+      ? await generateImage(req)
+      : await generateOpenAiCompatibleImage(req)
 
     // 顺序下载并保存每张图为 Asset（避免并发占用过多内存）
     const saved: GenerationResult[] = []
@@ -333,10 +543,12 @@ async function createImageGeneration(
         : `所有图片保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
+    await persistImageGenerationResultToFlow(req, record)
   } catch (err) {
     record.status = 'error'
     record.error = err instanceof Error ? err.message : String(err)
     record.finishedAt = new Date().toISOString()
+    await persistImageGenerationResultToFlow(req, record)
   }
 
   return toResponse(record)

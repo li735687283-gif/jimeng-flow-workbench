@@ -165,6 +165,24 @@ function hasFailed(text: string): boolean {
   return /失败|failed|error|AigcComplianceConfirmationRequired/i.test(text)
 }
 
+function isTransientQueryError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const message = err.message
+  return (
+    /download\s+(image|video)/i.test(message) &&
+    /EOF|ECONNRESET|ETIMEDOUT|ECONNREFUSED|socket hang up|network|timeout/i.test(message)
+  ) || (
+    err instanceof JimengError &&
+    err.code === 'JIMENG_TIMEOUT'
+  )
+}
+
+async function waitBeforeNextQuery(remaining: number): Promise<void> {
+  await new Promise((resolveDelay) => {
+    setTimeout(resolveDelay, Math.min(QUERY_INTERVAL_MS, Math.max(remaining, 0)))
+  })
+}
+
 function getResolutionType(width: number, height: number): string {
   const maxSide = Math.max(width, height)
   return maxSide >= 3000 ? '4k' : '2k'
@@ -276,15 +294,29 @@ async function waitForResults(
 
   while (Date.now() - started < timeoutMs) {
     const remaining = timeoutMs - (Date.now() - started)
-    const query = await runDreamina(
-      [
-        'query_result',
-        `--submit_id=${submitId}`,
-        `--download_dir=${downloadDir}`,
-      ],
-      Math.min(Math.max(remaining, 1_000), 60_000),
-      settings,
-    )
+    let query: CliRunResult
+    try {
+      query = await runDreamina(
+        [
+          'query_result',
+          `--submit_id=${submitId}`,
+          `--download_dir=${downloadDir}`,
+        ],
+        Math.min(Math.max(remaining, 1_000), 60_000),
+        settings,
+      )
+    } catch (err) {
+      lastOutput = err instanceof Error ? err.message : String(err)
+      const downloaded = await listDownloadedFiles(downloadDir, mediaType)
+      if (downloaded.length > 0) {
+        return downloaded.map((localPath) => ({ localPath }))
+      }
+      if (isTransientQueryError(err)) {
+        await waitBeforeNextQuery(remaining)
+        continue
+      }
+      throw err
+    }
     lastOutput = summarizeOutput(query.stdout, query.stderr)
     const downloaded = await listDownloadedFiles(downloadDir, mediaType)
     if (downloaded.length > 0) {
@@ -304,9 +336,7 @@ async function waitForResults(
       )
     }
 
-    await new Promise((resolveDelay) => {
-      setTimeout(resolveDelay, Math.min(QUERY_INTERVAL_MS, Math.max(remaining, 0)))
-    })
+    await waitBeforeNextQuery(remaining)
   }
 
   throw new JimengError(

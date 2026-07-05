@@ -18,7 +18,6 @@ import {
 import type { PromptOptimizeRequest } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
-  IMAGE_MODELS,
   IMAGE_SIZES,
   type GenerationRequest,
   type GenerationResult,
@@ -31,6 +30,10 @@ import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import type { BaseNodeData } from '../types/nodeTypes'
+import {
+  getConfiguredDefaultImageModel,
+  getConfiguredImageModels,
+} from '../utils/imageModels'
 
 type SpeechRecognitionResultLike = {
   readonly length: number
@@ -171,6 +174,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
   const { screenToFlowPosition } = useReactFlow()
+  const imageModelOptions = useMemo(
+    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels),
+    [settings?.imageModels, settings?.llmModels],
+  )
+  const defaultImageModelId = useMemo(
+    () =>
+      getConfiguredDefaultImageModel(
+        settings?.imageModels,
+        settings?.defaultModel,
+        settings?.llmModels,
+      ),
+    [settings?.defaultModel, settings?.imageModels, settings?.llmModels],
+  )
 
   const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
@@ -185,7 +201,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     useState<PendingImageRequest | null>(null)
   const [imageGenerationParams, setImageGenerationParams] =
     useState<ImageGenerationParams>({
-      model: settings?.defaultModel || IMAGE_MODELS[2].id,
+      model: defaultImageModelId,
       sizeId: settings?.defaultSize || IMAGE_SIZES[0].id,
       count: 1,
     })
@@ -250,10 +266,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   useEffect(() => {
     setImageGenerationParams((params) => ({
       ...params,
-      model: settings?.defaultModel || params.model,
+      model: imageModelOptions.some((model) => model.id === params.model)
+        ? params.model
+        : defaultImageModelId,
       sizeId: settings?.defaultSize || params.sizeId,
     }))
-  }, [settings?.defaultModel, settings?.defaultSize])
+  }, [defaultImageModelId, imageModelOptions, settings?.defaultSize])
 
   useEffect(() => {
     return () => {
@@ -827,7 +845,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     }))
                   }
                 >
-                  {IMAGE_MODELS.map((model) => (
+                  {imageModelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.label}
                     </option>

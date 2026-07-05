@@ -7,7 +7,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from 'react'
-import { Handle, Position, useStore } from '@xyflow/react'
+import { Handle, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
 import type { LucideIcon } from 'lucide-react'
 import type { NodeStatus } from '../types/nodeTypes'
 
@@ -18,6 +18,8 @@ interface NodeWrapperProps {
   selected?: boolean
   nodeId?: string
   nodeType?: string
+  mediaDisplay?: boolean
+  hideTitle?: boolean
   children?: ReactNode
 }
 
@@ -25,6 +27,7 @@ interface MagneticHandleProps {
   type: 'target' | 'source'
   position: Position
   className: string
+  nodeId?: string
 }
 
 const MAGNET_RADIUS_FLOW = 30
@@ -34,18 +37,30 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-function MagneticHandle({ type, position, className }: MagneticHandleProps) {
+function MagneticHandle({ type, position, className, nodeId }: MagneticHandleProps) {
   const zoom = useStore((state) => state.transform[2])
+  const updateNodeInternals = useUpdateNodeInternals()
   const zoneRef = useRef<HTMLDivElement | null>(null)
+  const measureFrameRef = useRef<number | null>(null)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [active, setActive] = useState(false)
+  const [captured, setCaptured] = useState(false)
+
+  const requestHandleMeasure = useCallback(() => {
+    if (!nodeId || measureFrameRef.current !== null) return
+    measureFrameRef.current = window.requestAnimationFrame(() => {
+      measureFrameRef.current = null
+      updateNodeInternals(nodeId)
+    })
+  }, [nodeId, updateNodeInternals])
 
   const reset = useCallback(() => {
     setActive(false)
     setOffset({ x: 0, y: 0 })
-  }, [])
+    requestHandleMeasure()
+  }, [requestHandleMeasure])
 
-  const updateMagnet = useCallback((clientX: number, clientY: number) => {
+  const updateMagnet = useCallback((clientX: number, clientY: number, keepAttached = false) => {
     const zone = zoneRef.current
     if (!zone) return
     const rect = zone.getBoundingClientRect()
@@ -56,14 +71,14 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
     const distance = Math.hypot(dx, dy)
     const radius = clamp(MAGNET_RADIUS_FLOW * zoom, 24, 86)
 
-    if (distance > radius) {
+    if (distance > radius && !keepAttached) {
       reset()
       return
     }
 
     const maxPull = clamp(MAGNET_PULL_FLOW * zoom, 9, 26)
     const pull = distance === 0 ? 0 : Math.min(distance, maxPull)
-    const strength = 1 - distance / radius
+    const strength = Math.max(0, 1 - distance / radius)
     const easedPull = pull * (0.55 + strength * 0.45)
 
     setActive(true)
@@ -71,29 +86,54 @@ function MagneticHandle({ type, position, className }: MagneticHandleProps) {
       x: distance === 0 ? 0 : (dx / distance) * easedPull,
       y: distance === 0 ? 0 : (dy / distance) * easedPull,
     })
-  }, [reset, zoom])
+    requestHandleMeasure()
+  }, [requestHandleMeasure, reset, zoom])
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    updateMagnet(event.clientX, event.clientY)
+    updateMagnet(event.clientX, event.clientY, captured)
+  }
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    setCaptured(true)
+    updateMagnet(event.clientX, event.clientY, true)
+  }
+
+  const handlePointerLeave = () => {
+    if (!captured) reset()
   }
 
   useEffect(() => {
-    if (!active) return
+    if (!active && !captured) return
     const handleWindowPointerMove = (event: globalThis.PointerEvent) => {
-      updateMagnet(event.clientX, event.clientY)
+      updateMagnet(event.clientX, event.clientY, captured)
+    }
+    const handleWindowPointerUp = () => {
+      setCaptured(false)
+      reset()
     }
     window.addEventListener('pointermove', handleWindowPointerMove)
+    window.addEventListener('pointerup', handleWindowPointerUp)
     return () => {
       window.removeEventListener('pointermove', handleWindowPointerMove)
+      window.removeEventListener('pointerup', handleWindowPointerUp)
     }
-  }, [active, updateMagnet])
+  }, [active, captured, reset, updateMagnet])
+
+  useEffect(() => {
+    return () => {
+      if (measureFrameRef.current !== null) {
+        window.cancelAnimationFrame(measureFrameRef.current)
+      }
+    }
+  }, [])
 
   return (
     <div
       ref={zoneRef}
-      className={`node-handle-zone nodrag nopan ${className}${active ? ' magnetic' : ''}`}
+      className={`node-handle-zone nodrag nopan ${className}${active ? ' magnetic' : ''}${captured ? ' captured' : ''}`}
       onPointerMove={handlePointerMove}
-      onPointerLeave={reset}
+      onPointerDown={handlePointerDown}
+      onPointerLeave={handlePointerLeave}
       style={
         {
           '--magnet-x': `${offset.x}px`,
@@ -116,32 +156,44 @@ export function NodeWrapper({
   selected = false,
   nodeId,
   nodeType,
+  mediaDisplay = false,
+  hideTitle = false,
   children,
 }: NodeWrapperProps) {
   return (
     <div
-      className={`node-wrapper status-${status}${selected ? ' selected' : ''}`}
+      className={`node-wrapper status-${status}${selected ? ' selected' : ''}${mediaDisplay ? ' media-display' : ''}`}
       data-flow-node-id={nodeId}
       data-flow-node-type={nodeType}
     >
-      <div className="node-title">
-        <Icon size={12} strokeWidth={1.8} />
-        <span>{title}</span>
-        {status === 'running' && <span className="node-status-spinner" />}
-        {status === 'success' && <span className="node-status-dot success" />}
-        {status === 'error' && <span className="node-status-dot error" />}
-      </div>
+      {!hideTitle && (
+        <div className="node-title">
+          <Icon size={12} strokeWidth={1.8} />
+          <span>{title}</span>
+          {!mediaDisplay && status === 'running' && (
+            <span className="node-status-spinner" />
+          )}
+          {!mediaDisplay && status === 'success' && (
+            <span className="node-status-dot success" />
+          )}
+          {!mediaDisplay && status === 'error' && (
+            <span className="node-status-dot error" />
+          )}
+        </div>
+      )}
       <div className="node-card">
         <MagneticHandle
           type="target"
           position={Position.Left}
           className="node-handle-left"
+          nodeId={nodeId}
         />
         <div className="node-body">{children}</div>
         <MagneticHandle
           type="source"
           position={Position.Right}
           className="node-handle-right"
+          nodeId={nodeId}
         />
       </div>
     </div>

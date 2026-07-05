@@ -21,18 +21,18 @@ import { useCanvasStore } from '../state/canvasStore'
 
 /** 暗色风格调色板（与 TextComposer 保持一致） */
 const COLORS = {
-  bg: '#1c1c20',
-  bgInput: '#26262c',
-  border: '#34343c',
-  text: '#e4e4e7',
-  textMuted: '#8a8a92',
-  textDim: '#5a5a62',
-  accent: '#ededee',
+  bg: '#1d1d1d',
+  bgInput: '#282828',
+  border: '#373737',
+  text: '#e5e5e5',
+  textMuted: '#8d8d8d',
+  textDim: '#5d5d5d',
+  accent: '#ededed',
   accentBg: 'rgba(255, 255, 255, 0.09)',
   promptBg: 'rgba(255, 255, 255, 0.08)',
-  promptText: '#d8d8da',
-  jsonBg: '#0f0f12',
-  error: '#ef4444',
+  promptText: '#d9d9d9',
+  jsonBg: '#101010',
+  error: '#cfcfcf',
 }
 
 const contentAreaStyle: CSSProperties = {
@@ -117,7 +117,7 @@ const quickBtnStyle = (disabled: boolean): CSSProperties => ({
   alignItems: 'center',
   gap: 10,
   background: 'transparent',
-  color: disabled ? '#77797e' : '#f2f2f2',
+  color: disabled ? '#7a7a7a' : '#f2f2f2',
   border: 'none',
   fontSize: 14,
   padding: 0,
@@ -213,6 +213,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
       title={nodeData.title}
       status={status}
       selected={selected}
+      nodeId={id}
     >
       {editing ? (
         <div
@@ -244,7 +245,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
           <div style={editActionsStyle}>
             <button
               type="button"
-              style={{ ...editBtnBase, background: '#2a2a30', color: COLORS.textMuted }}
+              style={{ ...editBtnBase, background: '#2c2c2c', color: COLORS.textMuted }}
               onClick={cancelEdit}
             >
               取消
@@ -297,7 +298,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
           </div>
 
           <div style={quickActionsStyle}>
-            <div style={{ color: '#8b8d92', fontSize: 14 }}>尝试:</div>
+            <div style={{ color: '#8e8e8e', fontSize: 14 }}>尝试:</div>
             <button
               type="button"
               style={quickBtnStyle(false)}

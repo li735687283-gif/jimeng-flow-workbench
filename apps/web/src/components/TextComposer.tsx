@@ -19,16 +19,16 @@ interface TextComposerProps {
 
 /** 暗色风格调色板（专业创作工具气质，参考 PRD 13.1） */
 const COLORS = {
-  bg: '#1c1c20',
-  bgInput: '#26262c',
-  border: '#34343c',
-  borderFocus: '#d7d7da',
-  text: '#e4e4e7',
-  textMuted: '#8a8a92',
-  accent: '#d7d7da',
-  accentHover: '#f1f1f2',
-  error: '#ef4444',
-  errorBg: 'rgba(239, 68, 68, 0.12)',
+  bg: '#1d1d1d',
+  bgInput: '#282828',
+  border: '#373737',
+  borderFocus: '#d8d8d8',
+  text: '#e5e5e5',
+  textMuted: '#8d8d8d',
+  accent: '#d8d8d8',
+  accentHover: '#f1f1f1',
+  error: '#cfcfcf',
+  errorBg: 'rgba(255, 255, 255, 0.08)',
 }
 
 const containerStyle: CSSProperties = {
@@ -102,7 +102,7 @@ const submitBtnStyle = (disabled: boolean, loading: boolean): CSSProperties => (
   alignItems: 'center',
   gap: 6,
   padding: '0 18px',
-  background: disabled || loading ? '#2a2a30' : COLORS.accent,
+  background: disabled || loading ? '#2c2c2c' : COLORS.accent,
   color: disabled || loading ? COLORS.textMuted : '#fff',
   border: 'none',
   borderRadius: 8,

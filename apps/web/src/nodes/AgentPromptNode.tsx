@@ -3,7 +3,7 @@ import { Bot } from 'lucide-react'
 import { NodeWrapper } from './NodeWrapper'
 import type { BaseNodeData } from '../types/nodeTypes'
 
-export function AgentPromptNode({ data, selected }: NodeProps) {
+export function AgentPromptNode({ id, data, selected }: NodeProps) {
   const nodeData = data as BaseNodeData
   return (
     <NodeWrapper
@@ -11,6 +11,7 @@ export function AgentPromptNode({ data, selected }: NodeProps) {
       title={nodeData.title}
       status={nodeData.status}
       selected={selected}
+      nodeId={id}
     >
       <div className="node-stub-content">
         <Bot size={20} strokeWidth={1.5} className="node-placeholder-icon" />

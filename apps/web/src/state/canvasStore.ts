@@ -19,11 +19,54 @@ import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
 
 const ARRANGE_GAP = 40
 
+function getAssetId(node: Node | undefined): string | null {
+  const assetId = (node?.data as BaseNodeData | undefined)?.assetId
+  return typeof assetId === 'string' && assetId ? assetId : null
+}
+
 function getNodeSize(node: Node): { width: number; height: number } {
   const measured = node.measured
   const width = measured?.width ?? node.width ?? 200
   const height = measured?.height ?? node.height ?? 150
   return { width, height }
+}
+
+function cleanupRemovedEdgeReferences(
+  nodes: Node[],
+  removedEdges: Edge[],
+): Node[] {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  const removalsByTarget = new Map<string, Set<string>>()
+
+  removedEdges.forEach((edge) => {
+    const assetId = getAssetId(nodesById.get(edge.source))
+    if (!assetId) return
+    const removals = removalsByTarget.get(edge.target) ?? new Set<string>()
+    removals.add(assetId)
+    removalsByTarget.set(edge.target, removals)
+  })
+
+  if (removalsByTarget.size === 0) return nodes
+
+  return nodes.map((node) => {
+    const removals = removalsByTarget.get(node.id)
+    const inputImageAssetIds = (node.data as BaseNodeData).inputImageAssetIds
+    if (!removals || !Array.isArray(inputImageAssetIds)) return node
+
+    const nextInputImageAssetIds = inputImageAssetIds.filter(
+      (assetId): assetId is string =>
+        typeof assetId === 'string' && !removals.has(assetId),
+    )
+    if (nextInputImageAssetIds.length === inputImageAssetIds.length) return node
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        inputImageAssetIds: nextInputImageAssetIds,
+      },
+    }
+  })
 }
 
 interface CanvasState {
@@ -83,6 +126,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onEdgesDelete: (edges: Edge[]) => {
     const ids = new Set(edges.map((e) => e.id))
     set((state) => ({
+      nodes: cleanupRemovedEdgeReferences(state.nodes, edges),
       edges: state.edges.filter((e) => !ids.has(e.id)),
     }))
   },
@@ -115,6 +159,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   removeEdge: (id) => {
     set((state) => ({
+      nodes: cleanupRemovedEdgeReferences(
+        state.nodes,
+        state.edges.filter((e) => e.id === id),
+      ),
       edges: state.edges.filter((e) => e.id !== id),
     }))
   },

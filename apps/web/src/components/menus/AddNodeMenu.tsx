@@ -1,5 +1,12 @@
+import {
+  AlignJustify,
+  AudioLines,
+  Image as ImageIcon,
+  Upload,
+  Video,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { FlowNodeType } from '../../types/nodeTypes'
-import { nodeRegistryList } from '../../nodes/registry'
 
 export interface AddNodeMenuState {
   x: number
@@ -14,6 +21,23 @@ interface AddNodeMenuProps {
   onClose: () => void
 }
 
+interface AddNodeMenuItem {
+  key: string
+  label: string
+  icon: LucideIcon
+  nodeType?: FlowNodeType
+  action?: 'upload'
+  disabled?: boolean
+}
+
+const nodeItems: AddNodeMenuItem[] = [
+  { key: 'text', label: '文本', icon: AlignJustify, nodeType: 'text' },
+  { key: 'image', label: '图片', icon: ImageIcon, nodeType: 'image' },
+  { key: 'video', label: '视频', icon: Video, nodeType: 'video' },
+  { key: 'audio', label: '音频', icon: AudioLines, disabled: true },
+  { key: 'upload', label: '上传', icon: Upload, action: 'upload' },
+]
+
 export function AddNodeMenu({
   state,
   onSelect,
@@ -27,37 +51,54 @@ export function AddNodeMenu({
         className="add-node-menu"
         style={{ left: state.x, top: state.y }}
       >
-        {nodeRegistryList.map((def) => {
-          const Icon = def.icon
-          return (
-            <button
-              key={def.type}
-              type="button"
-              className="menu-item"
-              onClick={() => {
-                onSelect(def.type)
-                onClose()
-              }}
-            >
-              <Icon size={14} strokeWidth={1.6} />
-              <span>{def.label}</span>
-            </button>
-          )
-        })}
-        <button
-          type="button"
-          className="menu-item"
-          onClick={() => {
-            onUpload()
-            onClose()
-          }}
-        >
-          上传
-        </button>
-        <button type="button" className="menu-item" disabled>
-          从生成历史选择
-        </button>
+        <div className="add-node-menu-title">添加节点</div>
+        <div className="add-node-menu-list">
+          {nodeItems.map((item) => (
+            <AddNodeMenuButton
+              key={item.key}
+              item={item}
+              onSelect={onSelect}
+              onUpload={onUpload}
+              onClose={onClose}
+            />
+          ))}
+        </div>
       </div>
     </>
+  )
+}
+
+function AddNodeMenuButton({
+  item,
+  onSelect,
+  onUpload,
+  onClose,
+}: {
+  item: AddNodeMenuItem
+  onSelect: (type: FlowNodeType) => void
+  onUpload: () => void
+  onClose: () => void
+}) {
+  const Icon = item.icon
+
+  return (
+    <button
+      type="button"
+      className="add-node-menu-item"
+      disabled={item.disabled}
+      onClick={() => {
+        if (item.action === 'upload') {
+          onUpload()
+          onClose()
+          return
+        }
+        if (!item.nodeType) return
+        onSelect(item.nodeType)
+        onClose()
+      }}
+    >
+      <Icon size={21} strokeWidth={1.9} />
+      <span className="add-node-menu-label">{item.label}</span>
+    </button>
   )
 }

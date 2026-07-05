@@ -26,18 +26,18 @@ import { getAssetFileUrl } from '../api/assets'
 
 /** 暗色风格调色板 */
 const COLORS = {
-  bg: '#1c1c20',
-  bgInput: '#26262c',
-  border: '#34343c',
-  text: '#e4e4e7',
-  textMuted: '#8a8a92',
-  textDim: '#5a5a62',
-  accent: '#ededee',
+  bg: '#1d1d1d',
+  bgInput: '#282828',
+  border: '#373737',
+  text: '#e5e5e5',
+  textMuted: '#8d8d8d',
+  textDim: '#5d5d5d',
+  accent: '#ededed',
   accentBg: 'rgba(255, 255, 255, 0.09)',
-  error: '#ef4444',
-  errorBg: 'rgba(239, 68, 68, 0.12)',
-  success: '#22c55e',
-  successBg: 'rgba(34, 197, 94, 0.12)',
+  error: '#cfcfcf',
+  errorBg: 'rgba(255, 255, 255, 0.08)',
+  success: '#ededed',
+  successBg: 'rgba(255, 255, 255, 0.12)',
 }
 
 const containerStyle: CSSProperties = {
@@ -242,6 +242,7 @@ export function GenerateNode({ id, data, selected }: NodeProps) {
       title={nodeData.title}
       status={displayStatus as BaseNodeData['status']}
       selected={selected}
+      nodeId={id}
     >
       <div style={containerStyle}>
         {/* 预览区：成功后展示第一张图 */}

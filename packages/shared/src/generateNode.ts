@@ -50,6 +50,9 @@ export interface GenerateNodeData {
   /** 生成成功的 Asset id 数组 */
   outputAssetIds: string[]
 
+  /** 图片节点生成历史，用于恢复版本和复用参数 */
+  generationRuns?: ImageGenerationRun[]
+
   /** 最近一次生成任务 id（由后端 generations service 分配） */
   generationId?: string
 
@@ -96,6 +99,10 @@ export interface GenerationResult {
   assetId?: string
   /** CLI 下载到本机的临时文件路径（后端保存 Asset 前使用） */
   localPath?: string
+  /** 第三方 API 返回的 base64 图片数据 */
+  base64Data?: string
+  /** base64 图片的 MIME 类型，默认 image/png */
+  mimeType?: string
   /** 该张图对应的 seed（若上游返回） */
   seed?: number
 }
@@ -121,6 +128,94 @@ export interface GenerationResponse {
   finishedAt?: string
 }
 
+/** 图片节点的一次生成版本记录 */
+export interface ImageGenerationRun {
+  /** 本地历史记录 id，默认与 generationId 一致 */
+  id: string
+  /** 后端生成任务 id */
+  generationId: string
+  /** 该次任务状态 */
+  status: GenerationStatus
+  /** 本次生成得到的 Asset id 列表 */
+  assetIds: string[]
+  /** 本次使用的 Prompt */
+  prompt: string
+  /** 本次使用的模型 id */
+  model: string
+  /** 本次输出宽度 */
+  width: number
+  /** 本次输出高度 */
+  height: number
+  /** 本次生成张数 */
+  count: number
+  /** 本次随机种子 */
+  seed?: number | null
+  /** 本次引用的输入图片 Asset id */
+  inputImageAssetIds: string[]
+  /** 前端画质选项 */
+  quality?: string
+  /** 前端比例选项 */
+  ratio?: string
+  /** 前端清晰度选项 */
+  resolution?: string
+  /** 失败信息 */
+  error?: string
+  /** 创建时间 ISO */
+  createdAt: string
+  /** 完成时间 ISO */
+  finishedAt?: string
+}
+
+const MAX_IMAGE_GENERATION_RUNS = 20
+const GENERATION_STATUSES = new Set<GenerationStatus>([
+  'idle',
+  'queued',
+  'running',
+  'success',
+  'error',
+])
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isImageGenerationRun(value: unknown): value is ImageGenerationRun {
+  if (!value || typeof value !== 'object') return false
+  const run = value as Partial<ImageGenerationRun>
+  return (
+    typeof run.id === 'string' &&
+    typeof run.generationId === 'string' &&
+    typeof run.status === 'string' &&
+    GENERATION_STATUSES.has(run.status as GenerationStatus) &&
+    isStringArray(run.assetIds) &&
+    typeof run.prompt === 'string' &&
+    typeof run.model === 'string' &&
+    typeof run.width === 'number' &&
+    typeof run.height === 'number' &&
+    typeof run.count === 'number' &&
+    isStringArray(run.inputImageAssetIds) &&
+    typeof run.createdAt === 'string'
+  )
+}
+
+export function normalizeImageGenerationRuns(
+  value: unknown,
+): ImageGenerationRun[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(isImageGenerationRun).slice(-MAX_IMAGE_GENERATION_RUNS)
+}
+
+export function appendImageGenerationRun(
+  value: unknown,
+  run: ImageGenerationRun,
+): ImageGenerationRun[] {
+  const runs = normalizeImageGenerationRuns(value).filter(
+    (item) => item.generationId !== run.generationId,
+  )
+  runs.push(run)
+  return runs.slice(-MAX_IMAGE_GENERATION_RUNS)
+}
+
 /** 可选图片模型列表（对齐 dreamina CLI model_version） */
 export const IMAGE_MODELS = [
   { id: 'jimeng-5.0', label: '即梦 5.0', description: 'CLI model_version=5.0' },
@@ -128,6 +223,10 @@ export const IMAGE_MODELS = [
   { id: 'jimeng-3.0', label: '即梦 3.0', description: 'CLI model_version=3.0' },
   { id: 'jimeng', label: '即梦（默认）', description: '使用 CLI 默认模型' },
 ] as const
+
+export function isJimengImageModel(modelId: string): boolean {
+  return IMAGE_MODELS.some((model) => model.id === modelId)
+}
 
 /** 可选图片尺寸（参考 reference-quality-ratio-menu.png、PRD 11.3 defaultSize） */
 export const IMAGE_SIZES: { id: string; label: string; width: number; height: number }[] = [
@@ -179,6 +278,7 @@ export function mergeGenerateDefaults(
     inputImageAssetIds:
       data.inputImageAssetIds ?? GENERATE_DEFAULTS.inputImageAssetIds,
     outputAssetIds: data.outputAssetIds ?? GENERATE_DEFAULTS.outputAssetIds,
+    generationRuns: normalizeImageGenerationRuns(data.generationRuns),
     generationId: data.generationId,
     createdAt: data.createdAt ?? '',
     updatedAt: data.updatedAt ?? '',

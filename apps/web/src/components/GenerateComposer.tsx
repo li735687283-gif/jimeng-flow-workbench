@@ -31,6 +31,10 @@ import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import { createGeneration, retryGeneration } from '../api/generations'
 import type { BaseNodeData } from '../types/nodeTypes'
+import {
+  getConfiguredDefaultImageModel,
+  getConfiguredImageModels,
+} from '../utils/imageModels'
 
 interface GenerateComposerProps {
   /** 选中的 Generate 节点 id */
@@ -39,15 +43,15 @@ interface GenerateComposerProps {
 
 /** 暗色风格调色板（与 VideoComposer / TextComposer 保持一致） */
 const COLORS = {
-  bg: '#1c1c20',
-  bgInput: '#26262c',
-  border: '#34343c',
-  text: '#e4e4e7',
-  textMuted: '#8a8a92',
-  textDim: '#5a5a62',
-  accent: '#d7d7da',
-  error: '#ef4444',
-  errorBg: 'rgba(239, 68, 68, 0.12)',
+  bg: '#1d1d1d',
+  bgInput: '#282828',
+  border: '#373737',
+  text: '#e5e5e5',
+  textMuted: '#8d8d8d',
+  textDim: '#5d5d5d',
+  accent: '#d8d8d8',
+  error: '#cfcfcf',
+  errorBg: 'rgba(255, 255, 255, 0.08)',
 }
 
 const containerStyle: CSSProperties = {
@@ -252,7 +256,21 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const cancelWaiting = useGenerateStore((s) => s.cancelWaiting)
 
   // dreamina CLI 是否已配置，未配置时禁用生成
+  const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
+  const imageModelOptions = useMemo(
+    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels),
+    [settings?.imageModels, settings?.llmModels],
+  )
+  const defaultImageModelId = useMemo(
+    () =>
+      getConfiguredDefaultImageModel(
+        settings?.imageModels,
+        settings?.defaultModel,
+        settings?.llmModels,
+      ),
+    [settings?.defaultModel, settings?.imageModels, settings?.llmModels],
+  )
 
   // 本地 seed 输入（字符串，空表示随机）
   const [seedInput, setSeedInput] = useState('')
@@ -283,6 +301,9 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const d = mergeGenerateDefaults(
     node.data as unknown as Partial<GenerateNodeData>,
   )
+  const activeImageModelId = imageModelOptions.some((model) => model.id === d.model)
+    ? d.model
+    : defaultImageModelId
 
   /** 把节点 data 部分更新写入 canvasStore */
   const set = (partial: Partial<GenerateNodeData>) =>
@@ -350,7 +371,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
       mediaType: 'image',
       prompt,
       inputImages: inputImageAssetIds,
-      model: d.model,
+      model: activeImageModelId,
       width: d.width,
       height: d.height,
       count: d.count,
@@ -452,7 +473,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const sizeLabel =
     IMAGE_SIZES.find((s) => s.id === selectedSizeId)?.label ?? selectedSizeId
   const modelLabel =
-    IMAGE_MODELS.find((m) => m.id === d.model)?.label ?? d.model
+    IMAGE_MODELS.find((m) => m.id === activeImageModelId)?.label ?? activeImageModelId
   const hasUpstreamPrompt = !!upstreamPromptResult.prompt
   const hasInputImage =
     d.inputImageAssetIds.length > 0 ||
@@ -499,11 +520,11 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
         <Field label="模型">
           <select
             style={selectStyle}
-            value={d.model}
+            value={activeImageModelId}
             onChange={(e) => set({ model: e.target.value })}
             disabled={running}
           >
-            {IMAGE_MODELS.map((m) => (
+            {imageModelOptions.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>
@@ -598,7 +619,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
           type="button"
           style={{
             ...submitBtnBase,
-            background: submitDisabled ? '#2a2a30' : COLORS.accent,
+            background: submitDisabled ? '#2c2c2c' : COLORS.accent,
             color: submitDisabled ? COLORS.textMuted : '#fff',
             cursor: submitDisabled ? 'not-allowed' : 'pointer',
           }}

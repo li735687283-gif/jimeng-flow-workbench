@@ -1,16 +1,53 @@
 import { useRef, useState } from 'react'
-import { EdgeLabelRenderer, getBezierPath } from '@xyflow/react'
-import type { EdgeProps } from '@xyflow/react'
+import { EdgeLabelRenderer, Position, getBezierPath } from '@xyflow/react'
+import type { EdgeProps, Node } from '@xyflow/react'
 import { Scissors } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 
-const EDGE_COLOR_DEFAULT = '#6f7278'
-const EDGE_COLOR_ACTIVE = '#e2e2e4'
+const EDGE_COLOR_DEFAULT = '#737373'
+const EDGE_COLOR_ACTIVE = '#e3e3e3'
+const FALLBACK_NODE_WIDTH = 200
+const FALLBACK_NODE_HEIGHT = 150
+
+function getNodeSize(node: Node): { width: number; height: number } {
+  return {
+    width: node.measured?.width ?? node.width ?? FALLBACK_NODE_WIDTH,
+    height: node.measured?.height ?? node.height ?? FALLBACK_NODE_HEIGHT,
+  }
+}
+
+function getCardEdgePoint(
+  node: Node | undefined,
+  fallback: { x: number; y: number },
+  position: Position,
+): { x: number; y: number } {
+  if (!node) return fallback
+
+  const { width, height } = getNodeSize(node)
+  const left = node.position.x
+  const right = node.position.x + width
+  const top = node.position.y
+  const bottom = node.position.y + height
+
+  if (position === Position.Left || position === Position.Right) {
+    return {
+      x: position === Position.Left ? left : right,
+      y: Math.min(bottom, Math.max(top, fallback.y)),
+    }
+  }
+
+  return {
+    x: Math.min(right, Math.max(left, fallback.x)),
+    y: position === Position.Top ? top : bottom,
+  }
+}
 
 export function CutEdge({
   id,
+  source,
   sourceX,
   sourceY,
+  target,
   targetX,
   targetY,
   sourcePosition,
@@ -19,14 +56,27 @@ export function CutEdge({
 }: EdgeProps) {
   const [hovered, setHovered] = useState(false)
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const nodes = useCanvasStore((s) => s.nodes)
   const removeEdge = useCanvasStore((s) => s.removeEdge)
+  const sourceNode = nodes.find((node) => node.id === source)
+  const targetNode = nodes.find((node) => node.id === target)
+  const sourcePoint = getCardEdgePoint(
+    sourceNode,
+    { x: sourceX, y: sourceY },
+    sourcePosition,
+  )
+  const targetPoint = getCardEdgePoint(
+    targetNode,
+    { x: targetX, y: targetY },
+    targetPosition,
+  )
 
   const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
+    sourceX: sourcePoint.x,
+    sourceY: sourcePoint.y,
     sourcePosition,
-    targetX,
-    targetY,
+    targetX: targetPoint.x,
+    targetY: targetPoint.y,
     targetPosition,
   })
 

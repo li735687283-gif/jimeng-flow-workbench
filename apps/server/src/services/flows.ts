@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { getProjectRoot } from '../config'
 import type {
   Flow,
+  FlowNode,
   FlowSummary,
   UpdateFlowRequest,
 } from '@jimeng-flow/shared/flow'
@@ -27,6 +28,94 @@ function generateFlowId(): string {
 /** 当前 ISO 8601 时间字符串 */
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function hasStringValue(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasGeneratedAsset(node: FlowNode | undefined): boolean {
+  return hasStringValue(node?.data.assetId)
+}
+
+function shouldKeepOmittedCurrentNode(node: FlowNode): boolean {
+  return hasGeneratedAsset(node)
+}
+
+function getUpdatedAtMs(node: FlowNode | undefined): number | null {
+  const value = node?.data.updatedAt
+  if (typeof value !== 'string') return null
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function shouldKeepCurrentGeneratedData(
+  current: FlowNode | undefined,
+  incoming: FlowNode,
+): current is FlowNode {
+  if (!current || !hasGeneratedAsset(current)) return false
+  if (!hasGeneratedAsset(incoming)) return true
+
+  const currentUpdatedAt = getUpdatedAtMs(current)
+  const incomingUpdatedAt = getUpdatedAtMs(incoming)
+  return (
+    currentUpdatedAt !== null &&
+    incomingUpdatedAt !== null &&
+    currentUpdatedAt > incomingUpdatedAt
+  )
+}
+
+function mergeGeneratedImageData(
+  incomingData: FlowNode['data'],
+  currentData: FlowNode['data'],
+): FlowNode['data'] {
+  return {
+    ...incomingData,
+    status: currentData.status,
+    error: currentData.error,
+    assetId: currentData.assetId,
+    outputAssetIds: currentData.outputAssetIds,
+    generationId: currentData.generationId,
+    prompt: currentData.prompt,
+    model: currentData.model,
+    width: currentData.width,
+    height: currentData.height,
+    count: currentData.count,
+    quality: currentData.quality,
+    ratio: currentData.ratio,
+    resolution: currentData.resolution,
+    inputImageAssetIds: currentData.inputImageAssetIds,
+    generationRuns: currentData.generationRuns,
+    updatedAt: currentData.updatedAt,
+  }
+}
+
+export function mergeNodesForFlowUpdate(
+  currentNodes: FlowNode[],
+  incomingNodes: FlowNode[],
+): FlowNode[] {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]))
+  const incomingIds = new Set(incomingNodes.map((node) => node.id))
+
+  const merged = incomingNodes.map((incoming) => {
+    const current = currentById.get(incoming.id)
+    if (!shouldKeepCurrentGeneratedData(current, incoming)) {
+      return incoming
+    }
+
+    return {
+      ...incoming,
+      data: mergeGeneratedImageData(incoming.data, current.data),
+    }
+  })
+
+  for (const current of currentNodes) {
+    if (!incomingIds.has(current.id) && shouldKeepOmittedCurrentNode(current)) {
+      merged.push(current)
+    }
+  }
+
+  return merged
 }
 
 /** 校验 flow ID 格式，防止路径穿越 */
@@ -154,9 +243,15 @@ export async function updateFlow(
 ): Promise<Flow> {
   validateFlowId(id)
   const current = await getFlow(id)
+  const patchWithMergedNodes: UpdateFlowRequest = {
+    ...patch,
+    nodes: Array.isArray(patch.nodes)
+      ? mergeNodesForFlowUpdate(current.nodes, patch.nodes)
+      : patch.nodes,
+  }
   const next: Flow = {
     ...current,
-    ...patch,
+    ...patchWithMergedNodes,
     id: current.id,
     createdAt: current.createdAt,
     updatedAt: nowIso(),

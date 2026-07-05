@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent, ChangeEvent } from 'react'
+import type {
+  MouseEvent as ReactMouseEvent,
+  ChangeEvent,
+  DragEvent as ReactDragEvent,
+  RefObject,
+} from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
+  Position,
+  getBezierPath,
   useReactFlow,
   useStore,
   SelectionMode,
@@ -21,7 +28,7 @@ import { useCanvasStore } from '../../state/canvasStore'
 import { useAssetStore } from '../../state/assetStore'
 import { uploadAsset } from '../../api/assets'
 import { nodeTypes } from '../../nodes/registry'
-import type { FlowNodeType } from '../../types/nodeTypes'
+import type { BaseNodeData, FlowNodeType } from '../../types/nodeTypes'
 import { CutEdge } from './CutEdge'
 import { ContextMenu, type ContextMenuState } from '../menus/ContextMenu'
 import { AddNodeMenu, type AddNodeMenuState } from '../menus/AddNodeMenu'
@@ -35,6 +42,12 @@ const edgeTypes = { cut: CutEdge }
 const REFERENCE_MENU_WIDTH = 330
 const REFERENCE_MENU_HEIGHT = 356
 const MENU_VIEWPORT_PADDING = 12
+const FALLBACK_NODE_WIDTH = 200
+const FALLBACK_NODE_HEIGHT = 150
+const INTERACTION_HANDLE_OFFSET = 8
+const UPLOAD_STAGGER = 34
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'])
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -62,6 +75,28 @@ function isBlankCanvasTarget(target: EventTarget | null): boolean {
   return !!target.closest('.react-flow')
 }
 
+function getFileExtension(file: File): string {
+  const name = file.name.toLowerCase()
+  const dotIndex = name.lastIndexOf('.')
+  return dotIndex >= 0 ? name.slice(dotIndex + 1) : ''
+}
+
+function getUploadNodeType(file: File): FlowNodeType | null {
+  const mimeType = file.type.toLowerCase()
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.startsWith('video/')) return 'video'
+
+  const extension = getFileExtension(file)
+  if (IMAGE_EXTENSIONS.has(extension)) return 'image'
+  if (VIDEO_EXTENSIONS.has(extension)) return 'video'
+  return null
+}
+
+function hasFileTransfer(dataTransfer: DataTransfer): boolean {
+  if (dataTransfer.types.includes('Files')) return true
+  return Array.from(dataTransfer.items).some((item) => item.kind === 'file')
+}
+
 function getReferenceMenuPosition(pointer: { x: number; y: number }): {
   x: number
   y: number
@@ -78,6 +113,87 @@ function getReferenceMenuPosition(pointer: { x: number; y: number }): {
       window.innerHeight - REFERENCE_MENU_HEIGHT - MENU_VIEWPORT_PADDING,
     ),
   }
+}
+
+function getNodeSize(node: Node): { width: number; height: number } {
+  return {
+    width: node.measured?.width ?? node.width ?? FALLBACK_NODE_WIDTH,
+    height: node.measured?.height ?? node.height ?? FALLBACK_NODE_HEIGHT,
+  }
+}
+
+function getNodeEdgePoint(node: Node, position: Position): { x: number; y: number } {
+  const { width, height } = getNodeSize(node)
+  return {
+    x: position === Position.Left ? node.position.x : node.position.x + width,
+    y: node.position.y + height / 2,
+  }
+}
+
+function getInteractionHandlePoint(
+  node: Node,
+  position: Position,
+): { x: number; y: number } {
+  const edgePoint = getNodeEdgePoint(node, position)
+  return {
+    x:
+      edgePoint.x +
+      (position === Position.Left
+        ? -INTERACTION_HANDLE_OFFSET
+        : INTERACTION_HANDLE_OFFSET),
+    y: edgePoint.y,
+  }
+}
+
+function PendingReferenceLine({
+  containerRef,
+  nodes,
+  state,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>
+  nodes: Node[]
+  state: ReferenceNodeMenuState
+}) {
+  const transform = useStore((s) => s.transform)
+  const { flowToScreenPosition } = useReactFlow()
+  const sourceNode = nodes.find((node) => node.id === state.sourceNodeId)
+  const containerRect = containerRef.current?.getBoundingClientRect()
+  if (!sourceNode || !containerRect) return null
+
+  const sourcePosition =
+    state.sourceHandleType === 'target' ? Position.Left : Position.Right
+  const sourcePoint = getInteractionHandlePoint(sourceNode, sourcePosition)
+  const targetPosition =
+    state.flowPosition.x >= sourcePoint.x ? Position.Left : Position.Right
+  const sourceScreen = flowToScreenPosition(sourcePoint)
+  const targetScreen = flowToScreenPosition(state.flowPosition)
+  const sourceLocal = {
+    x: sourceScreen.x - containerRect.left,
+    y: sourceScreen.y - containerRect.top,
+  }
+  const targetLocal = {
+    x: targetScreen.x - containerRect.left,
+    y: targetScreen.y - containerRect.top,
+  }
+  const [path] = getBezierPath({
+    sourceX: sourceLocal.x,
+    sourceY: sourceLocal.y,
+    sourcePosition,
+    targetX: targetLocal.x,
+    targetY: targetLocal.y,
+    targetPosition,
+  })
+
+  return (
+    <svg
+      className="pending-reference-line-layer"
+      data-transform={`${transform[0]},${transform[1]},${transform[2]}`}
+      aria-hidden="true"
+    >
+      <path className="pending-reference-line" d={path} />
+      <path className="pending-reference-line-flow" d={path} />
+    </svg>
+  )
 }
 
 export function CanvasView() {
@@ -101,6 +217,7 @@ export function CanvasView() {
   const [referenceMenu, setReferenceMenu] =
     useState<ReferenceNodeMenuState | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [fileDragActive, setFileDragActive] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const connectionStartRef = useRef<{
@@ -158,33 +275,76 @@ export function CanvasView() {
     [],
   )
 
-  const handleFileChange = useCallback(
-    async (event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0]
-      if (!file) return
-      const nodeType: FlowNodeType = file.type.startsWith('video/')
-        ? 'video'
-        : 'image'
-      const position = pendingUploadPosRef.current
-      // 先创建节点，让用户立即看到占位
+  const createUploadedNode = useCallback(
+    async (file: File, position: { x: number; y: number }) => {
+      const nodeType = getUploadNodeType(file)
+      if (!nodeType) return
+
       const nodeId = addNode(nodeType, position)
-      // 上传资产并回填 assetId
+      let localPreviewUrl: string | undefined
+      if (nodeType === 'image') {
+        localPreviewUrl = URL.createObjectURL(file)
+        updateNodeData(nodeId, {
+          title: file.name,
+          localPreviewUrl,
+          status: 'running',
+        } as Partial<BaseNodeData>)
+      } else {
+        updateNodeData(nodeId, {
+          title: file.name,
+          status: 'running',
+        } as Partial<BaseNodeData>)
+      }
+
       try {
         const asset = await uploadAsset(file)
         setAsset(asset)
         updateNodeData(nodeId, {
-          assetId: asset.id,
+          status: 'success',
           ...(nodeType === 'video'
-            ? { inputImageAssetIds: [] }
-            : null),
-        } as never)
+            ? {
+                assetIds: [asset.id],
+                inputImageAssetIds: [],
+              }
+            : {
+                assetId: asset.id,
+                localPreviewUrl: undefined,
+              }),
+        } as Partial<BaseNodeData>)
+        if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl)
       } catch (err) {
         console.error('[CanvasView] 上传资产失败:', err)
-        updateNodeData(nodeId, { status: 'error' } as never)
+        updateNodeData(nodeId, {
+          status: 'error',
+          error: err instanceof Error ? err.message : '上传资产失败',
+        } as Partial<BaseNodeData>)
       }
-      event.target.value = ''
     },
     [addNode, updateNodeData, setAsset],
+  )
+
+  const createUploadedNodes = useCallback(
+    (files: FileList | File[], position: { x: number; y: number }) => {
+      Array.from(files)
+        .filter((file) => getUploadNodeType(file) !== null)
+        .forEach((file, index) => {
+          void createUploadedNode(file, {
+            x: position.x + index * UPLOAD_STAGGER,
+            y: position.y + index * UPLOAD_STAGGER,
+          })
+        })
+    },
+    [createUploadedNode],
+  )
+
+  const handleFileChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files
+      if (!files || files.length === 0) return
+      createUploadedNodes(files, pendingUploadPosRef.current)
+      event.target.value = ''
+    },
+    [createUploadedNodes],
   )
 
   const handleCreateNode = useCallback(
@@ -263,6 +423,55 @@ export function CanvasView() {
     [addNode, onConnect],
   )
 
+  const handleCanvasDragEnter = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      setFileDragActive(true)
+    },
+    [],
+  )
+
+  const handleCanvasDragOver = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      setFileDragActive(true)
+    },
+    [],
+  )
+
+  const handleCanvasDragLeave = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      const relatedTarget = event.relatedTarget
+      if (
+        relatedTarget instanceof window.Node &&
+        event.currentTarget.contains(relatedTarget)
+      ) {
+        return
+      }
+      setFileDragActive(false)
+    },
+    [],
+  )
+
+  const handleCanvasDrop = useCallback(
+    (event: ReactDragEvent<HTMLDivElement>) => {
+      if (!hasFileTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      setFileDragActive(false)
+
+      const flowPosition = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      })
+      createUploadedNodes(event.dataTransfer.files, flowPosition)
+    },
+    [createUploadedNodes, screenToFlowPosition],
+  )
+
   // 在容器捕获阶段监听双击，只在画布 pane 上触发添加节点菜单
   useEffect(() => {
     const el = containerRef.current
@@ -275,6 +484,9 @@ export function CanvasView() {
         target.classList.contains('react-flow__pane') ||
         target.classList.contains('react-flow__renderer')
       ) {
+        event.preventDefault()
+        event.stopPropagation()
+        window.getSelection()?.removeAllRanges()
         setAddMenu({
           x: event.clientX,
           y: event.clientY,
@@ -292,7 +504,14 @@ export function CanvasView() {
   }, [screenToFlowPosition])
 
   return (
-    <div ref={containerRef} className="canvas-container">
+    <div
+      ref={containerRef}
+      className={`canvas-container${fileDragActive ? ' file-drag-active' : ''}`}
+      onDragEnterCapture={handleCanvasDragEnter}
+      onDragOverCapture={handleCanvasDragOver}
+      onDragLeaveCapture={handleCanvasDragLeave}
+      onDropCapture={handleCanvasDrop}
+    >
       <ReactFlow
         nodes={nodes as Node[]}
         edges={edges as Edge[]}
@@ -312,6 +531,7 @@ export function CanvasView() {
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
         panOnDrag={[1]}
+        zoomOnDoubleClick={false}
         connectionRadius={connectionRadius}
         deleteKeyCode={['Delete', 'Backspace']}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
@@ -323,7 +543,7 @@ export function CanvasView() {
           variant={BackgroundVariant.Dots}
           gap={22}
           size={1.5}
-          color="#262830"
+          color="#2a2a2a"
         />
         <Controls showInteractive={false} />
       </ReactFlow>
@@ -347,6 +567,14 @@ export function CanvasView() {
       )}
 
       <SelectionToolbar selectedNodeIds={selectedNodeIds} />
+
+      {referenceMenu && (
+        <PendingReferenceLine
+          containerRef={containerRef}
+          nodes={nodes as Node[]}
+          state={referenceMenu}
+        />
+      )}
 
       <input
         ref={fileInputRef}

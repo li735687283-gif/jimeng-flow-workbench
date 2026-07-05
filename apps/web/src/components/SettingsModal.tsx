@@ -9,6 +9,7 @@ import { Plus, RefreshCw, Settings as SettingsIcon, Trash2, X } from 'lucide-rea
 import type { Settings } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
+import { IMAGE_MODELS } from '@jimeng-flow/shared/generateNode'
 import { useSettingsStore } from '../state/settingsStore'
 import { listLlmModelsForSettings, testJimengConnection, testLlmConnection } from '../api/settings'
 
@@ -121,6 +122,38 @@ function normalizeModelOptions(
   return Array.from(map.values())
 }
 
+function cleanImageModelIds(models: string[]): string[] {
+  return uniqueModelIds(models)
+}
+
+function normalizeImageModelOptions(
+  availableModels: LlmModelInfo[],
+  selectedModels: string[],
+  defaultModel: string,
+): LlmModelInfo[] {
+  const map = new Map<string, LlmModelInfo>()
+  for (const model of IMAGE_MODELS) {
+    map.set(model.id, {
+      id: model.id,
+      label: model.label,
+      description: model.description,
+    })
+  }
+  for (const model of availableModels) {
+    const id = (model.id || model.label || '').trim()
+    if (!id) continue
+    if (!map.has(id)) {
+      map.set(id, { ...model, id, label: model.label || id })
+    }
+  }
+  for (const id of uniqueModelIds([...selectedModels, defaultModel])) {
+    if (!map.has(id)) {
+      map.set(id, { id, label: id, description: '第三方 API 图片模型' })
+    }
+  }
+  return Array.from(map.values())
+}
+
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { settings, loadSettings, saveSettings } = useSettingsStore()
   const [form, setForm] = useState<FormState>(DEFAULT_SETTINGS)
@@ -186,10 +219,24 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         ...(form.llmModels ?? []),
         form.llmModel,
       ])
+      const cleanedImageModels =
+        cleanImageModelIds([
+          ...(form.imageModels ?? []),
+          form.defaultModel,
+        ])
+      const imageModels =
+        cleanedImageModels.length > 0
+          ? cleanedImageModels
+          : DEFAULT_SETTINGS.imageModels
+      const defaultImageModel = imageModels.includes(form.defaultModel)
+        ? form.defaultModel
+        : imageModels[0] ?? DEFAULT_SETTINGS.defaultModel
       const nextForm = {
         ...form,
         llmModel: form.llmModel.trim() || cleanedModels[0] || DEFAULT_SETTINGS.llmModel,
         llmModels: cleanedModels.length > 0 ? cleanedModels : [DEFAULT_SETTINGS.llmModel],
+        defaultModel: defaultImageModel,
+        imageModels,
       }
       await saveSettings(nextForm)
       onClose()
@@ -284,6 +331,35 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }
 
+  const addImageModelRow = () => {
+    const used = new Set(form.imageModels ?? [])
+    const next =
+      imageModelOptions.find((model) => !used.has(model.id))?.id ??
+      DEFAULT_SETTINGS.imageModels[0] ??
+      ''
+    if (!next) return
+    update('imageModels', cleanImageModelIds([...(form.imageModels ?? []), next]))
+  }
+
+  const updateImageModelRow = (index: number, modelId: string) => {
+    const next = [...(form.imageModels ?? [])]
+    next[index] = modelId
+    const cleaned = cleanImageModelIds(next)
+    update('imageModels', cleaned)
+    if (!form.defaultModel.trim() || !cleaned.includes(form.defaultModel)) {
+      update('defaultModel', modelId)
+    }
+  }
+
+  const removeImageModelRow = (index: number) => {
+    const next = (form.imageModels ?? []).filter((_, itemIndex) => itemIndex !== index)
+    const cleaned = cleanImageModelIds(next)
+    update('imageModels', cleaned)
+    if (form.defaultModel && !cleaned.includes(form.defaultModel)) {
+      update('defaultModel', cleaned[0] ?? '')
+    }
+  }
+
   const renderTestResult = (result: { ok: boolean; message: string } | null) => {
     if (!result) return null
     return (
@@ -294,12 +370,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           borderRadius: '6px',
           fontSize: '12px',
           background: result.ok
-            ? 'rgba(40, 160, 80, 0.12)'
-            : 'rgba(220, 50, 50, 0.12)',
+            ? 'rgba(255, 255, 255, 0.12)'
+            : 'rgba(255, 255, 255, 0.08)',
           border: result.ok
-            ? '1px solid rgba(40, 160, 80, 0.5)'
-            : '1px solid rgba(220, 50, 50, 0.5)',
-          color: result.ok ? '#7ee0a0' : '#ff9a9a',
+            ? '1px solid rgba(255, 255, 255, 0.34)'
+            : '1px solid rgba(255, 255, 255, 0.2)',
+          color: result.ok ? '#eeeeee' : '#cfcfcf',
         }}
       >
         {result.ok ? '连接成功：' : '连接失败：'}
@@ -318,6 +394,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     ...selectedLlmModels,
     form.llmModel,
   ])
+  const selectedImageModels = cleanImageModelIds(form.imageModels ?? [])
+  const imageModelOptions = normalizeImageModelOptions(
+    availableLlmModels,
+    selectedImageModels,
+    form.defaultModel,
+  )
+  const defaultImageModelOptions =
+    selectedImageModels.length > 0 ? selectedImageModels : DEFAULT_SETTINGS.imageModels
 
   return (
     <div
@@ -391,10 +475,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               style={{
                 marginTop: '12px',
                 padding: '8px 10px',
-                background: 'rgba(220, 50, 50, 0.12)',
-                border: '1px solid rgba(220, 50, 50, 0.5)',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
                 borderRadius: '6px',
-                color: '#ff9a9a',
+                color: '#cfcfcf',
                 fontSize: '12px',
               }}
             >
@@ -445,6 +529,130 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <span style={{ color: '#777', fontSize: 11 }}>
                 生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
               </span>
+            </div>
+          </section>
+
+          {/* Image Models */}
+          <section style={sectionStyle}>
+            <div style={sectionTitleStyle}>图片模型</div>
+            <div style={{ ...fieldStyle, gap: '10px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                }}
+              >
+                <div style={helperTextStyle}>
+                  这里决定图片节点下拉菜单显示哪些图片模型；即梦模型走本机 CLI，第三方模型走下方 OpenAI-compatible API。
+                </div>
+                <button
+                  type="button"
+                  style={{
+                    ...subtleButtonStyle,
+                    opacity: loadingLlmModels ? 0.65 : 1,
+                    cursor: loadingLlmModels ? 'not-allowed' : 'pointer',
+                  }}
+                  disabled={loadingLlmModels}
+                  onClick={() => void refreshLlmModels()}
+                >
+                  <RefreshCw size={13} className={loadingLlmModels ? 'animate-spin' : undefined} />
+                  {loadingLlmModels ? '拉取中' : '刷新中转站'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {selectedImageModels.length === 0 && (
+                  <div
+                    style={{
+                      padding: '10px',
+                      border: '1px dashed #383838',
+                      borderRadius: '8px',
+                      color: '#777',
+                      fontSize: 12,
+                    }}
+                  >
+                    暂未添加常用图片模型。保存时会自动使用即梦默认模型，也可以手动输入第三方模型 ID。
+                  </div>
+                )}
+
+                <datalist id="set-image-model-options">
+                  {imageModelOptions.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label || model.id}
+                    </option>
+                  ))}
+                </datalist>
+
+                {selectedImageModels.map((modelId, index) => (
+                  <div
+                    key={`${modelId}-${index}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 34px',
+                      gap: '8px',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <input
+                      style={inputStyle}
+                      list="set-image-model-options"
+                      value={modelId}
+                      onChange={(e) => updateImageModelRow(index, e.target.value)}
+                      placeholder="选择或输入图片模型 ID，例如 gpt-image-1"
+                    />
+                    <button
+                      type="button"
+                      style={iconButtonStyle}
+                      onClick={() => removeImageModelRow(index)}
+                      aria-label="移除图片模型"
+                      title="移除图片模型"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  style={{
+                    ...subtleButtonStyle,
+                    width: '100%',
+                    justifyContent: 'center',
+                    borderStyle: 'dashed',
+                  }}
+                  onClick={addImageModelRow}
+                >
+                  <Plus size={14} />
+                  添加一个图片模型
+                </button>
+              </div>
+
+              <div style={fieldStyle}>
+                <label style={labelStyle} htmlFor="set-image-default-model">
+                  默认图片模型
+                </label>
+                <select
+                  id="set-image-default-model"
+                  style={inputStyle}
+                  value={
+                    defaultImageModelOptions.includes(form.defaultModel)
+                      ? form.defaultModel
+                      : defaultImageModelOptions[0] ?? ''
+                  }
+                  onChange={(e) => update('defaultModel', e.target.value)}
+                >
+                  {defaultImageModelOptions.map((modelId) => {
+                    const model = imageModelOptions.find((item) => item.id === modelId)
+                    return (
+                      <option key={modelId} value={modelId}>
+                        {model?.label ?? modelId}
+                      </option>
+                    )
+                  })}
+                </select>
+              </div>
             </div>
           </section>
 
@@ -534,7 +742,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </div>
 
                 {llmModelsMessage && (
-                  <div style={{ ...helperTextStyle, color: llmModelsMessage.includes('失败') ? '#ff9a9a' : '#8d8d8d' }}>
+                  <div style={{ ...helperTextStyle, color: llmModelsMessage.includes('失败') ? '#cfcfcf' : '#8d8d8d' }}>
                     {llmModelsMessage}
                   </div>
                 )}
@@ -645,7 +853,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           }}
         >
           {saveError && (
-            <div style={{ marginRight: 'auto', color: '#ff9a9a', fontSize: '12px', alignSelf: 'center' }}>
+            <div style={{ marginRight: 'auto', color: '#cfcfcf', fontSize: '12px', alignSelf: 'center' }}>
               保存失败：{saveError}
             </div>
           )}

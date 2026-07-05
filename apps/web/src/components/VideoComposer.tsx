@@ -546,7 +546,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
           style={{
             alignSelf: 'stretch',
             padding: '0 18px',
-            background: submitDisabled ? '#2a2a30' : 'var(--accent)',
+            background: submitDisabled ? '#2c2c2c' : 'var(--accent)',
             color: submitDisabled ? 'var(--text-dim)' : '#fff',
             border: 'none',
             borderRadius: 6,
@@ -573,7 +573,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         <div
           style={{
             fontSize: 11,
-            color: '#ef4444',
+            color: '#cfcfcf',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -588,8 +588,8 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
             onClick={() => void handleRetry()}
             style={{
               background: 'transparent',
-              border: '1px solid #ef4444',
-              color: '#ef4444',
+              border: '1px solid #cfcfcf',
+              color: '#cfcfcf',
               borderRadius: 5,
               padding: '3px 9px',
               fontSize: 11,
@@ -607,7 +607,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       )}
 
       {!isJimengConfigured && (
-        <div style={{ fontSize: 11, color: '#ef4444' }}>
+        <div style={{ fontSize: 11, color: '#cfcfcf' }}>
           未配置 dreamina CLI 时无法生成，请前往设置
         </div>
       )}

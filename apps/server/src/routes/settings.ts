@@ -41,6 +41,7 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       'llmApiKey',
       'outputDir',
       'defaultModel',
+      'imageModels',
       'defaultSize',
       'defaultVideoModel',
       'defaultVideoAspectRatio',

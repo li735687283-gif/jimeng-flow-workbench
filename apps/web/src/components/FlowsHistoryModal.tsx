@@ -112,10 +112,10 @@ export function FlowsHistoryModal({ open, onClose }: FlowsHistoryModalProps) {
             style={{
               marginBottom: '12px',
               padding: '8px 10px',
-              background: 'rgba(220, 50, 50, 0.12)',
-              border: '1px solid rgba(220, 50, 50, 0.5)',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
               borderRadius: '6px',
-              color: '#ff9a9a',
+              color: '#cfcfcf',
               fontSize: '12px',
             }}
           >

@@ -44,8 +44,8 @@ const statusBadgeStyle = (status: string): CSSProperties => {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 3,
-      background: 'rgba(34, 197, 94, 0.12)',
-      color: '#22c55e',
+      background: 'rgba(255, 255, 255, 0.12)',
+      color: '#ededed',
       fontSize: 10,
       padding: '2px 6px',
       borderRadius: 4,
@@ -57,8 +57,8 @@ const statusBadgeStyle = (status: string): CSSProperties => {
       display: 'inline-flex',
       alignItems: 'center',
       gap: 3,
-      background: 'rgba(239, 68, 68, 0.12)',
-      color: '#ef4444',
+      background: 'rgba(255, 255, 255, 0.08)',
+      color: '#cfcfcf',
       fontSize: 10,
       padding: '2px 6px',
       borderRadius: 4,
@@ -71,7 +71,7 @@ const statusBadgeStyle = (status: string): CSSProperties => {
       alignItems: 'center',
       gap: 3,
       background: 'rgba(255, 255, 255, 0.1)',
-      color: '#ededee',
+      color: '#ededed',
       fontSize: 10,
       padding: '2px 6px',
       borderRadius: 4,
@@ -95,11 +95,11 @@ const errorRowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 4,
-  background: 'rgba(239, 68, 68, 0.12)',
-  border: '1px solid #ef4444',
+  background: 'rgba(255, 255, 255, 0.08)',
+  border: '1px solid #cfcfcf',
   borderRadius: 4,
   padding: '4px 6px',
-  color: '#ef4444',
+  color: '#cfcfcf',
   fontSize: 10,
 }
 
@@ -137,45 +137,58 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       title={nodeData.title}
       status={displayStatus as BaseNodeData['status']}
       selected={selected}
+      nodeId={id}
+      nodeType="video"
+      mediaDisplay={!!firstAssetId}
     >
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          width: 620,
-          minHeight: 320,
-          position: 'relative',
-        }}
-      >
-        {/* 视频预览区 */}
+      {firstAssetId ? (
         <div
-          className="node-preview-area"
+          className="media-display-node video-media-display"
           style={{
             width: 620,
-            height: 220,
-            background: 'transparent',
-            borderRadius: 11,
+            maxWidth: '72vw',
+            borderRadius: 12,
             overflow: 'hidden',
-            position: 'relative',
-            padding: 0,
-            margin: 0,
-            minWidth: 0,
-            minHeight: 0,
           }}
         >
-          {firstAssetId ? (
-            <video
-              src={getAssetFileUrl(firstAssetId)}
-              controls
-              muted
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                display: 'block',
-              }}
-            />
-          ) : (
+          <video
+            src={getAssetFileUrl(firstAssetId)}
+            controls
+            muted
+            style={{
+              width: '100%',
+              maxHeight: 420,
+              objectFit: 'contain',
+              display: 'block',
+            }}
+          />
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: 620,
+            minHeight: 320,
+            position: 'relative',
+          }}
+        >
+          {/* 视频预览区 */}
+          <div
+            className="node-preview-area"
+            style={{
+              width: 620,
+              height: 220,
+              background: 'transparent',
+              borderRadius: 11,
+              overflow: 'hidden',
+              position: 'relative',
+              padding: 0,
+              margin: 0,
+              minWidth: 0,
+              minHeight: 0,
+            }}
+          >
             <div
               style={{
                 display: 'flex',
@@ -192,100 +205,100 @@ export function VideoNode({ id, data, selected }: NodeProps) {
                 className="node-placeholder-icon"
               />
             </div>
+          </div>
+
+          {/* 状态徽章 */}
+          {displayStatus !== 'idle' ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: 10,
+                padding: '0 28px',
+              }}
+            >
+              <span style={statusBadgeStyle(displayStatus)}>
+                {STATUS_LABEL[displayStatus] ?? displayStatus}
+              </span>
+              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
+                {modeLabel}
+              </span>
+            </div>
+          ) : null}
+
+          {/* 错误信息 */}
+          {error ? (
+            <div style={errorRowStyle}>
+              <AlertCircle size={11} style={{ flexShrink: 0 }} />
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={error}
+              >
+                {error}
+              </span>
+            </div>
+          ) : null}
+
+          {/* Quick actions */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: 14,
+              padding: displayStatus !== 'idle' ? '8px 28px 28px' : '0 28px 32px',
+            }}
+          >
+            <div style={{ color: '#8e8e8e', fontSize: 14 }}>尝试:</div>
+            <button
+              type="button"
+              style={quickBtnStyle}
+              onClick={() => setMode('image_to_video')}
+              title="使用首帧图片生成视频"
+            >
+              <ImageIcon size={15} strokeWidth={1.8} />
+              首帧生成视频
+            </button>
+            <button
+              type="button"
+              style={quickBtnStyle}
+              onClick={() => setMode('first_last_frame')}
+              title="使用首尾帧图片生成视频"
+            >
+              <Film size={15} strokeWidth={1.8} />
+              首尾帧生成视频
+            </button>
+          </div>
+
+          {/* 已连接输入 */}
+          {connectedCount > 0 ? (
+            <div
+              style={{
+                position: 'absolute',
+                right: 14,
+                bottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: 10,
+                color: 'var(--text-dim)',
+                gap: 3,
+              }}
+            >
+              <Link2 size={10} strokeWidth={1.6} />
+              {connectedCount}
+            </div>
+          ) : null}
+
+          {hint && (
+            <div style={{ fontSize: 10, color: 'var(--accent)' }}>{hint}</div>
           )}
         </div>
-
-        {/* 状态徽章 */}
-        {displayStatus !== 'idle' ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: 10,
-              padding: '0 28px',
-            }}
-          >
-            <span style={statusBadgeStyle(displayStatus)}>
-              {STATUS_LABEL[displayStatus] ?? displayStatus}
-            </span>
-            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
-              {modeLabel}
-            </span>
-          </div>
-        ) : null}
-
-        {/* 错误信息 */}
-        {error ? (
-          <div style={errorRowStyle}>
-            <AlertCircle size={11} style={{ flexShrink: 0 }} />
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={error}
-            >
-              {error}
-            </span>
-          </div>
-        ) : null}
-
-        {/* Quick actions */}
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 14,
-            padding: displayStatus !== 'idle' ? '8px 28px 28px' : '0 28px 32px',
-          }}
-        >
-          <div style={{ color: '#8b8d92', fontSize: 14 }}>尝试:</div>
-          <button
-            type="button"
-            style={quickBtnStyle}
-            onClick={() => setMode('image_to_video')}
-            title="使用首帧图片生成视频"
-          >
-            <ImageIcon size={15} strokeWidth={1.8} />
-            首帧生成视频
-          </button>
-          <button
-            type="button"
-            style={quickBtnStyle}
-            onClick={() => setMode('first_last_frame')}
-            title="使用首尾帧图片生成视频"
-          >
-            <Film size={15} strokeWidth={1.8} />
-            首尾帧生成视频
-          </button>
-        </div>
-
-        {/* 已连接输入 */}
-        {connectedCount > 0 ? (
-          <div
-            style={{
-              position: 'absolute',
-              right: 14,
-              bottom: 12,
-              display: 'flex',
-              alignItems: 'center',
-              fontSize: 10,
-              color: 'var(--text-dim)',
-              gap: 3,
-            }}
-          >
-            <Link2 size={10} strokeWidth={1.6} />
-            {connectedCount}
-          </div>
-        ) : null}
-
-        {hint && (
-          <div style={{ fontSize: 10, color: 'var(--accent)' }}>{hint}</div>
-        )}
-      </div>
+      )}
     </NodeWrapper>
   )
 }
