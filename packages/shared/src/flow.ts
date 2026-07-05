@@ -56,4 +56,5 @@ export interface UpdateFlowRequest {
   name?: string
   nodes?: FlowNode[]
   edges?: FlowEdge[]
+  deletedNodeIds?: string[]
 }

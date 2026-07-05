@@ -72,6 +72,7 @@ function cleanupRemovedEdgeReferences(
 interface CanvasState {
   nodes: Node[]
   edges: Edge[]
+  deletedNodeIds: string[]
   selectedNodeId: string | null
   onNodesChange: OnNodesChange
   onEdgesChange: OnEdgesChange
@@ -80,6 +81,7 @@ interface CanvasState {
   onEdgesDelete: (edges: Edge[]) => void
   addNode: (type: FlowNodeType, position: { x: number; y: number }) => string
   removeNode: (id: string) => void
+  clearDeletedNodeIds: () => void
   removeEdge: (id: string) => void
   updateNodeData: (id: string, data: Partial<BaseNodeData>) => void
   setSelectedNode: (id: string | null) => void
@@ -94,6 +96,7 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodes: [],
   edges: [],
+  deletedNodeIds: [],
   selectedNodeId: null,
 
   onNodesChange: (changes: NodeChange[]) => {
@@ -113,6 +116,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   onNodesDelete: (nodes: Node[]) => {
     const ids = new Set(nodes.map((n) => n.id))
     set((state) => ({
+      deletedNodeIds: Array.from(
+        new Set([...state.deletedNodeIds, ...ids]),
+      ),
       edges: state.edges.filter(
         (e) => !ids.has(e.source) && !ids.has(e.target),
       ),
@@ -149,6 +155,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   removeNode: (id) => {
     set((state) => ({
+      deletedNodeIds: state.deletedNodeIds.includes(id)
+        ? state.deletedNodeIds
+        : [...state.deletedNodeIds, id],
       nodes: state.nodes.filter((n) => n.id !== id),
       edges: state.edges.filter(
         (e) => e.source !== id && e.target !== id,
@@ -156,6 +165,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
     }))
   },
+
+  clearDeletedNodeIds: () => set({ deletedNodeIds: [] }),
 
   removeEdge: (id) => {
     set((state) => ({

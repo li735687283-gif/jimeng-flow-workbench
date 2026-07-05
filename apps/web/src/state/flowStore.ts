@@ -71,6 +71,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       useCanvasStore.setState({
         nodes: flow.nodes,
         edges: flow.edges,
+        deletedNodeIds: [],
         selectedNodeId: null,
       })
       set({
@@ -96,6 +97,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       useCanvasStore.setState({
         nodes: [],
         edges: [],
+        deletedNodeIds: [],
         selectedNodeId: null,
       })
       set({
@@ -118,11 +120,14 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     if (!currentFlowId) return
     set({ saving: true, error: null })
     try {
-      const { nodes, edges } = useCanvasStore.getState()
+      const { nodes, edges, deletedNodeIds, clearDeletedNodeIds } =
+        useCanvasStore.getState()
       const updated = await flowsApi.updateFlow(currentFlowId, {
         nodes,
         edges,
+        ...(deletedNodeIds.length > 0 ? { deletedNodeIds } : {}),
       })
+      clearDeletedNodeIds()
       set({
         currentFlowName: updated.name,
         lastSavedAt: Date.now(),

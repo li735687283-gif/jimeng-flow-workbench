@@ -91,6 +91,11 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       if (Array.isArray(body.edges)) {
         safePatch.edges = body.edges
       }
+      if (Array.isArray(body.deletedNodeIds)) {
+        safePatch.deletedNodeIds = body.deletedNodeIds.filter(
+          (id): id is string => typeof id === 'string',
+        )
+      }
 
       try {
         return await updateFlow(req.params.id, safePatch)

@@ -38,7 +38,11 @@ function hasGeneratedAsset(node: FlowNode | undefined): boolean {
   return hasStringValue(node?.data.assetId)
 }
 
-function shouldKeepOmittedCurrentNode(node: FlowNode): boolean {
+function shouldKeepOmittedCurrentNode(
+  node: FlowNode,
+  deletedNodeIds: ReadonlySet<string>,
+): boolean {
+  if (deletedNodeIds.has(node.id)) return false
   return hasGeneratedAsset(node)
 }
 
@@ -93,6 +97,7 @@ function mergeGeneratedImageData(
 export function mergeNodesForFlowUpdate(
   currentNodes: FlowNode[],
   incomingNodes: FlowNode[],
+  deletedNodeIds: ReadonlySet<string> = new Set(),
 ): FlowNode[] {
   const currentById = new Map(currentNodes.map((node) => [node.id, node]))
   const incomingIds = new Set(incomingNodes.map((node) => node.id))
@@ -110,7 +115,10 @@ export function mergeNodesForFlowUpdate(
   })
 
   for (const current of currentNodes) {
-    if (!incomingIds.has(current.id) && shouldKeepOmittedCurrentNode(current)) {
+    if (
+      !incomingIds.has(current.id) &&
+      shouldKeepOmittedCurrentNode(current, deletedNodeIds)
+    ) {
       merged.push(current)
     }
   }
@@ -243,11 +251,15 @@ export async function updateFlow(
 ): Promise<Flow> {
   validateFlowId(id)
   const current = await getFlow(id)
+  const deletedNodeIds = new Set(
+    Array.isArray(patch.deletedNodeIds) ? patch.deletedNodeIds : [],
+  )
   const patchWithMergedNodes: UpdateFlowRequest = {
     ...patch,
     nodes: Array.isArray(patch.nodes)
-      ? mergeNodesForFlowUpdate(current.nodes, patch.nodes)
+      ? mergeNodesForFlowUpdate(current.nodes, patch.nodes, deletedNodeIds)
       : patch.nodes,
+    deletedNodeIds: undefined,
   }
   const next: Flow = {
     ...current,

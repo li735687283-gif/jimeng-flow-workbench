@@ -205,3 +205,48 @@ test('mergeNodesForFlowUpdate keeps current generated nodes missing from a stale
   assert.equal(merged[1].id, 'image-generated')
   assert.equal(merged[1].data.assetId, 'asset_generated')
 })
+
+test('mergeNodesForFlowUpdate does not restore generated nodes that were explicitly deleted', () => {
+  const currentNodes: FlowNode[] = [
+    {
+      id: 'image-generated',
+      type: 'image',
+      position: { x: 320, y: 80 },
+      data: {
+        title: '图片节点 2',
+        status: 'success',
+        assetId: 'asset_generated',
+        outputAssetIds: ['asset_generated'],
+        generationId: 'gen_generated',
+        updatedAt: '2026-07-05T14:12:45.000Z',
+      },
+    },
+    {
+      id: 'text-1',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: {
+        title: '文本节点 1',
+      },
+    },
+  ]
+  const incomingNodes: FlowNode[] = [
+    {
+      id: 'text-1',
+      type: 'text',
+      position: { x: 20, y: 30 },
+      data: {
+        title: '文本节点 1',
+      },
+    },
+  ]
+
+  const merged = mergeNodesForFlowUpdate(
+    currentNodes,
+    incomingNodes,
+    new Set(['image-generated']),
+  )
+
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].id, 'text-1')
+})
