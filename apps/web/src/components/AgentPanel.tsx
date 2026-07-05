@@ -18,7 +18,7 @@ import {
   X,
   Film,
 } from 'lucide-react'
-import type { PromptOptimizeRequest, AgentMessage } from '@jimeng-flow/shared/agentMessage'
+import type { PromptOptimizeRequest, AgentMessage, StoryboardData } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
   IMAGE_MODELS,
@@ -190,6 +190,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const appendAssistant = useAgentStore((s) => s.appendAssistant)
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
+  const conversationContext = useAgentStore((s) => s.conversationContext)
+  const setConversationContext = useAgentStore((s) => s.setConversationContext)
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
@@ -225,7 +227,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       quality: 'standard',
     })
   const [videoGenerationStatus, setVideoGenerationStatus] = useState('')
-  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'done'>('idle')
+  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'done'>('idle')
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [listening, setListening] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
@@ -512,6 +514,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const inputImageAssetIds = imageContextNodes
       .map((node) => (node.data as { assetId?: string }).assetId)
       .filter((assetId): assetId is string => !!assetId)
+    const referenceAssetId = useAgentStore.getState().conversationContext.referenceAssetId
+    if (referenceAssetId && !inputImageAssetIds.includes(referenceAssetId)) {
+      inputImageAssetIds.push(referenceAssetId)
+    }
     const skillHint =
       activeSkills.length > 0
         ? `\n\n技能要求：${activeSkills
@@ -587,6 +593,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       } as unknown as Partial<BaseNodeData>)
       setPendingImageRequest(null)
       setImageGenerationStatus('已生成并写入画布')
+
+      // 自动将第一张图设为参考图（风格一致性锁定）
+      if (outputAssetIds.length > 0) {
+        useAgentStore.getState().setConversationContext({
+          referenceAssetId: outputAssetIds[0],
+          lastGeneratedAssetIds: outputAssetIds,
+        })
+      }
 
       // 如果 intent 是 image_then_video，图片生成完成后自动触发视频生成
       const lastIntent = useAgentStore.getState().lastResponse?.intent
@@ -727,6 +741,229 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
       setVideoGenerationStatus(message)
+    }
+  }
+
+  const startBatchImageGeneration = async (storyboard: StoryboardData) => {
+    if (!isJimengConfigured) {
+      setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
+      return
+    }
+
+    const size =
+      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
+      IMAGE_SIZES[0]
+    const basePos = getCanvasDropPosition()
+    const generateNodeIds: string[] = []
+
+    // 1. 为每个镜头创建 generate 节点
+    storyboard.items.forEach((item, index) => {
+      const nodeId = addNode('generate', {
+        x: basePos.x + index * 260,
+        y: basePos.y,
+      })
+      if (nodeId) {
+        generateNodeIds.push(nodeId)
+        updateNodeData(nodeId, {
+          prompt: item.prompt,
+          model: imageGenerationParams.model,
+          width: size.width,
+          height: size.height,
+          count: 1,
+          seed: null,
+          status: 'queued',
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+      }
+    })
+
+    const generateStore = useGenerateStore.getState()
+    const newImageAssetIds: string[] = []
+
+    // 2. 串行生成每个镜头
+    for (let i = 0; i < storyboard.items.length; i++) {
+      const item = storyboard.items[i]
+      const generateNodeId = generateNodeIds[i]
+      if (!generateNodeId) continue
+
+      const request: GenerationRequest = {
+        flowId: 'local',
+        nodeId: generateNodeId,
+        mediaType: 'image',
+        prompt: item.prompt,
+        inputImages: (() => {
+          const refId = useAgentStore.getState().conversationContext.referenceAssetId
+          return refId ? [refId] : []
+        })(),
+        model: imageGenerationParams.model,
+        width: size.width,
+        height: size.height,
+        count: 1,
+        seed: null,
+      }
+
+      generateStore.setLastRequest(generateNodeId, request)
+      generateStore.setStatus(generateNodeId, 'queued')
+      generateStore.setError(generateNodeId, undefined)
+
+      try {
+        const response = await createGeneration(request)
+        generateStore.setGenerationId(generateNodeId, response.id)
+        const results = response.results ?? []
+        const assetIds = results
+          .map((result) => result.assetId)
+          .filter((assetId): assetId is string => !!assetId)
+
+        generateStore.setStatus(generateNodeId, response.status)
+        if (response.error) generateStore.setError(generateNodeId, response.error)
+
+        // 创建 image 节点并连线
+        if (assetIds.length > 0) {
+          const imageNodeId = addNode('image', {
+            x: basePos.x + i * 260 + 300,
+            y: basePos.y,
+          })
+          if (imageNodeId) {
+            updateNodeData(imageNodeId, {
+              assetId: assetIds[0],
+            } as unknown as Partial<BaseNodeData>)
+            onConnect({
+              source: generateNodeId,
+              target: imageNodeId,
+              sourceHandle: null,
+              targetHandle: null,
+            })
+            newImageAssetIds[i] = assetIds[0]
+          }
+        }
+
+        updateNodeData(generateNodeId, {
+          status: response.status,
+          error: response.error,
+          outputAssetIds: assetIds,
+          generationId: response.id,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        generateStore.setError(generateNodeId, message)
+        updateNodeData(generateNodeId, {
+          status: 'error',
+          error: message,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+      }
+    }
+
+    // 3. 更新消息中的 storyboard imageAssetId
+    if (newImageAssetIds.length > 0) {
+      const lastMsg = useAgentStore.getState().messages[useAgentStore.getState().messages.length - 1]
+      if (lastMsg?.role === 'assistant' && lastMsg.storyboard) {
+        const updatedItems = lastMsg.storyboard.items.map((item, index) => ({
+          ...item,
+          imageAssetId: newImageAssetIds[index] ?? item.imageAssetId,
+        }))
+        useAgentStore.setState((state) => ({
+          messages: state.messages.map((msg) =>
+            msg.id === lastMsg.id
+              ? { ...msg, storyboard: { ...msg.storyboard!, items: updatedItems } }
+              : msg
+          ),
+        }))
+      }
+    }
+
+    setImageGenerationStatus('分镜图片已生成并写入画布')
+  }
+
+  const startBatchVideoGeneration = async (storyboard: StoryboardData) => {
+    if (!isJimengConfigured) {
+      setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
+      return
+    }
+
+    const basePos = getCanvasDropPosition()
+    const videoNodeIds: string[] = []
+
+    // 为每个有 imageAssetId 的镜头创建视频节点
+    for (let i = 0; i < storyboard.items.length; i++) {
+      const item = storyboard.items[i]
+      if (!item.imageAssetId) continue
+
+      const videoNodeId = addNode('video', {
+        x: basePos.x + i * 260,
+        y: basePos.y + 300,
+      })
+      if (!videoNodeId) continue
+
+      videoNodeIds.push(videoNodeId)
+
+      const request: VideoGenerationRequest = {
+        flowId: 'local',
+        nodeId: videoNodeId,
+        mediaType: 'video',
+        mode: 'image_to_video',
+        prompt: item.shotDescription,
+        inputImages: [item.imageAssetId],
+        model: videoGenerationParams.model,
+        aspectRatio: videoGenerationParams.aspectRatio,
+        resolution: videoGenerationParams.resolution,
+        quality: videoGenerationParams.quality,
+        durationSeconds: videoGenerationParams.durationSeconds,
+        count: 1,
+        generateAudio: true,
+      }
+
+      const generateStore = useGenerateStore.getState()
+      generateStore.setLastRequest(videoNodeId, request)
+      generateStore.setStatus(videoNodeId, 'queued')
+      generateStore.setError(videoNodeId, undefined)
+      updateNodeData(videoNodeId, {
+        prompt: item.shotDescription,
+        model: videoGenerationParams.model,
+        aspectRatio: videoGenerationParams.aspectRatio,
+        resolution: videoGenerationParams.resolution,
+        quality: videoGenerationParams.quality,
+        durationSeconds: videoGenerationParams.durationSeconds,
+        count: 1,
+        mode: 'image_to_video',
+        inputImageAssetIds: [item.imageAssetId],
+        status: 'queued',
+        error: undefined,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+
+      try {
+        const response = await createGeneration(request)
+        generateStore.setGenerationId(videoNodeId, response.id)
+        const results = response.results ?? []
+        const assetIds = results
+          .map((result) => result.assetId)
+          .filter((assetId): assetId is string => !!assetId)
+
+        generateStore.setStatus(videoNodeId, response.status)
+        if (response.error) generateStore.setError(videoNodeId, response.error)
+        updateNodeData(videoNodeId, {
+          status: response.status,
+          error: response.error,
+          assetIds,
+          generationId: response.id,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        generateStore.setError(videoNodeId, message)
+        updateNodeData(videoNodeId, {
+          status: 'error',
+          error: message,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+      }
+    }
+
+    if (videoNodeIds.length > 0) {
+      setVideoGenerationStatus('视频生成已提交到画布')
+      setSkillStep('done')
     }
   }
 
@@ -905,6 +1142,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         })
         setVideoGenerationStatus('')
         setTimeout(() => setSkillStep('done'), 600)
+      } else if (intent === 'story_mode') {
+        setSkillStep('story')
+        setTimeout(() => setSkillStep('done'), 600)
       } else {
         setSkillStep('done')
       }
@@ -1004,6 +1244,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         })
         setVideoGenerationStatus('')
         setTimeout(() => setSkillStep('done'), 600)
+      } else if (intent === 'story_mode') {
+        setSkillStep('story')
+        setTimeout(() => setSkillStep('done'), 600)
       } else {
         // text 纯文本对话，不需要生成
         setSkillStep('done')
@@ -1100,6 +1343,41 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 <p>{message.optimizedPrompt}</p>
               </div>
             )}
+            {message.intent === 'story_mode' && message.storyboard && (
+              <div className="agent-storyboard-card">
+                <div className="agent-storyboard-title">
+                  <Film size={14} />
+                  <span>{message.storyboard.title}</span>
+                  <span className="agent-storyboard-style">{message.storyboard.style}</span>
+                </div>
+                <div className="agent-storyboard-items">
+                  {message.storyboard.items.map((item) => (
+                    <div key={item.id} className="agent-storyboard-item">
+                      <span className="agent-shot-number">镜头 {item.shotNumber}</span>
+                      <span className="agent-shot-desc">{item.shotDescription}</span>
+                      <span className="agent-shot-prompt">{item.prompt}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="agent-storyboard-actions">
+                  {message.storyboard.items.every((item) => item.imageAssetId) ? (
+                    <button
+                      type="button"
+                      onClick={() => startBatchVideoGeneration(message.storyboard!)}
+                    >
+                      <Film size={12} /> 生成视频
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startBatchImageGeneration(message.storyboard!)}
+                    >
+                      <Sparkles size={12} /> 开始生成分镜图
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             {message.role === 'assistant' && (
               <div className="agent-message-actions">
                 {(message.intent === 'image' || message.intent === 'image_then_video') && (
@@ -1129,6 +1407,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                       }}
                     >
                       <Sparkles size={12} /> 生成更多图片
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-msg-action-btn"
+                      onClick={() => {
+                        const lastAssetId = useAgentStore.getState().conversationContext.lastGeneratedAssetIds?.[0]
+                        if (lastAssetId) {
+                          useAgentStore.getState().setConversationContext({ referenceAssetId: lastAssetId })
+                        }
+                      }}
+                    >
+                      <ImageIcon size={12} /> 锁定参考风格
                     </button>
                   </>
                 )}
@@ -1178,6 +1468,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-skill-status">
             <span className="agent-skill-status-dot running" />
             <span className="agent-skill-status-label">生成视频</span>
+            <span className="agent-skill-status-state">执行中...</span>
+          </div>
+        )}
+        {skillStep === 'story' && (
+          <div className="agent-skill-status">
+            <span className="agent-skill-status-dot running" />
+            <span className="agent-skill-status-label">生成故事分镜</span>
             <span className="agent-skill-status-state">执行中...</span>
           </div>
         )}
@@ -1489,6 +1786,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 <X size={11} />
               </button>
             ))}
+          </div>
+        )}
+
+        {conversationContext.referenceAssetId && (
+          <div className="agent-reference-lock">
+            <ImageIcon size={11} />
+            <span>已锁定参考风格</span>
+            <button
+              type="button"
+              onClick={() => setConversationContext({ referenceAssetId: undefined })}
+            >
+              <X size={11} /> 解除
+            </button>
           </div>
         )}
 

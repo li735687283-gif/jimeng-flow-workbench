@@ -27,6 +27,8 @@ export interface AgentMessage {
   thinking?: string
   /** Agent 判断的用户意图 */
   intent?: AgentIntent
+  /** 分镜/故事板数据（intent==='story_mode' 时） */
+  storyboard?: StoryboardData
   createdAt: string
 }
 
@@ -34,7 +36,36 @@ export interface AgentMessage {
  * Agent 判断的用户意图类型。
  * 参考：前端根据 intent 展示不同的技能加载和生成确认卡片。
  */
-export type AgentIntent = 'image' | 'video' | 'text' | 'image_then_video'
+export type AgentIntent = 'image' | 'video' | 'text' | 'image_then_video' | 'story_mode'
+
+/**
+ * 分镜/故事板单条镜头
+ */
+export interface StoryboardItem {
+  id: string
+  /** 镜头序号 */
+  shotNumber: number
+  /** 镜头描述（给用户看） */
+  shotDescription: string
+  /** 生成提示词 */
+  prompt: string
+  /** 生成后的图片 assetId */
+  imageAssetId?: string
+  /** 生成后的视频 assetId */
+  videoAssetId?: string
+}
+
+/**
+ * 分镜/故事板数据
+ */
+export interface StoryboardData {
+  /** 故事标题 */
+  title: string
+  /** 整体风格描述 */
+  style: string
+  /** 镜头列表 */
+  items: StoryboardItem[]
+}
 
 /**
  * Agent 建议的参数（参考 PRD 8.7、10.5）
@@ -87,8 +118,10 @@ export interface PromptOptimizeResponse {
   reasoning: string
   /** Agent 详细思考过程（可折叠展示给用户） */
   thinking?: string
-  /** Agent 判断的用户意图：image / video / text / image_then_video */
+  /** Agent 判断的用户意图：image / video / text / image_then_video / story_mode */
   intent?: AgentIntent
+  /** 分镜/故事板数据（intent==='story_mode' 时） */
+  storyboard?: StoryboardData
   /** 优化后的提示词 */
   optimizedPrompt: string
   /** 负面约束（需要避免的内容） */

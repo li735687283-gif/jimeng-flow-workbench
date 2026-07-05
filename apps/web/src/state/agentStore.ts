@@ -110,6 +110,7 @@ export const useAgentStore = create<AgentStore>((set) => ({
       content: response.reasoning,
       thinking: response.thinking,
       intent: response.intent,
+      storyboard: response.storyboard,
       contextNodeIds: response.usedContextNodeIds,
       optimizedPrompt: response.optimizedPrompt,
       proposedActions: response.proposedActions,
