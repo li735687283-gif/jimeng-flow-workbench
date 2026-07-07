@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ArrowLeft } from 'lucide-react'
@@ -9,6 +9,7 @@ import { AgentPanel } from './components/AgentPanel'
 import { FlowsHistoryModal } from './components/FlowsHistoryModal'
 import { SettingsModal } from './components/SettingsModal'
 import { useCanvasStore } from './state/canvasStore'
+import { useFlowStore } from './state/flowStore'
 import { useSettingsStore } from './state/settingsStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import {
@@ -31,8 +32,10 @@ function AppInner() {
   const nodes = useCanvasStore((s) => s.nodes)
   const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const currentFlowId = useFlowStore((s) => s.currentFlowId)
   const loadSettings = useSettingsStore((s) => s.loadSettings)
   const { fitView, screenToFlowPosition } = useReactFlow()
+  const centeredFlowIdRef = useRef<string | null>(null)
 
   // 启用自动保存（首次挂载时若无 currentFlowId 会自动新建空工作流）
   useAutoSave()
@@ -42,6 +45,26 @@ function AppInner() {
       console.error('[App] 加载设置失败:', err)
     })
   }, [loadSettings])
+
+  useEffect(() => {
+    if (!currentFlowId) {
+      centeredFlowIdRef.current = null
+      return
+    }
+    if (centeredFlowIdRef.current === currentFlowId) return
+
+    centeredFlowIdRef.current = currentFlowId
+    if (nodes.length === 0) return
+
+    const frame = window.requestAnimationFrame(() => {
+      void fitView({
+        padding: 0.2,
+        duration: 0,
+        maxZoom: 1,
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [currentFlowId, fitView, nodes.length])
 
   const getCanvasCenterPosition = useCallback(() => {
     const canvasEl = document.querySelector('.react-flow') as HTMLElement | null

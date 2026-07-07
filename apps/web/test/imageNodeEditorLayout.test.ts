@@ -15,7 +15,7 @@ test('image node editor starts with reference thumbnails like video nodes', asyn
   assert.equal(source.includes('<span>参考</span>'), false)
 
   const stripIndex = source.indexOf('<ReferenceAssetStrip')
-  const promptIndex = source.indexOf('className="image-editor-prompt"')
+  const promptIndex = source.indexOf('<PromptEditor')
 
   assert.ok(stripIndex > -1)
   assert.ok(promptIndex > -1)

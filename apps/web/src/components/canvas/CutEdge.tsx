@@ -22,7 +22,7 @@ function getNodeSize(node: Node): { width: number; height: number } {
   }
 }
 
-function getCardEdgePoint(
+export function getCardEdgePoint(
   node: Node | undefined,
   fallback: { x: number; y: number },
   position: Position,
@@ -38,7 +38,7 @@ function getCardEdgePoint(
   if (position === Position.Left || position === Position.Right) {
     return {
       x: position === Position.Left ? left : right,
-      y: Math.min(bottom, Math.max(top, fallback.y)),
+      y: top + height / 2,
     }
   }
 

@@ -535,8 +535,8 @@ export function CanvasView() {
         connectionRadius={connectionRadius}
         deleteKeyCode={['Delete', 'Backspace']}
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-        minZoom={0.35}
-        maxZoom={1.6}
+        minZoom={0.05}
+        maxZoom={3}
         proOptions={{ hideAttribution: true }}
       >
         <Background

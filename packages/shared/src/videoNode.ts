@@ -12,6 +12,7 @@ export type VideoMode =
   | 'text_to_video'
   | 'image_to_video'
   | 'all_reference'
+  | 'action_mimic'
   | 'first_last_frame'
   | 'image_reference'
 
@@ -162,8 +163,9 @@ export const VIDEO_MODES: { id: VideoMode; label: string }[] = [
   { id: 'text_to_video', label: '文生视频' },
   { id: 'image_to_video', label: '图生视频' },
   { id: 'all_reference', label: '全能参考' },
+  { id: 'action_mimic', label: '动作模仿' },
   { id: 'first_last_frame', label: '首尾帧' },
-  { id: 'image_reference', label: '图片参考' },
+  { id: 'image_reference', label: '多图参考' },
 ]
 
 /** 视频比例选项 */
@@ -187,9 +189,6 @@ export const VIDEO_RESOLUTIONS: VideoResolution[] = [
 
 /** 视频时长选项（秒） */
 export const VIDEO_DURATIONS: number[] = [
-  1,
-  2,
-  3,
   4,
   5,
   6,

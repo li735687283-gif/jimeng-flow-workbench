@@ -307,12 +307,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       const cleanedImageModels =
         cleanImageModelIds([
           ...(form.imageModels ?? []),
-          form.defaultModel,
         ])
       const cleanedVideoModels =
         cleanVideoModelIds([
           ...(form.videoModels ?? []),
-          form.defaultVideoModel,
         ])
       const imageModels =
         cleanedImageModels.length > 0
@@ -322,19 +320,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         cleanedVideoModels.length > 0
           ? cleanedVideoModels
           : DEFAULT_SETTINGS.videoModels
-      const defaultImageModel = imageModels.includes(form.defaultModel)
-        ? form.defaultModel
-        : imageModels[0] ?? DEFAULT_SETTINGS.defaultModel
-      const defaultVideoModel = videoModels.includes(form.defaultVideoModel)
-        ? form.defaultVideoModel
-        : videoModels[0] ?? DEFAULT_SETTINGS.defaultVideoModel
       const nextForm = {
         ...form,
         llmModel: form.llmModel.trim() || cleanedModels[0] || DEFAULT_SETTINGS.llmModel,
         llmModels: cleanedModels.length > 0 ? cleanedModels : [DEFAULT_SETTINGS.llmModel],
-        defaultModel: defaultImageModel,
+        defaultModel: '',
         imageModels,
-        defaultVideoModel,
+        defaultVideoModel: '',
         videoModels,
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
@@ -476,18 +468,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     next[index] = modelId
     const cleaned = cleanImageModelIds(next)
     update('imageModels', cleaned)
-    if (!form.defaultModel.trim() || !cleaned.includes(form.defaultModel)) {
-      update('defaultModel', modelId)
-    }
   }
 
   const removeImageModelRow = (index: number) => {
     const next = (form.imageModels ?? []).filter((_, itemIndex) => itemIndex !== index)
     const cleaned = cleanImageModelIds(next)
     update('imageModels', cleaned)
-    if (form.defaultModel && !cleaned.includes(form.defaultModel)) {
-      update('defaultModel', cleaned[0] ?? '')
-    }
   }
 
   const addVideoModelRow = () => {
@@ -505,18 +491,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     next[index] = modelId
     const cleaned = cleanVideoModelIds(next)
     update('videoModels', cleaned)
-    if (!form.defaultVideoModel.trim() || !cleaned.includes(form.defaultVideoModel)) {
-      update('defaultVideoModel', modelId)
-    }
   }
 
   const removeVideoModelRow = (index: number) => {
     const next = (form.videoModels ?? []).filter((_, itemIndex) => itemIndex !== index)
     const cleaned = cleanVideoModelIds(next)
     update('videoModels', cleaned)
-    if (form.defaultVideoModel && !cleaned.includes(form.defaultVideoModel)) {
-      update('defaultVideoModel', cleaned[0] ?? '')
-    }
   }
 
   const renderTestResult = (result: { ok: boolean; message: string } | null) => {
@@ -575,10 +555,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const imageModelOptions = normalizeImageModelOptions(
     availableLlmModels,
     selectedImageModels,
-    form.defaultModel,
+    '',
   )
-  const defaultImageModelOptions =
-    selectedImageModels.length > 0 ? selectedImageModels : DEFAULT_SETTINGS.imageModels
   const selectedVideoModels = cleanVideoModelIds([
     ...(form.videoModels ?? []),
     ...structuredVideoModelIds,
@@ -586,10 +564,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const videoModelOptions = normalizeVideoModelOptions(
     availableLlmModels,
     selectedVideoModels,
-    form.defaultVideoModel,
+    '',
   )
-  const defaultVideoModelOptions =
-    selectedVideoModels.length > 0 ? selectedVideoModels : DEFAULT_SETTINGS.videoModels
   const codexSetupRows = [
     { label: '安装 Codex CLI', command: codexSetupCommands.installCodex },
     { label: '安装图片 Helper', command: codexSetupCommands.installImageHelper },
@@ -903,30 +879,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </button>
               </div>
 
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-image-default-model">
-                  默认图片模型
-                </label>
-                <select
-                  id="set-image-default-model"
-                  style={inputStyle}
-                  value={
-                    defaultImageModelOptions.includes(form.defaultModel)
-                      ? form.defaultModel
-                      : defaultImageModelOptions[0] ?? ''
-                  }
-                  onChange={(e) => update('defaultModel', e.target.value)}
-                >
-                  {defaultImageModelOptions.map((modelId) => {
-                    const model = imageModelOptions.find((item) => item.id === modelId)
-                    return (
-                      <option key={modelId} value={modelId}>
-                        {model?.label ?? modelId}
-                      </option>
-                    )
-                  })}
-                </select>
-              </div>
             </div>
           </section>
 
@@ -1027,30 +979,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </button>
               </div>
 
-              <div style={fieldStyle}>
-                <label style={labelStyle} htmlFor="set-video-default-model">
-                  默认视频模型
-                </label>
-                <select
-                  id="set-video-default-model"
-                  style={inputStyle}
-                  value={
-                    defaultVideoModelOptions.includes(form.defaultVideoModel)
-                      ? form.defaultVideoModel
-                      : defaultVideoModelOptions[0] ?? ''
-                  }
-                  onChange={(e) => update('defaultVideoModel', e.target.value)}
-                >
-                  {defaultVideoModelOptions.map((modelId) => {
-                    const model = videoModelOptions.find((item) => item.id === modelId)
-                    return (
-                      <option key={modelId} value={modelId}>
-                        {model?.label ?? modelId}
-                      </option>
-                    )
-                  })}
-                </select>
-              </div>
             </div>
           </section>
 

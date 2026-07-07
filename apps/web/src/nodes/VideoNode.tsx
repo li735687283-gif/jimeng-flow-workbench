@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import { Film, Video } from 'lucide-react'
+import { Film, Video, Volume2, VolumeX } from 'lucide-react'
 import { createGeneration, subscribeGeneration } from '../api/generations'
 import { getAssetFileUrl } from '../api/assets'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
-import { VideoGenerationHistoryStrip } from '../components/VideoGenerationHistoryStrip'
 import { NodeWrapper } from './NodeWrapper'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
@@ -17,6 +16,8 @@ import { shouldCloseFloatingEditorOnPointerDown } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
 import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
+import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
+import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
@@ -25,7 +26,6 @@ import {
   resolveVideoModeForInputImages,
 } from '../utils/videoGenerationState'
 import {
-  getConfiguredDefaultVideoModel,
   getConfiguredVideoModels,
   getUnsupportedVideoModelMessage,
   videoModelNeedsJimeng,
@@ -35,6 +35,7 @@ import {
   mergeVideoDefaults,
   type VideoAspectRatio,
   type VideoGenerationRequest,
+  type VideoMode,
   type VideoNodeData,
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
@@ -69,7 +70,8 @@ function normalizeVideoCount(value: number): VideoNodeData['count'] {
 }
 
 export function VideoNode({ id, data, selected }: NodeProps) {
-  const nodeData = mergeVideoDefaults(data as Partial<VideoNodeData>)
+  const rawNodeData = data as Partial<VideoNodeData>
+  const nodeData = mergeVideoDefaults(rawNodeData)
   const settings = useSettingsStore((state) => state.settings)
   const isJimengConfigured = useSettingsStore((state) => state.isJimengConfigured)
   const nodes = useCanvasStore((state) => state.nodes)
@@ -81,24 +83,35 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const callState = useGenerateStore((state) => state.states[id] ?? IDLE_CALL_STATE)
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const rememberedDefaultsRef = useRef(useGenerationDefaultsStore.getState().video)
+  const initialVideoDefaults = resolveVideoGenerationDefaults({
+    nodeData: rawNodeData,
+    remembered: rememberedDefaultsRef.current,
+    modelOptions: [],
+  })
 
   const [editorMounted, setEditorMounted] = useState(false)
   const [editorClosing, setEditorClosing] = useState(false)
   const [prompt, setPrompt] = useState(nodeData.prompt)
+  const [mode, setMode] = useState<VideoMode>(nodeData.mode)
   const [selectedModelId, setSelectedModelId] = useState('')
   const [modelTouched, setModelTouched] = useState(false)
   const [aspectRatio, setAspectRatio] =
-    useState<VideoAspectRatio>(nodeData.aspectRatio)
+    useState<VideoAspectRatio>(initialVideoDefaults.aspectRatio)
   const [resolution, setResolution] =
-    useState<VideoResolution>(nodeData.resolution)
+    useState<VideoResolution>(initialVideoDefaults.resolution)
   const [durationSeconds, setDurationSeconds] = useState(
-    nodeData.durationSeconds,
+    initialVideoDefaults.durationSeconds,
   )
-  const [count, setCount] = useState<VideoNodeData['count']>(nodeData.count)
+  const [count, setCount] = useState<VideoNodeData['count']>(
+    initialVideoDefaults.count,
+  )
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [countMenuOpen, setCountMenuOpen] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [videoMuted, setVideoMuted] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -110,17 +123,24 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   }, [])
 
   useEffect(() => {
+    const defaults = resolveVideoGenerationDefaults({
+      nodeData: rawNodeData,
+      remembered: rememberedDefaultsRef.current,
+      modelOptions: [],
+    })
     setPrompt(nodeData.prompt)
-    setAspectRatio(nodeData.aspectRatio)
-    setResolution(nodeData.resolution)
-    setDurationSeconds(nodeData.durationSeconds)
-    setCount(nodeData.count)
+    setMode(nodeData.mode)
+    setAspectRatio(defaults.aspectRatio)
+    setResolution(defaults.resolution)
+    setDurationSeconds(defaults.durationSeconds)
+    setCount(defaults.count)
   }, [
-    nodeData.aspectRatio,
-    nodeData.count,
-    nodeData.durationSeconds,
+    rawNodeData.aspectRatio,
+    rawNodeData.count,
+    rawNodeData.durationSeconds,
+    nodeData.mode,
     nodeData.prompt,
-    nodeData.resolution,
+    rawNodeData.resolution,
   ])
 
   const videoModelOptions = useMemo(
@@ -128,11 +148,11 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     [settings?.modelConfigs, settings?.videoModels],
   )
   useEffect(() => {
-    const fallbackModel = getConfiguredDefaultVideoModel(
-      settings?.videoModels,
-      nodeData.model || settings?.defaultVideoModel,
-      settings?.modelConfigs,
-    )
+    const defaults = resolveVideoGenerationDefaults({
+      nodeData: rawNodeData,
+      remembered: rememberedDefaultsRef.current,
+      modelOptions: videoModelOptions,
+    })
     setSelectedModelId((current) => {
       if (
         modelTouched &&
@@ -141,14 +161,11 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       ) {
         return current
       }
-      return fallbackModel
+      return defaults.modelId
     })
   }, [
     modelTouched,
-    nodeData.model,
-    settings?.defaultVideoModel,
-    settings?.modelConfigs,
-    settings?.videoModels,
+    rawNodeData.model,
     videoModelOptions,
   ])
 
@@ -184,7 +201,9 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     const handleDocumentPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target
       if (!(target instanceof Element)) return
-      const isInsideEditorOwner = !!target.closest(`[data-flow-node-id="${id}"]`)
+      const isInsideEditorOwner =
+        !!target.closest(`[data-flow-node-id="${id}"]`) ||
+        !!target.closest('.prompt-editor-modal')
       if (
         shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
@@ -293,6 +312,13 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       generationId: response.id,
     })
     if (response.status === 'success') {
+      useGenerationDefaultsStore.getState().rememberVideoDefaults({
+        model: request.model,
+        aspectRatio: request.aspectRatio,
+        resolution: request.resolution,
+        durationSeconds: request.durationSeconds,
+        count: request.count as VideoNodeData['count'],
+      })
       try {
         await useFlowStore.getState().saveCurrent()
       } catch (error) {
@@ -363,15 +389,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
 
     const inputImages = referenceAssetIds
-    const mode = resolveVideoModeForInputImages(nodeData.mode, inputImages)
+    const effectiveMode = resolveVideoModeForInputImages(
+      inputImages.length > 0 ? mode : 'text_to_video',
+      inputImages,
+    )
     const request: VideoGenerationRequest = {
       flowId: resolveGenerationFlowId(getCurrentFlowId()),
       nodeId: id,
       mediaType: 'video',
-      mode,
+      mode: effectiveMode,
       prompt: trimmedPrompt,
       inputImages,
-      references: buildVideoReferencesFromInputImages(mode, inputImages),
+      references: buildVideoReferencesFromInputImages(effectiveMode, inputImages),
       model: selectedModel.id,
       aspectRatio,
       resolution,
@@ -435,6 +464,32 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     void useFlowStore.getState().saveCurrent().catch(() => undefined)
   }
 
+  const handleVideoModeChange = useCallback(
+    (nextMode: VideoMode) => {
+      setMode(nextMode)
+      updateNodeData(id, {
+        mode: nextMode,
+        references: buildVideoReferencesFromInputImages(nextMode, referenceAssetIds),
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [id, referenceAssetIds, updateNodeData],
+  )
+
+  const handleToggleVideoMute = useCallback(() => {
+    setVideoMuted((muted) => {
+      const nextMuted = !muted
+      if (videoRef.current) {
+        videoRef.current.muted = nextMuted
+        if (!nextMuted) {
+          videoRef.current.volume = 1
+        }
+      }
+      return nextMuted
+    })
+  }, [])
+
   return (
     <NodeWrapper
       icon={Film}
@@ -447,35 +502,48 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     >
       <>
         {firstAssetId ? (
-          <div className="video-media-stack">
-            <div
-              className="media-display-node video-media-display"
-              data-node-handle-anchor
-              style={VIDEO_DISPLAY_STYLE}
-              onClick={handleOpenEditor}
-            >
-              <video
-                src={getAssetFileUrl(firstAssetId)}
-                controls
-                muted
-                style={{
-                  width: '100%',
-                  maxHeight: 420,
-                  objectFit: 'contain',
-                  display: 'block',
-                }}
-              />
-            </div>
-            <VideoGenerationHistoryStrip
-              items={generationHistoryItems}
-              currentAssetId={firstAssetId}
-              onSelect={handleSelectHistory}
+          <div
+            className="media-display-node video-media-display"
+            style={VIDEO_DISPLAY_STYLE}
+            onClick={handleOpenEditor}
+          >
+            <video
+              ref={videoRef}
+              src={getAssetFileUrl(firstAssetId)}
+              controls
+              playsInline
+              muted={videoMuted}
+              onLoadedMetadata={(event) => {
+                event.currentTarget.muted = videoMuted
+                if (!videoMuted) event.currentTarget.volume = 1
+              }}
+              style={{
+                width: '100%',
+                maxHeight: 420,
+                objectFit: 'contain',
+                display: 'block',
+              }}
             />
+            <button
+              type="button"
+              className={`video-sound-toggle${videoMuted ? ' muted' : ''}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleToggleVideoMute()
+              }}
+              aria-label={videoMuted ? '取消静音' : '静音'}
+              title={videoMuted ? '取消静音' : '静音'}
+            >
+              {videoMuted ? (
+                <VolumeX size={19} strokeWidth={1.9} />
+              ) : (
+                <Volume2 size={19} strokeWidth={1.9} />
+              )}
+            </button>
           </div>
         ) : (
           <div
             className="image-node-container video-node-container"
-            data-node-handle-anchor
             onClick={handleOpenEditor}
             style={EMPTY_VIDEO_FRAME_STYLE}
           >
@@ -506,10 +574,14 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             running={running}
             submitLabel={submitLabel}
             sendError={sendError || callState.error}
+            historyItems={generationHistoryItems}
+            currentAssetId={firstAssetId}
+            videoMode={mode}
             onPromptChange={(value) => {
               setPrompt(value)
               if (sendError) setSendError('')
             }}
+            onVideoModeChange={handleVideoModeChange}
             onModelToggle={() => {
               setModelMenuOpen((open) => !open)
               setQualityMenuOpen(false)
@@ -538,6 +610,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               setCountMenuOpen(false)
             }}
             onRemoveReference={handleRemoveReferenceAsset}
+            onSelectHistory={handleSelectHistory}
             onSend={() => void handleSend()}
           />
         ) : null}

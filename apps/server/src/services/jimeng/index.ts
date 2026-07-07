@@ -459,11 +459,11 @@ export function buildJimengVideoArgs(
   const firstFrame = inputs.find((input) => input.role === 'first_frame')
   const lastFrame = inputs.find((input) => input.role === 'last_frame')
 
-  if (params.mode === 'all_reference' || params.mode === 'image_reference') {
+  if (params.mode === 'all_reference' || params.mode === 'action_mimic') {
     if (inputPaths.length === 0) {
       throw new JimengError(
         'INVALID_INPUT',
-        '全能参考/图片参考模式至少需要一个上游图片',
+        '全能参考/动作模仿模式至少需要一个上游图片',
         400,
       )
     }
@@ -479,6 +479,14 @@ export function buildJimengVideoArgs(
     return args
   }
 
+  if (params.mode === 'image_reference' && inputPaths.length === 0) {
+    throw new JimengError(
+      'INVALID_INPUT',
+      '多图参考模式至少需要一个上游图片',
+      400,
+    )
+  }
+
   if (firstFrame && lastFrame) {
     const args = [
       'frames2video',
@@ -492,14 +500,12 @@ export function buildJimengVideoArgs(
   }
 
   if (inputPaths.length >= 2 || params.mode === 'first_last_frame') {
-    const args = [
+    return [
       'multiframe2video',
       `--images=${inputPaths.join(',')}`,
       `--prompt=${params.prompt}`,
       `--duration=${params.durationSeconds}`,
     ]
-    appendVideoModelResolutionArgs(args, modelVersion, resolution)
-    return args
   }
 
   if (inputPaths.length === 1) {

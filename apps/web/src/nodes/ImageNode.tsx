@@ -36,6 +36,7 @@ import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
 import { testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
 import { ImageFullscreenViewer } from '../components/ImageFullscreenViewer'
+import { PromptEditor } from '../components/PromptEditor'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
@@ -58,6 +59,8 @@ import {
   getImageModelMenuWidth,
 } from '../utils/imageModels'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
+import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
+import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   chooseFloatingMenuDirection,
   type FloatingMenuDirection,
@@ -237,6 +240,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const qualityMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const countMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
+  const rememberedDefaultsRef = useRef(useGenerationDefaultsStore.getState().image)
 
   useEffect(() => {
     return () => {
@@ -251,10 +255,23 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   )
   const [selectedModelId, setSelectedModelId] = useState('')
   const [modelTouched, setModelTouched] = useState(false)
-  const [quality, setQuality] = useState<(typeof QUALITY_OPTIONS)[number]>('标准画质')
-  const [resolution, setResolution] = useState<(typeof RESOLUTION_OPTIONS)[number]>('2K')
-  const [ratio, setRatio] = useState<(typeof RATIO_OPTIONS)[number]>('16:9')
-  const [count, setCount] = useState<(typeof COUNT_OPTIONS)[number]>(1)
+  const initialImageDefaults = resolveImageGenerationDefaults({
+    nodeData,
+    remembered: rememberedDefaultsRef.current,
+    modelOptions: [],
+  })
+  const [quality, setQuality] = useState<(typeof QUALITY_OPTIONS)[number]>(
+    initialImageDefaults.quality as (typeof QUALITY_OPTIONS)[number],
+  )
+  const [resolution, setResolution] = useState<(typeof RESOLUTION_OPTIONS)[number]>(
+    initialImageDefaults.resolution as (typeof RESOLUTION_OPTIONS)[number],
+  )
+  const [ratio, setRatio] = useState<(typeof RATIO_OPTIONS)[number]>(
+    initialImageDefaults.ratio as (typeof RATIO_OPTIONS)[number],
+  )
+  const [count, setCount] = useState<(typeof COUNT_OPTIONS)[number]>(
+    initialImageDefaults.count as (typeof COUNT_OPTIONS)[number],
+  )
   const [isGenerating, setIsGenerating] = useState(false)
   const [sendError, setSendError] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -293,7 +310,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     }
     for (const assetId of getImageGenerationInputImages({
       assetId: undefined,
-      modelId: selectedModelId || settings?.defaultModel || '',
+      modelId: selectedModelId,
       nodeId: id,
       nodes,
       edges,
@@ -307,7 +324,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     nodeData.inputImageAssetIds,
     nodes,
     selectedModelId,
-    settings?.defaultModel,
   ])
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
@@ -432,21 +448,19 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   }
 
   useEffect(() => {
-    const preferredModel = settings?.defaultModel?.trim()
-    const fallbackModel =
-      (preferredModel &&
-        modelOptions.find((model) => model.id === preferredModel)?.id) ||
-      modelOptions.find((model) => model.id === 'jimeng')?.id ||
-      modelOptions[0]?.id ||
-      ''
+    const defaults = resolveImageGenerationDefaults({
+      nodeData,
+      remembered: rememberedDefaultsRef.current,
+      modelOptions,
+    })
 
     setSelectedModelId((current) => {
       if (modelTouched && current && modelOptions.some((model) => model.id === current)) {
         return current
       }
-      return fallbackModel
+      return defaults.modelId
     })
-  }, [modelOptions, modelTouched, settings?.defaultModel])
+  }, [modelOptions, modelTouched, nodeData])
 
   const handleCloseEditor = useCallback(() => {
     if (!editorMounted || editorClosing) return
@@ -618,7 +632,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       if (!(target instanceof Element)) return
       const isInsideEditorOwner =
         !!target.closest(`[data-flow-node-id="${id}"]`) ||
-        !!target.closest('.image-fullscreen-viewer')
+        !!target.closest('.image-fullscreen-viewer') ||
+        !!target.closest('.prompt-editor-modal')
       if (
         !shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
@@ -844,6 +859,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       }
 
       if (outputAssetIds.length > 0) {
+        useGenerationDefaultsStore.getState().rememberImageDefaults({
+          model: effectiveModel.id,
+          quality: effectiveQuality,
+          ratio: effectiveRatio,
+          resolution: effectiveResolution,
+          count: effectiveCount,
+        })
         setImgError(false)
         try {
           const flowStore = useFlowStore.getState()
@@ -1018,7 +1040,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         {hasImage && imageSrc ? (
           <div
             className="media-display-node image-media-display"
-            data-node-handle-anchor
             onClick={handleOpenEditor}
             style={mediaDisplayStyle}
           >
@@ -1034,7 +1055,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         ) : (
           <div
             className="image-node-container"
-            data-node-handle-anchor
             onClick={handleOpenEditor}
             style={emptyContainerStyle}
           >
@@ -1104,11 +1124,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
               onRemove={handleRemoveReferenceAsset}
             />
 
-            <textarea
-              className="image-editor-prompt"
+            <PromptEditor
               value={prompt}
-              onChange={(event) => {
-                setPrompt(event.target.value)
+              onChange={(value) => {
+                setPrompt(value)
                 if (sendError) setSendError('')
               }}
               placeholder="可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜"

@@ -239,14 +239,14 @@ export interface Settings {
   /** 输出目录，相对项目根 */
   outputDir: string;
 
-  /** 默认图片模型 */
+  /** 旧版默认图片模型；保留字段兼容，前端不再用它决定新建节点默认值 */
   defaultModel: string;
   /** 常用图片模型列表；图片节点只显示这些常用即梦图片模型 */
   imageModels: string[];
   /** 默认图片尺寸，例如 1024x1024 */
   defaultSize: string;
 
-  /** 默认视频模型 */
+  /** 旧版默认视频模型；保留字段兼容，前端不再用它决定新建节点默认值 */
   defaultVideoModel: string;
   /** 常用视频模型列表；视频节点和 Agent 视频生成只显示这些常用模型 */
   videoModels: string[];
@@ -281,11 +281,11 @@ export const DEFAULT_SETTINGS: Settings = {
 
   outputDir: "./workspace/outputs",
 
-  defaultModel: "jimeng",
+  defaultModel: "",
   imageModels: ["jimeng"],
   defaultSize: "1024x1024",
 
-  defaultVideoModel: "seedance-2.0",
+  defaultVideoModel: "",
   videoModels: ["seedance-2.0"],
   defaultVideoAspectRatio: "16:9",
   defaultVideoResolution: "720P",

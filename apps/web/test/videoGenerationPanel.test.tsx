@@ -28,7 +28,9 @@ test('video generation panel mirrors the image editor controls with video models
       running={false}
       submitLabel="生成"
       sendError=""
+      videoMode="image_reference"
       onPromptChange={() => undefined}
+      onVideoModeChange={() => undefined}
       onModelToggle={() => undefined}
       onSelectModel={() => undefined}
       onQualityToggle={() => undefined}
@@ -51,13 +53,25 @@ test('video generation panel mirrors the image editor controls with video models
   assert.equal(html.includes('aria-label="发送生成视频"'), true)
   assert.equal(html.includes('reference-asset-strip'), true)
   assert.equal(html.includes('/api/assets/asset_ref_a/file'), true)
+  assert.equal(html.includes('video-reference-mode-tabs'), true)
+  assert.equal(html.includes('首尾帧'), true)
+  assert.equal(html.includes('多图参考'), true)
+  assert.equal(html.includes('动作模仿'), true)
+  assert.equal(html.includes('全能参考'), true)
+  assert.equal(
+    html.indexOf('video-reference-mode-tabs') < html.indexOf('reference-asset-strip'),
+    true,
+  )
   assert.equal(html.includes('video-duration-slider'), true)
   assert.equal(html.includes('aria-label="视频时长"'), true)
   assert.equal(html.includes('type="range"'), true)
-  assert.equal(html.includes('min="1"'), true)
+  assert.equal(html.includes('min="4"'), true)
   assert.equal(html.includes('max="15"'), true)
   assert.equal(html.includes('<strong>5s</strong>'), true)
-  assert.equal(html.includes('>1s</span>'), true)
+  assert.equal(html.includes('>1s</span>'), false)
+  assert.equal(html.includes('>2s</span>'), false)
+  assert.equal(html.includes('>3s</span>'), false)
+  assert.equal(html.includes('>4s</span>'), true)
   assert.equal(html.includes('>15s</span>'), true)
   assert.equal(html.includes('video-duration-grid'), false)
   assert.equal(html.includes('image-editor-tool'), false)

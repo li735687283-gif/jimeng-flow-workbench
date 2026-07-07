@@ -12,11 +12,15 @@ import {
   VIDEO_DURATIONS,
   VIDEO_RESOLUTIONS,
   type VideoAspectRatio,
+  type VideoMode,
   type VideoNodeData,
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
 import type { VideoModelOption } from '../utils/videoModels'
+import type { VideoGenerationHistoryItem } from '../utils/videoGenerationHistory'
+import { PromptEditor } from './PromptEditor'
 import { ReferenceAssetStrip } from './ReferenceAssetStrip'
+import { VideoGenerationHistoryStrip } from './VideoGenerationHistoryStrip'
 
 interface VideoGenerationPanelProps {
   closing?: boolean
@@ -34,7 +38,11 @@ interface VideoGenerationPanelProps {
   running: boolean
   submitLabel: string
   sendError?: string
+  historyItems?: VideoGenerationHistoryItem[]
+  currentAssetId?: string
+  videoMode: VideoMode
   onPromptChange: (prompt: string) => void
+  onVideoModeChange: (mode: VideoMode) => void
   onModelToggle: () => void
   onSelectModel: (modelId: string) => void
   onQualityToggle: () => void
@@ -44,8 +52,16 @@ interface VideoGenerationPanelProps {
   onCountToggle: () => void
   onCountChange: (count: VideoNodeData['count']) => void
   onRemoveReference?: (assetId: string) => void
+  onSelectHistory?: (item: VideoGenerationHistoryItem) => void
   onSend: () => void
 }
+
+const VIDEO_REFERENCE_MODES: Array<{ id: VideoMode; label: string }> = [
+  { id: 'first_last_frame', label: '首尾帧' },
+  { id: 'image_reference', label: '多图参考' },
+  { id: 'action_mimic', label: '动作模仿' },
+  { id: 'all_reference', label: '全能参考' },
+]
 
 export function VideoGenerationPanel({
   closing = false,
@@ -63,7 +79,11 @@ export function VideoGenerationPanel({
   running,
   submitLabel,
   sendError = '',
+  historyItems = [],
+  currentAssetId,
+  videoMode,
   onPromptChange,
+  onVideoModeChange,
   onModelToggle,
   onSelectModel,
   onQualityToggle,
@@ -73,12 +93,13 @@ export function VideoGenerationPanel({
   onCountToggle,
   onCountChange,
   onRemoveReference,
+  onSelectHistory,
   onSend,
 }: VideoGenerationPanelProps) {
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0]
-  const minDuration = VIDEO_DURATIONS[0] ?? 1
+  const minDuration = VIDEO_DURATIONS[0] ?? 4
   const maxDuration = VIDEO_DURATIONS[VIDEO_DURATIONS.length - 1] ?? 15
   const durationProgress =
     maxDuration === minDuration
@@ -92,15 +113,31 @@ export function VideoGenerationPanel({
       }`}
       onClick={(event) => event.stopPropagation()}
     >
+      {referenceAssetIds.length > 0 ? (
+        <div className="video-reference-mode-tabs" aria-label="视频参考模式">
+          {VIDEO_REFERENCE_MODES.map((mode) => (
+            <button
+              type="button"
+              key={mode.id}
+              className={mode.id === videoMode ? 'selected' : ''}
+              onClick={() => onVideoModeChange(mode.id)}
+              disabled={running}
+              title={mode.label}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <ReferenceAssetStrip
         assetIds={referenceAssetIds}
         onRemove={onRemoveReference}
       />
 
-      <textarea
-        className="image-editor-prompt"
+      <PromptEditor
         value={prompt}
-        onChange={(event) => onPromptChange(event.target.value)}
+        onChange={onPromptChange}
         placeholder="描述视频画面，连接图片后可按图生视频、首尾帧或多图参考生成"
         disabled={running}
       />
@@ -276,6 +313,13 @@ export function VideoGenerationPanel({
       ) : null}
       {running ? (
         <div className="image-editor-status">{submitLabel}</div>
+      ) : null}
+      {onSelectHistory ? (
+        <VideoGenerationHistoryStrip
+          items={historyItems}
+          currentAssetId={currentAssetId}
+          onSelect={onSelectHistory}
+        />
       ) : null}
     </div>
   )

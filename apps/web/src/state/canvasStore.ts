@@ -30,6 +30,7 @@ const VIDEO_MODES = new Set<VideoMode>([
   'text_to_video',
   'image_to_video',
   'all_reference',
+  'action_mimic',
   'first_last_frame',
   'image_reference',
 ])
@@ -148,7 +149,9 @@ function syncVideoModeForConnectedImages(
   const mode = videoMode(value)
   if (
     inputImages.length > 0 &&
-    (mode === 'all_reference' || mode === 'image_reference')
+    (mode === 'all_reference' ||
+      mode === 'action_mimic' ||
+      mode === 'image_reference')
   ) {
     return mode
   }

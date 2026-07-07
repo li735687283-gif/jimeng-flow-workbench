@@ -58,6 +58,27 @@ test('buildJimengVideoArgs keeps all-reference multi-image inputs on multimodal2
   assert.ok(args.includes('--image=F:\\refs\\b.png'))
 })
 
+test('buildJimengVideoArgs sends action mimic inputs to multimodal video', () => {
+  const args = buildJimengVideoArgs(
+    {
+      ...baseParams,
+      mode: 'action_mimic',
+      references: [
+        { kind: 'image', role: 'reference', assetId: 'asset_a' },
+        { kind: 'image', role: 'reference', assetId: 'asset_b' },
+      ],
+    },
+    [
+      { path: 'F:\\refs\\a.png', role: 'reference' },
+      { path: 'F:\\refs\\b.png', role: 'reference' },
+    ],
+  )
+
+  assert.equal(args[0], 'multimodal2video')
+  assert.ok(args.includes('--image=F:\\refs\\a.png'))
+  assert.ok(args.includes('--image=F:\\refs\\b.png'))
+})
+
 test('buildJimengVideoArgs adds video resolution only once for single image video', () => {
   const args = buildJimengVideoArgs(
     {
@@ -79,7 +100,7 @@ test('buildJimengVideoArgs adds video resolution only once for single image vide
   )
 })
 
-test('buildJimengVideoArgs keeps selected model and resolution for fallback multi-frame video', () => {
+test('buildJimengVideoArgs omits unsupported model and resolution args for multi-frame video', () => {
   const args = buildJimengVideoArgs(
     {
       ...baseParams,
@@ -97,6 +118,26 @@ test('buildJimengVideoArgs keeps selected model and resolution for fallback mult
   )
 
   assert.equal(args[0], 'multiframe2video')
-  assert.ok(args.includes('--model_version=seedance2.0'))
-  assert.ok(args.includes('--video_resolution=720p'))
+  assert.equal(args.some((arg) => arg.startsWith('--model_version=')), false)
+  assert.equal(args.some((arg) => arg.startsWith('--video_resolution=')), false)
+})
+
+test('buildJimengVideoArgs uses multi-frame command for multi-image reference mode', () => {
+  const args = buildJimengVideoArgs(
+    {
+      ...baseParams,
+      mode: 'image_reference',
+      references: [
+        { kind: 'image', role: 'reference', assetId: 'asset_a' },
+        { kind: 'image', role: 'reference', assetId: 'asset_b' },
+      ],
+    },
+    [
+      { path: 'F:\\refs\\a.png', role: 'reference' },
+      { path: 'F:\\refs\\b.png', role: 'reference' },
+    ],
+  )
+
+  assert.equal(args[0], 'multiframe2video')
+  assert.ok(args.includes('--images=F:\\refs\\a.png,F:\\refs\\b.png'))
 })
