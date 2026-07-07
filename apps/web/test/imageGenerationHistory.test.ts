@@ -131,6 +131,6 @@ test('getImageGenerationHistoryItems keeps generated versions in append order an
 test('getImageGenerationHistoryPreviewScale keeps hover preview modest', () => {
   const scale = getImageGenerationHistoryPreviewScale()
 
-  assert.equal(scale >= 2, true)
+  assert.equal(scale >= 2.8, true)
   assert.equal(scale <= 3, true)
 })

@@ -44,12 +44,14 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       'imageModels',
       'defaultSize',
       'defaultVideoModel',
+      'videoModels',
       'defaultVideoAspectRatio',
       'defaultVideoResolution',
       'defaultVideoQuality',
       'defaultVideoDurationSeconds',
       'defaultVideoCount',
       'defaultVideoGenerateAudio',
+      'modelConfigs',
     ]
     const safePatch: Partial<Settings> = {}
     for (const key of Object.keys(patch) as (keyof Settings)[]) {

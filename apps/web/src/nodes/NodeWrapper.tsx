@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -160,6 +161,88 @@ export function NodeWrapper({
   hideTitle = false,
   children,
 }: NodeWrapperProps) {
+  const cardRef = useRef<HTMLDivElement | null>(null)
+  const lastHandleCenterYRef = useRef<number | null>(null)
+  const updateNodeInternals = useUpdateNodeInternals()
+  const [handleCenterY, setHandleCenterY] = useState<number | null>(null)
+
+  const applyHandleCenterY = useCallback((nextCenterY: number | null) => {
+    const currentCenterY = lastHandleCenterYRef.current
+    const unchanged =
+      currentCenterY === null && nextCenterY === null
+        ? true
+        : currentCenterY !== null &&
+          nextCenterY !== null &&
+          Math.abs(currentCenterY - nextCenterY) < 0.5
+    if (unchanged) return
+
+    lastHandleCenterYRef.current = nextCenterY
+    setHandleCenterY(nextCenterY)
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!nodeId) return
+    const card = cardRef.current
+    if (!card) return
+
+    let observedAnchor: HTMLElement | null = null
+    let resizeObserver: ResizeObserver | null = null
+
+    const measure = () => {
+      const anchor = card.querySelector<HTMLElement>('[data-node-handle-anchor]')
+      if (!anchor) {
+        applyHandleCenterY(null)
+        return
+      }
+
+      const cardRect = card.getBoundingClientRect()
+      const anchorRect = anchor.getBoundingClientRect()
+      const nextCenterY = anchorRect.top - cardRect.top + anchorRect.height / 2
+      applyHandleCenterY(nextCenterY)
+    }
+
+    const observeAnchor = () => {
+      const nextAnchor = card.querySelector<HTMLElement>('[data-node-handle-anchor]')
+      if (nextAnchor === observedAnchor) {
+        measure()
+        return
+      }
+      if (resizeObserver && observedAnchor) {
+        resizeObserver.unobserve(observedAnchor)
+      }
+      observedAnchor = nextAnchor
+      if (resizeObserver && observedAnchor) {
+        resizeObserver.observe(observedAnchor)
+      }
+      measure()
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(measure)
+      resizeObserver.observe(card)
+    }
+
+    const mutationObserver =
+      typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver(observeAnchor)
+    mutationObserver?.observe(card, { childList: true, subtree: true })
+    observeAnchor()
+
+    return () => {
+      resizeObserver?.disconnect()
+      mutationObserver?.disconnect()
+    }
+  }, [nodeId, applyHandleCenterY])
+
+  useEffect(() => {
+    if (!nodeId) return
+    const frame = window.requestAnimationFrame(() => {
+      updateNodeInternals(nodeId)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [handleCenterY, nodeId, updateNodeInternals])
+
   return (
     <div
       className={`node-wrapper status-${status}${selected ? ' selected' : ''}${mediaDisplay ? ' media-display' : ''}`}
@@ -181,7 +264,17 @@ export function NodeWrapper({
           )}
         </div>
       )}
-      <div className="node-card">
+      <div
+        ref={cardRef}
+        className="node-card"
+        style={
+          handleCenterY === null
+            ? undefined
+            : ({
+                '--node-handle-y': `${handleCenterY}px`,
+              } as CSSProperties)
+        }
+      >
         <MagneticHandle
           type="target"
           position={Position.Left}

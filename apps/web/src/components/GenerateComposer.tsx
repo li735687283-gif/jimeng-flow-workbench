@@ -27,6 +27,7 @@ import {
 } from '@jimeng-flow/shared/generateNode'
 import type { TextNodeData } from '@jimeng-flow/shared/textNode'
 import { useCanvasStore } from '../state/canvasStore'
+import { getCurrentFlowId } from '../state/flowStore'
 import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import { createGeneration, retryGeneration } from '../api/generations'
@@ -34,7 +35,10 @@ import type { BaseNodeData } from '../types/nodeTypes'
 import {
   getConfiguredDefaultImageModel,
   getConfiguredImageModels,
+  shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
+import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import { resolveGenerationFlowId } from '../utils/generationFlow'
 
 interface GenerateComposerProps {
   /** 选中的 Generate 节点 id */
@@ -217,27 +221,6 @@ function findUpstreamPrompt(
   return { prompt: '' }
 }
 
-/** 从上游 Image 节点收集参考图 Asset id */
-function findUpstreamImageAssetIds(
-  currentId: string,
-  nodes: Node[],
-  edges: { source: string; target: string }[],
-): string[] {
-  const upstreamIds = edges
-    .filter((e) => e.target === currentId)
-    .map((e) => e.source)
-  const assetIds: string[] = []
-  for (const sid of upstreamIds) {
-    const n = nodes.find((x) => x.id === sid)
-    if (!n || n.type !== 'image') continue
-    const d = n.data as { assetId?: string }
-    if (typeof d.assetId === 'string' && d.assetId) {
-      assetIds.push(d.assetId)
-    }
-  }
-  return assetIds
-}
-
 export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
   const nodes = useCanvasStore((s) => s.nodes)
@@ -259,8 +242,12 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const imageModelOptions = useMemo(
-    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels),
-    [settings?.imageModels, settings?.llmModels],
+    () => getConfiguredImageModels(
+      settings?.imageModels,
+      settings?.llmModels,
+      settings?.modelConfigs,
+    ),
+    [settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
   )
   const defaultImageModelId = useMemo(
     () =>
@@ -268,8 +255,9 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
         settings?.imageModels,
         settings?.defaultModel,
         settings?.llmModels,
+        settings?.modelConfigs,
       ),
-    [settings?.defaultModel, settings?.imageModels, settings?.llmModels],
+    [settings?.defaultModel, settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
   )
 
   // 本地 seed 输入（字符串，空表示随机）
@@ -288,7 +276,16 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
 
   // 内存上游查询结果，避免每次渲染都 O(n*m) 遍历
   const upstreamPromptResult = useMemo(() => findUpstreamPrompt(nodeId, nodes, edges), [nodeId, nodes, edges])
-  const upstreamImageAssetIdsList = useMemo(() => findUpstreamImageAssetIds(nodeId, nodes, edges), [nodeId, nodes, edges])
+  const upstreamImageAssetIdsList = useMemo(
+    () =>
+      getImageGenerationInputImages({
+        modelId: defaultImageModelId || 'image',
+        nodeId,
+        nodes,
+        edges,
+      }),
+    [defaultImageModelId, nodeId, nodes, edges],
+  )
 
   if (!node) {
     return (
@@ -304,14 +301,17 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
   const activeImageModelId = imageModelOptions.some((model) => model.id === d.model)
     ? d.model
     : defaultImageModelId
+  const activeImageModelNeedsJimeng =
+    shouldRequireJimengCliForImageModel(activeImageModelId)
 
   /** 把节点 data 部分更新写入 canvasStore */
   const set = (partial: Partial<GenerateNodeData>) =>
     updateNodeData(nodeId, partial as unknown as Partial<BaseNodeData>)
 
   const running = callState.status === 'queued' || callState.status === 'running'
-  // 生成按钮禁用：运行中或未配置 dreamina CLI
-  const submitDisabled = running || !isJimengConfigured
+  // 生成按钮禁用：运行中，或当前即梦模型缺少 dreamina CLI 配置。
+  const submitDisabled =
+    running || (activeImageModelNeedsJimeng && !isJimengConfigured)
 
   /** 自动创建 Image 节点并连线（每张结果一个节点，水平排列） */
   const createImageNodesForResults = (results: GenerationResult[]) => {
@@ -366,7 +366,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
       seedNum !== null && Number.isFinite(seedNum) ? seedNum : null
 
     const req: GenerationRequest = {
-      flowId: 'local',
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
       nodeId,
       mediaType: 'image',
       prompt,
@@ -653,7 +653,7 @@ export function GenerateComposer({ nodeId }: GenerateComposerProps) {
         </div>
       )}
 
-      {!isJimengConfigured && (
+      {activeImageModelNeedsJimeng && !isJimengConfigured && (
         <div style={{ ...hintStyle, color: COLORS.error }}>
           未配置 dreamina CLI 时无法生成，请前往设置
         </div>

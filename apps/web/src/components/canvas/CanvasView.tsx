@@ -611,10 +611,8 @@ export function CanvasView() {
       {referenceMenu && (
         <ReferenceNodeMenu
           state={referenceMenu}
-          sourceType={
-            nodes.find((node) => node.id === referenceMenu.sourceNodeId)?.type
-          }
           onSelect={(type) => handleCreateReferenceNode(type, referenceMenu)}
+          onUpload={() => triggerUpload(referenceMenu.flowPosition)}
           onClose={() => setReferenceMenu(null)}
         />
       )}

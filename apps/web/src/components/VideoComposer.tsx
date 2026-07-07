@@ -13,15 +13,16 @@ import {
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
-import { createGeneration, retryGeneration } from '../api/generations'
+import { createGeneration, retryGeneration, subscribeGeneration } from '../api/generations'
+import type { GenerationResponse } from '@jimeng-flow/shared/generateNode'
 import type { TextNodeData } from '@jimeng-flow/shared/textNode'
 import {
-  VIDEO_MODELS,
   VIDEO_MODES,
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
   VIDEO_DURATIONS,
   VIDEO_COUNTS,
+  buildVideoReferencesFromInputImages,
   mergeVideoDefaults,
   type VideoNodeData,
   type VideoGenerationRequest,
@@ -29,6 +30,22 @@ import {
   type VideoAspectRatio,
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
+import {
+  buildVideoCompletionNodePatch,
+  buildVideoRunningNodePatch,
+  getVideoSubmitLabel,
+  resolveVideoInputImages,
+  resolveVideoModeForInputImages,
+} from '../utils/videoGenerationState'
+import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import {
+  getConfiguredDefaultVideoModel,
+  getConfiguredVideoModels,
+  getUnsupportedVideoModelMessage,
+  videoModelNeedsJimeng,
+} from '../utils/videoModels'
+import { getCurrentFlowId } from '../state/flowStore'
+import { resolveGenerationFlowId } from '../utils/generationFlow'
 
 interface VideoComposerProps {
   nodeId: string
@@ -108,24 +125,6 @@ function findUpstreamPrompt(
   return ''
 }
 
-function findUpstreamImageAssetIds(
-  currentId: string,
-  nodes: Node[],
-  edges: { source: string; target: string }[],
-): string[] {
-  const upstreamIds = edges
-    .filter((e) => e.target === currentId)
-    .map((e) => e.source)
-  const assetIds: string[] = []
-  for (const sid of upstreamIds) {
-    const n = nodes.find((x) => x.id === sid)
-    if (!n || n.type !== 'image') continue
-    const d = n.data as { assetId?: string }
-    if (d.assetId) assetIds.push(d.assetId)
-  }
-  return assetIds
-}
-
 export function VideoComposer({ nodeId }: VideoComposerProps) {
   const node = useCanvasStore((s) => s.nodes.find((n) => n.id === nodeId))
   const nodes = useCanvasStore((s) => s.nodes)
@@ -133,17 +132,20 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const generationUnsubscribeRef = useRef<(() => void) | null>(null)
 
   // 组件卸载时清除 notice timer
   useEffect(() => {
     return () => {
       if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+      generationUnsubscribeRef.current?.()
     }
   }, [])
 
   const callState = useGenerateStore(
     (s) => s.states[nodeId] ?? IDLE_CALL_STATE,
   )
+  const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
 
   if (!node) {
@@ -155,20 +157,43 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   }
 
   const d = mergeVideoDefaults(node.data as Partial<VideoNodeData>)
+  const videoModelOptions = getConfiguredVideoModels(
+    settings?.videoModels,
+    settings?.modelConfigs,
+  )
+  const activeVideoModelId = getConfiguredDefaultVideoModel(
+    settings?.videoModels,
+    d.model || settings?.defaultVideoModel,
+    settings?.modelConfigs,
+  )
   const set = (partial: Partial<VideoNodeData>) =>
     updateNodeData(nodeId, partial)
 
-  const isVipModel = d.model === 'seedance-2.0-vip'
+  const isVipModel = activeVideoModelId === 'seedance-2.0-vip'
+  const activeVideoModelNeedsJimeng = videoModelNeedsJimeng(activeVideoModelId)
+  const unsupportedModelMessage =
+    getUnsupportedVideoModelMessage(activeVideoModelId)
   const modeLabel =
     VIDEO_MODES.find((m) => m.id === d.mode)?.label ?? d.mode
   const running = callState.status === 'queued' || callState.status === 'running'
+  const submitLabel = getVideoSubmitLabel(running, d.assetIds.length > 0)
   const upstreamPrompt = findUpstreamPrompt(nodeId, nodes, edges)
-  const upstreamImageAssetIds = findUpstreamImageAssetIds(nodeId, nodes, edges)
+  const upstreamImageAssetIds = getImageGenerationInputImages({
+    modelId: activeVideoModelId,
+    nodeId,
+    nodes,
+    edges,
+  })
   const resolvedPrompt = d.prompt.trim() || upstreamPrompt
-  const resolvedInputImages =
-    d.inputImageAssetIds.length > 0 ? d.inputImageAssetIds : upstreamImageAssetIds
+  const resolvedInputImages = resolveVideoInputImages(
+    d.inputImageAssetIds,
+    upstreamImageAssetIds,
+  )
   const hasInputImage = resolvedInputImages.length > 0
-  const submitDisabled = running || !isJimengConfigured
+  const submitDisabled =
+    running ||
+    (activeVideoModelNeedsJimeng && !isJimengConfigured) ||
+    !!unsupportedModelMessage
 
   /** 显示通知，自动清除前一个 timer，在 delayMs 后自动消失 */
   const showNotice = (msg: string, delayMs = 4000) => {
@@ -181,17 +206,17 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
     const prompt = resolvedPrompt.trim()
     if (!prompt) return null
 
-    const mode =
-      hasInputImage && d.mode === 'text_to_video' ? 'image_to_video' : d.mode
+    const mode = resolveVideoModeForInputImages(d.mode, resolvedInputImages)
 
     return {
-      flowId: 'local',
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
       nodeId,
       mediaType: 'video',
       mode,
       prompt,
       inputImages: resolvedInputImages,
-      model: d.model,
+      references: buildVideoReferencesFromInputImages(mode, resolvedInputImages),
+      model: activeVideoModelId,
       aspectRatio: d.aspectRatio,
       resolution: d.resolution,
       quality: d.quality,
@@ -202,15 +227,11 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   }
 
   const applyRunning = (req: VideoGenerationRequest) => {
-    updateNodeData(nodeId, {
-      status: 'running',
-      error: undefined,
-      assetIds: [],
-      prompt: req.prompt,
-      inputImageAssetIds: req.inputImages,
-      mode: req.mode,
-      updatedAt: new Date().toISOString(),
-    })
+    const latestData = useCanvasStore
+      .getState()
+      .nodes.find((item) => item.id === nodeId)
+      ?.data as Partial<VideoNodeData> | undefined
+    updateNodeData(nodeId, buildVideoRunningNodePatch(req, latestData ?? d))
     useGenerateStore.getState().patch(nodeId, {
       status: 'running',
       error: undefined,
@@ -221,18 +242,23 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   }
 
   const applyResponse = (
-    res: Awaited<ReturnType<typeof createGeneration>>,
+    res: GenerationResponse,
+    req: VideoGenerationRequest,
   ) => {
-    const assetIds = (res.results ?? [])
-      .map((r) => r.assetId)
-      .filter((id): id is string => typeof id === 'string')
+    const latestData = useCanvasStore
+      .getState()
+      .nodes.find((item) => item.id === nodeId)
+      ?.data as Partial<VideoNodeData> | undefined
+    const completionPatch = buildVideoCompletionNodePatch(
+      res,
+      req,
+      latestData ?? d,
+    )
 
-    updateNodeData(nodeId, {
-      status: res.status === 'success' ? 'success' : 'error',
-      error: res.error,
-      assetIds,
-      updatedAt: new Date().toISOString(),
-    })
+    updateNodeData(
+      nodeId,
+      completionPatch as unknown as Partial<VideoNodeData>,
+    )
     useGenerateStore.getState().patch(nodeId, {
       status: res.status,
       error: res.error,
@@ -240,10 +266,68 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
     })
 
     if (res.status === 'success') {
-      showNotice(`视频生成完成，共 ${assetIds.length} 个结果`)
+      const generatedCount = (res.results ?? []).filter((item) => item.assetId).length
+      showNotice(`视频生成完成，共 ${generatedCount} 个结果`)
     } else {
       showNotice(res.error ?? '视频生成失败')
     }
+  }
+
+  const applyProgress = (res: GenerationResponse) => {
+    updateNodeData(nodeId, {
+      status: res.status,
+      error: res.error,
+      generationId: res.id,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<VideoNodeData>)
+    useGenerateStore.getState().patch(nodeId, {
+      status: res.status,
+      error: res.error,
+      generationId: res.id,
+    })
+  }
+
+  const clearGenerationSubscription = () => {
+    generationUnsubscribeRef.current?.()
+    generationUnsubscribeRef.current = null
+  }
+
+  const handleGenerationResponse = (
+    res: GenerationResponse,
+    req: VideoGenerationRequest,
+  ) => {
+    clearGenerationSubscription()
+    if (res.status === 'success' || res.status === 'error') {
+      applyResponse(res, req)
+      return
+    }
+
+    applyProgress(res)
+    const unsubscribe = subscribeGeneration(res.id, {
+      onUpdate: (data) => {
+        if (data.status !== 'success' && data.status !== 'error') {
+          applyProgress(data)
+        }
+      },
+      onComplete: (data) => {
+        applyResponse(data, req)
+        clearGenerationSubscription()
+      },
+      onError: (error) => {
+        updateNodeData(nodeId, {
+          status: 'error',
+          error,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<VideoNodeData>)
+        useGenerateStore.getState().patch(nodeId, {
+          status: 'error',
+          error,
+        })
+        showNotice(`视频生成失败：${error}`)
+        clearGenerationSubscription()
+      },
+    })
+    generationUnsubscribeRef.current = unsubscribe
   }
 
   const handleSubmit = async () => {
@@ -260,7 +344,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
     applyRunning(req)
     try {
       const res = await createGeneration(req)
-      applyResponse(res)
+      handleGenerationResponse(res, req)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       updateNodeData(nodeId, { status: 'error', error: msg })
@@ -293,7 +377,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       const res = callState.generationId
         ? await retryGeneration(callState.generationId)
         : await createGeneration(req)
-      applyResponse(res)
+      handleGenerationResponse(res, req)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       updateNodeData(nodeId, {
@@ -311,6 +395,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   }
 
   const handleCancel = () => {
+    clearGenerationSubscription()
     useGenerateStore.getState().cancelWaiting(nodeId)
     updateNodeData(nodeId, { status: 'idle', updatedAt: new Date().toISOString() })
   }
@@ -349,7 +434,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
           视频 Composer
         </span>
         <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
-          {d.model} · {modeLabel}
+          {activeVideoModelId} · {modeLabel}
         </span>
       </div>
 
@@ -365,11 +450,11 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         <Field label="模型">
           <select
             style={selectStyle}
-            value={d.model}
+            value={activeVideoModelId}
             onChange={(e) => set({ model: e.target.value })}
             disabled={running}
           >
-            {VIDEO_MODELS.map((m) => (
+            {videoModelOptions.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>
@@ -565,7 +650,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
           ) : (
             <Sparkles size={13} strokeWidth={1.8} />
           )}
-          {running ? '生成中' : '生成'}
+          {submitLabel}
         </button>
       </div>
 
@@ -606,9 +691,15 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         </div>
       )}
 
-      {!isJimengConfigured && (
+      {activeVideoModelNeedsJimeng && !isJimengConfigured && (
         <div style={{ fontSize: 11, color: '#cfcfcf' }}>
           未配置 dreamina CLI 时无法生成，请前往设置
+        </div>
+      )}
+
+      {unsupportedModelMessage && (
+        <div style={{ fontSize: 11, color: '#cfcfcf' }}>
+          {unsupportedModelMessage}
         </div>
       )}
 
@@ -627,7 +718,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       )}
 
       <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
-        {hasInputImage ? '已读取上游图片，按图生视频提交' : '未连接图片时按文生视频提交'} · 使用本机 dreamina CLI 登录态
+        {hasInputImage ? '已读取上游图片，按图生视频提交' : '未连接图片时按文生视频提交'} · {activeVideoModelNeedsJimeng ? '使用本机 dreamina CLI 登录态' : '使用设置中的中转站视频接口'}
       </div>
     </div>
   )

@@ -8,29 +8,35 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import type { NodeProps } from '@xyflow/react'
 import {
   ArrowUp,
-  Box,
   Check,
   ChevronDown,
   History,
   Image as ImageIcon,
-  MapPin,
-  Maximize2,
-  Plus,
   Sparkles,
 } from 'lucide-react'
 import {
   appendImageGenerationRun,
   type GenerationRequest,
+  type GenerationResponse,
   type ImageGenerationRun,
   isJimengImageModel,
 } from '@jimeng-flow/shared/generateNode'
 import { NodeWrapper } from './NodeWrapper'
 import type { BaseNodeData } from '../types/nodeTypes'
-import { getAssetFileUrl } from '../api/assets'
-import { createGeneration } from '../api/generations'
+import {
+  downloadAssetFile,
+  getAssetFileUrl,
+  upscaleImageAsset,
+} from '../api/assets'
+import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
+import { testJimengConnection } from '../api/settings'
+import { ImageActionCard } from '../components/ImageActionCard'
+import { ImageFullscreenViewer } from '../components/ImageFullscreenViewer'
+import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
 import { useGenerateStore } from '../state/generateStore'
@@ -46,10 +52,12 @@ import {
   getImageGenerationProgressState,
   shouldShowImagePlaceholderIcon,
 } from '../utils/imageGenerationProgress'
+import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
 import {
   getConfiguredImageModels,
   getImageModelMenuWidth,
 } from '../utils/imageModels'
+import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import {
   chooseFloatingMenuDirection,
   type FloatingMenuDirection,
@@ -219,10 +227,22 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as ImageNodeData
   const settings = useSettingsStore((state) => state.settings)
   const isJimengConfigured = useSettingsStore((state) => state.isJimengConfigured)
+  const nodes = useCanvasStore((state) => state.nodes)
+  const edges = useCanvasStore((state) => state.edges)
+  const removeIncomingImageReference = useCanvasStore(
+    (state) => state.removeIncomingImageReference,
+  )
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const qualityMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const countMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const generationUnsubscribeRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => {
+    return () => {
+      generationUnsubscribeRef.current?.()
+    }
+  }, [])
   const [imgError, setImgError] = useState(false)
   const [editorMounted, setEditorMounted] = useState(false)
   const [editorClosing, setEditorClosing] = useState(false)
@@ -240,6 +260,21 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [countMenuOpen, setCountMenuOpen] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [validationStatus, setValidationStatus] = useState<
+    'idle' | 'checking' | 'success' | 'error'
+  >('idle')
+  const [upscaleResolution, setUpscaleResolution] = useState<'2k' | '4k' | '8k'>('2k')
+  const [fullSizeOpen, setFullSizeOpen] = useState(false)
+  const [fullSizeScale, setFullSizeScale] = useState(1)
+  const [fullSizeRotation, setFullSizeRotation] = useState(0)
+  const [fullSizeOffset, setFullSizeOffset] = useState({ x: 0, y: 0 })
+  const [fullSizePanning, setFullSizePanning] = useState(false)
+  const fullSizePanAnchorRef = useRef<{
+    pointer: { x: number; y: number }
+    offset: { x: number; y: number }
+  } | null>(null)
+  const [fullSizeReloadVersion, setFullSizeReloadVersion] = useState(0)
   const [menuDirections, setMenuDirections] = useState<
     Record<ImageEditorMenuKind, FloatingMenuDirection>
   >({
@@ -251,10 +286,40 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     () => getImageGenerationHistoryItems(nodeData.generationRuns),
     [nodeData.generationRuns],
   )
+  const referenceAssetIds = useMemo(() => {
+    const references = new Set<string>()
+    for (const assetId of nodeData.inputImageAssetIds ?? []) {
+      if (assetId) references.add(assetId)
+    }
+    for (const assetId of getImageGenerationInputImages({
+      assetId: undefined,
+      modelId: selectedModelId || settings?.defaultModel || '',
+      nodeId: id,
+      nodes,
+      edges,
+    })) {
+      references.add(assetId)
+    }
+    return Array.from(references)
+  }, [
+    edges,
+    id,
+    nodeData.inputImageAssetIds,
+    nodes,
+    selectedModelId,
+    settings?.defaultModel,
+  ])
+  const handleRemoveReferenceAsset = useCallback(
+    (assetId: string) => {
+      removeIncomingImageReference(id, assetId)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [id, removeIncomingImageReference],
+  )
   const historyPreviewStyle = useMemo(
     () =>
       ({
-        '--image-history-preview-scale': String(
+        '--history-preview-scale': String(
           getImageGenerationHistoryPreviewScale(),
         ),
       }) as CSSProperties,
@@ -290,8 +355,12 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     imgError,
   )
   const modelOptions = useMemo(() => {
-    return getConfiguredImageModels(settings?.imageModels, settings?.llmModels)
-  }, [settings?.imageModels, settings?.llmModels])
+    return getConfiguredImageModels(
+      settings?.imageModels,
+      settings?.llmModels,
+      settings?.modelConfigs,
+    )
+  }, [settings?.imageModels, settings?.llmModels, settings?.modelConfigs])
   const modelMenuStyle = useMemo(
     () =>
       ({
@@ -384,6 +453,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setModelMenuOpen(false)
     setQualityMenuOpen(false)
     setCountMenuOpen(false)
+    setFullSizeOpen(false)
     setEditorClosing(true)
     clearCloseTimer()
     closeTimerRef.current = window.setTimeout(() => {
@@ -399,13 +469,156 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setEditorClosing(false)
   }, [clearCloseTimer])
 
+  const handleValidateJimeng = useCallback(async () => {
+    setActionBusy(true)
+    setValidationStatus('checking')
+    try {
+      const result = await testJimengConnection(settings ?? {})
+      setValidationStatus(result.ok ? 'success' : 'error')
+    } catch {
+      setValidationStatus('error')
+    } finally {
+      setActionBusy(false)
+    }
+  }, [settings])
+
+  const handleDownloadImage = useCallback(async () => {
+    if (!nodeData.assetId) {
+      return
+    }
+    setActionBusy(true)
+    try {
+      downloadAssetFile(nodeData.assetId)
+    } catch {
+      // 下载失败时保留当前界面，不再显示额外状态文字。
+    } finally {
+      setActionBusy(false)
+    }
+  }, [nodeData.assetId])
+
+  const handleUpscaleImage = useCallback(async (resolution = upscaleResolution) => {
+    if (!nodeData.assetId) {
+      return
+    }
+    setActionBusy(true)
+    let targetNodeId = ''
+    try {
+      targetNodeId = useCanvasStore
+        .getState()
+        .createUpscaleImageNode(id, resolution)
+      if (!targetNodeId) {
+        return
+      }
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+      const asset = await upscaleImageAsset(nodeData.assetId, resolution)
+      useCanvasStore.getState().updateNodeData(targetNodeId, {
+        assetId: asset.id,
+        status: 'success',
+        error: undefined,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      try {
+        await useFlowStore.getState().saveCurrent()
+      } catch {
+        // 保存失败不打断高清结果展示；用户后续操作仍可继续。
+      }
+    } catch (error) {
+      if (targetNodeId) {
+        useCanvasStore.getState().updateNodeData(targetNodeId, {
+          status: 'error',
+          error: error instanceof Error ? error.message : String(error),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+        void useFlowStore.getState().saveCurrent().catch(() => undefined)
+      }
+    } finally {
+      setActionBusy(false)
+    }
+  }, [id, nodeData.assetId, upscaleResolution])
+
+  const handleOpenFullSize = useCallback(() => {
+    if (!hasImage || !imageSrc) {
+      return
+    }
+    setFullSizeScale(1)
+    setFullSizeRotation(0)
+    setFullSizeOffset({ x: 0, y: 0 })
+    setFullSizePanning(false)
+    fullSizePanAnchorRef.current = null
+    setFullSizeOpen(true)
+  }, [hasImage, imageSrc])
+
+  const handleFullSizeScaleChange = useCallback((scale: number) => {
+    setFullSizeScale(clampPreviewScale(scale))
+  }, [])
+
+  const handleFullSizeWheelZoom = useCallback((deltaY: number) => {
+    setFullSizeScale((scale) => {
+      const nextScale = deltaY < 0 ? scale * 1.08 : scale / 1.08
+      return clampPreviewScale(nextScale)
+    })
+  }, [])
+
+  const handleFullSizeReset = useCallback(() => {
+    setFullSizeScale(1)
+    setFullSizeRotation(0)
+    setFullSizeOffset({ x: 0, y: 0 })
+    setFullSizeReloadVersion((version) => version + 1)
+  }, [])
+
+  const handleFullSizeRename = useCallback((title: string) => {
+    useCanvasStore.getState().updateNodeData(id, {
+      title: title || '未命名图片',
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+  }, [id])
+
+  const handleFullSizePanStart = useCallback((point: { x: number; y: number }) => {
+    setFullSizePanning(true)
+    fullSizePanAnchorRef.current = {
+      pointer: point,
+      offset: fullSizeOffset,
+    }
+  }, [fullSizeOffset])
+
+  const handleFullSizePanMove = useCallback((point: { x: number; y: number }) => {
+    const anchor = fullSizePanAnchorRef.current
+    if (!anchor) return
+    setFullSizeOffset({
+      x: anchor.offset.x + point.x - anchor.pointer.x,
+      y: anchor.offset.y + point.y - anchor.pointer.y,
+    })
+  }, [])
+
+  const handleFullSizePanEnd = useCallback(() => {
+    setFullSizePanning(false)
+    fullSizePanAnchorRef.current = null
+  }, [])
+
+  const fullSizeImageInfo = useMemo(() => {
+    const resolution =
+      nodeData.width && nodeData.height
+        ? `${Math.round(nodeData.width)} x ${Math.round(nodeData.height)}`
+        : '未知'
+    return `分辨率 ${resolution} · 文件大小未知`
+  }, [nodeData.height, nodeData.width])
+
+  const fullSizeImageSrc = useMemo(() => {
+    if (!imageSrc) return ''
+    if (!fullSizeReloadVersion) return imageSrc
+    const joiner = imageSrc.includes('?') ? '&' : '?'
+    return `${imageSrc}${joiner}viewerReload=${fullSizeReloadVersion}`
+  }, [fullSizeReloadVersion, imageSrc])
+
   useEffect(() => {
     if (!editorMounted) return
 
     const handleDocumentPointerDown = (event: globalThis.PointerEvent) => {
       const target = event.target
       if (!(target instanceof Element)) return
-      const isInsideEditorOwner = !!target.closest(`[data-flow-node-id="${id}"]`)
+      const isInsideEditorOwner =
+        !!target.closest(`[data-flow-node-id="${id}"]`) ||
+        !!target.closest('.image-fullscreen-viewer')
       if (
         !shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
@@ -486,9 +699,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
     const inputImageAssetIds =
       options.inputImageAssetIds ??
-      (nodeData.assetId && isJimengImageModel(effectiveModel.id)
-        ? [nodeData.assetId]
-        : [])
+      getImageGenerationInputImages({
+        assetId: nodeData.assetId,
+        modelId: effectiveModel.id,
+        nodeId: id,
+        nodes,
+        edges,
+      })
     const request: GenerationRequest = {
       flowId: startedFlowId ?? 'local',
       nodeId: id,
@@ -549,33 +766,26 @@ export function ImageNode({ id, data, selected }: NodeProps) {
 
     setIsGenerating(true)
     setSendError('')
-    try {
-      const response = await createGeneration(request)
-      generateStore.setGenerationId(id, response.id)
-      const results = response.results ?? []
-      const outputAssetIds =
-        results
-          .map((result) => result.assetId)
-          .filter((assetId): assetId is string => !!assetId)
-      const generationRun = buildImageGenerationRunFromResponse(
-        response,
-        request,
-        {
-          quality: effectiveQuality,
-          ratio: effectiveRatio,
-          resolution: effectiveResolution,
-        },
-      )
 
+    const applyFinal = async (resp: GenerationResponse) => {
+      const results = resp.results ?? []
+      const outputAssetIds = results
+        .map((result) => result.assetId)
+        .filter((assetId): assetId is string => !!assetId)
+      const generationRun = buildImageGenerationRunFromResponse(resp, request, {
+        quality: effectiveQuality,
+        ratio: effectiveRatio,
+        resolution: effectiveResolution,
+      })
       const failedMessage =
-        response.status === 'error'
-          ? response.error || '生图失败，请稍后重试'
+        resp.status === 'error'
+          ? resp.error || '生图失败，请稍后重试'
           : outputAssetIds.length === 0
-            ? response.error || '生图完成，但没有返回可上图的图片'
+            ? resp.error || '生图完成，但没有返回可上图的图片'
             : ''
-      const nextStatus = failedMessage ? 'error' : response.status
+      const nextStatus = failedMessage ? 'error' : resp.status
       const reloadStartedFlow = async (fallbackMessage: string) => {
-        if (!startedFlowId || response.status === 'error') {
+        if (!startedFlowId || resp.status === 'error') {
           setSendError(fallbackMessage)
           return
         }
@@ -593,8 +803,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       }
 
       generateStore.setStatus(id, nextStatus)
-      if (failedMessage || response.error) {
-        generateStore.setError(id, failedMessage || response.error)
+      if (failedMessage || resp.error) {
+        generateStore.setError(id, failedMessage || resp.error)
       }
       const latestStore = useCanvasStore.getState()
       const nodeExists = latestStore.nodes.some((node) => node.id === id)
@@ -608,10 +818,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       const latestNodeData = latestNode?.data as ImageNodeData | undefined
       store.updateNodeData(id, {
         status: nextStatus,
-        error: failedMessage || response.error,
+        error: failedMessage || resp.error,
         outputAssetIds,
         assetId: outputAssetIds[0] ?? nodeData.assetId,
-        generationId: response.id,
+        generationId: resp.id,
         prompt: trimmedPrompt,
         model: effectiveModel.id,
         width: size.width,
@@ -651,8 +861,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         }
         handleCloseEditor()
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+    }
+
+    const handleGenerationError = (message: string) => {
       generateStore.setStatus(id, 'error')
       generateStore.setError(id, message)
       store.updateNodeData(id, {
@@ -661,9 +872,38 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
       setSendError(message)
-    } finally {
-      setIsGenerating(false)
     }
+
+    const flow = startImageGenerationFlow(request, {
+      onQueued: () => {
+        setSendError('')
+      },
+      onUpdate: (data) => {
+        if (data.status !== 'success' && data.status !== 'error') {
+          store.updateNodeData(id, {
+            status: data.status,
+            error: data.error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          generateStore.setStatus(id, data.status)
+          if (data.error) generateStore.setError(id, data.error)
+        }
+      },
+      onComplete: async (data) => {
+        try {
+          await applyFinal(data)
+        } catch (applyErr) {
+          handleGenerationError(
+            applyErr instanceof Error ? applyErr.message : String(applyErr),
+          )
+        }
+      },
+      onError: (error) => {
+        handleGenerationError(error)
+      },
+    })
+    generationUnsubscribeRef.current = flow.cancel
+    setIsGenerating(false)
   }
 
   const applyEditorStateFromRun = (run: ImageGenerationRun) => {
@@ -761,9 +1001,24 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       hideTitle={!hasImage}
     >
       <>
+        {editorMounted && (
+          <ImageActionCard
+            busy={actionBusy}
+            closing={editorClosing}
+            validationStatus={validationStatus}
+            upscaleResolution={upscaleResolution}
+            onUpscale={(resolution) => void handleUpscaleImage(resolution)}
+            onUpscaleResolutionChange={setUpscaleResolution}
+            onValidate={() => void handleValidateJimeng()}
+            onDownload={handleDownloadImage}
+            onOpenFullSize={handleOpenFullSize}
+          />
+        )}
+
         {hasImage && imageSrc ? (
           <div
             className="media-display-node image-media-display"
+            data-node-handle-anchor
             onClick={handleOpenEditor}
             style={mediaDisplayStyle}
           >
@@ -779,6 +1034,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         ) : (
           <div
             className="image-node-container"
+            data-node-handle-anchor
             onClick={handleOpenEditor}
             style={emptyContainerStyle}
           >
@@ -800,6 +1056,42 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           </div>
         )}
 
+        {fullSizeOpen && hasImage && imageSrc && typeof document !== 'undefined'
+          ? createPortal(
+              <ImageFullscreenViewer
+                imageSrc={fullSizeImageSrc}
+                title={nodeData.title}
+                imageInfo={fullSizeImageInfo}
+                scale={fullSizeScale}
+                rotation={fullSizeRotation}
+                offset={fullSizeOffset}
+                isPanning={fullSizePanning}
+                onClose={() => setFullSizeOpen(false)}
+                onDownload={() => void handleDownloadImage()}
+                onRename={handleFullSizeRename}
+                onReset={handleFullSizeReset}
+                onRotateClockwise={() => {
+                  setFullSizeRotation((rotation) => rotation + 90)
+                }}
+                onRotateCounterClockwise={() => {
+                  setFullSizeRotation((rotation) => rotation - 90)
+                }}
+                onPanStart={handleFullSizePanStart}
+                onPanMove={handleFullSizePanMove}
+                onPanEnd={handleFullSizePanEnd}
+                onScaleChange={handleFullSizeScaleChange}
+                onZoomIn={() => {
+                  setFullSizeScale((scale) => clampPreviewScale(scale + 0.1))
+                }}
+                onZoomOut={() => {
+                  setFullSizeScale((scale) => clampPreviewScale(scale - 0.1))
+                }}
+                onWheelZoom={handleFullSizeWheelZoom}
+              />,
+              document.body,
+            )
+          : null}
+
         {editorMounted && (
           <div
             className={`image-editor-panel nodrag nopan${
@@ -807,23 +1099,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             }`}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="image-editor-tools">
-              <button type="button" className="image-editor-tool">
-                <Box size={20} strokeWidth={1.6} />
-                <span>风格</span>
-              </button>
-              <button type="button" className="image-editor-tool">
-                <MapPin size={20} strokeWidth={1.6} />
-                <span>标记</span>
-              </button>
-              <button type="button" className="image-editor-tool">
-                <Plus size={24} strokeWidth={1.5} />
-                <span>参考</span>
-              </button>
-              <button type="button" className="image-editor-expand" title="展开">
-                <Maximize2 size={18} strokeWidth={1.6} />
-              </button>
-            </div>
+            <ReferenceAssetStrip
+              assetIds={referenceAssetIds}
+              onRemove={handleRemoveReferenceAsset}
+            />
 
             <textarea
               className="image-editor-prompt"
@@ -994,7 +1273,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             {sendError ? (
               <div className="image-editor-status error">{sendError}</div>
             ) : null}
-
             {generationRuns.length > 0 && (
               <div className="image-generation-history">
                 <div className="image-generation-history-head">

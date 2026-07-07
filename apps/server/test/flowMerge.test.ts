@@ -91,6 +91,66 @@ test('mergeNodesForFlowUpdate keeps image generation history when a stale autosa
   )
 })
 
+test('mergeNodesForFlowUpdate keeps video assets and history when a stale autosave omits them', () => {
+  const currentNodes: FlowNode[] = [
+    {
+      id: 'video-1',
+      type: 'video',
+      position: { x: 0, y: 0 },
+      data: {
+        title: '视频节点 1',
+        status: 'success',
+        assetIds: ['asset_video_new'],
+        generationRuns: [
+          {
+            id: 'gen_video_new',
+            generationId: 'gen_video_new',
+            status: 'success',
+            assetIds: ['asset_video_new'],
+            prompt: 'storm city trailer',
+            model: 'seedance-2.0',
+            mode: 'image_to_video',
+            aspectRatio: '16:9',
+            resolution: '720P',
+            quality: 'standard',
+            durationSeconds: 5,
+            count: 1,
+            generateAudio: true,
+            inputImageAssetIds: ['asset_image_ref'],
+            createdAt: '2026-07-05T11:00:00.000Z',
+            finishedAt: '2026-07-05T11:02:00.000Z',
+          },
+        ],
+        updatedAt: '2026-07-05T11:02:00.000Z',
+      },
+    },
+  ]
+  const incomingNodes: FlowNode[] = [
+    {
+      id: 'video-1',
+      type: 'video',
+      position: { x: 30, y: 40 },
+      data: {
+        title: '视频节点 1',
+        status: 'idle',
+        updatedAt: '2026-07-05T11:00:30.000Z',
+      },
+    },
+  ]
+
+  const merged = mergeNodesForFlowUpdate(currentNodes, incomingNodes)
+
+  assert.equal(merged[0].position.x, 30)
+  assert.deepEqual(merged[0].data.assetIds, ['asset_video_new'])
+  assert.equal(merged[0].data.status, 'success')
+  assert.deepEqual(
+    (merged[0].data.generationRuns as Array<{ generationId: string }>).map(
+      (run) => run.generationId,
+    ),
+    ['gen_video_new'],
+  )
+})
+
 test('mergeNodesForFlowUpdate allows a newer incoming image asset to replace the current one', () => {
   const currentNodes: FlowNode[] = [
     {
@@ -204,6 +264,68 @@ test('mergeNodesForFlowUpdate keeps current generated nodes missing from a stale
   assert.deepEqual(merged[0].position, { x: 20, y: 30 })
   assert.equal(merged[1].id, 'image-generated')
   assert.equal(merged[1].data.assetId, 'asset_generated')
+})
+
+test('mergeNodesForFlowUpdate keeps current generated video nodes missing from a stale autosave', () => {
+  const currentNodes: FlowNode[] = [
+    {
+      id: 'video-generated',
+      type: 'video',
+      position: { x: 360, y: 120 },
+      data: {
+        title: '视频节点 2',
+        status: 'success',
+        assetIds: ['asset_video_generated'],
+        generationRuns: [
+          {
+            id: 'gen_video_generated',
+            generationId: 'gen_video_generated',
+            status: 'success',
+            assetIds: ['asset_video_generated'],
+            prompt: 'cinematic skyline',
+            model: 'seedance-2.0',
+            mode: 'text_to_video',
+            aspectRatio: '16:9',
+            resolution: '720P',
+            quality: 'standard',
+            durationSeconds: 5,
+            count: 1,
+            generateAudio: true,
+            inputImageAssetIds: [],
+            createdAt: '2026-07-05T14:12:45.000Z',
+            finishedAt: '2026-07-05T14:13:45.000Z',
+          },
+        ],
+        updatedAt: '2026-07-05T14:13:45.000Z',
+      },
+    },
+    {
+      id: 'text-1',
+      type: 'text',
+      position: { x: 0, y: 0 },
+      data: {
+        title: '文本节点 1',
+      },
+    },
+  ]
+  const incomingNodes: FlowNode[] = [
+    {
+      id: 'text-1',
+      type: 'text',
+      position: { x: 20, y: 30 },
+      data: {
+        title: '文本节点 1',
+      },
+    },
+  ]
+
+  const merged = mergeNodesForFlowUpdate(currentNodes, incomingNodes)
+
+  assert.equal(merged.length, 2)
+  assert.equal(merged[0].id, 'text-1')
+  assert.deepEqual(merged[0].position, { x: 20, y: 30 })
+  assert.equal(merged[1].id, 'video-generated')
+  assert.deepEqual(merged[1].data.assetIds, ['asset_video_generated'])
 })
 
 test('mergeNodesForFlowUpdate does not restore generated nodes that were explicitly deleted', () => {

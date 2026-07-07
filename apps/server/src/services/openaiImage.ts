@@ -3,6 +3,10 @@ import type {
   GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
 import type { Settings } from '@jimeng-flow/shared/settings'
+import { readFile } from 'node:fs/promises'
+import { extname, resolve } from 'node:path'
+import { getProjectRoot } from '../config'
+import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
 
 interface OpenAiImageItem {
@@ -127,6 +131,186 @@ function getResolution(width: number, height: number): string {
   if (longSide >= 2048) return '4k'
   if (longSide >= 1400) return '2k'
   return '1k'
+}
+
+function isAssetId(value: string): boolean {
+  return /^asset_[A-Za-z0-9_-]+$/.test(value)
+}
+
+function isDataUrl(value: string): boolean {
+  return value.startsWith('data:')
+}
+
+function isRemoteUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value)
+}
+
+function isLocalHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '[::1]'
+}
+
+function extractLocalAssetIdFromUrl(value: string): string | null {
+  let pathname = ''
+  if (value.startsWith('/')) {
+    pathname = value
+  } else {
+    try {
+      const url = new URL(value)
+      if (!isLocalHost(url.hostname)) return null
+      pathname = url.pathname
+    } catch {
+      return null
+    }
+  }
+
+  const match = pathname.match(/^\/api\/assets\/([^/]+)\/(?:file|download)$/)
+  if (!match) return null
+  return decodeURIComponent(match[1])
+}
+
+function imageMimeFromPath(path: string): string {
+  const ext = extname(path).toLowerCase()
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.webp') return 'image/webp'
+  if (ext === '.gif') return 'image/gif'
+  if (ext === '.bmp') return 'image/bmp'
+  return 'image/png'
+}
+
+async function resolveInputImageFilePath(value: string): Promise<string> {
+  const localAssetId = extractLocalAssetIdFromUrl(value)
+  if (localAssetId) {
+    const asset = await getAsset(localAssetId)
+    if (!asset) {
+      throw new Error(`找不到参考图 Asset：${localAssetId}`)
+    }
+    return getAssetFilePath(asset)
+  }
+  if (isAssetId(value)) {
+    const asset = await getAsset(value)
+    if (!asset) {
+      throw new Error(`找不到参考图 Asset：${value}`)
+    }
+    return getAssetFilePath(asset)
+  }
+  return resolve(getProjectRoot(), value)
+}
+
+async function resolveInputImageDataUrl(input: string): Promise<string | null> {
+  const value = input.trim()
+  if (!value) return null
+  if (isDataUrl(value) || isRemoteUrl(value)) return value
+
+  const filePath = await resolveInputImageFilePath(value)
+  const buffer = await readFile(filePath)
+  return `data:${imageMimeFromPath(filePath)};base64,${buffer.toString('base64')}`
+}
+
+async function resolveInputImageDataUrls(
+  inputImages: string[] | undefined,
+): Promise<string[]> {
+  const urls: string[] = []
+  for (const input of inputImages ?? []) {
+    const url = await resolveInputImageDataUrl(input)
+    if (url) urls.push(url)
+  }
+  return urls
+}
+
+interface InputImageFilePart {
+  buffer: Buffer
+  mimeType: string
+  filename: string
+}
+
+function imageExtFromMime(mimeType: string): string {
+  const normalized = mimeType.toLowerCase()
+  if (normalized === 'image/jpeg') return '.jpg'
+  if (normalized === 'image/webp') return '.webp'
+  if (normalized === 'image/gif') return '.gif'
+  if (normalized === 'image/bmp') return '.bmp'
+  return '.png'
+}
+
+function parseDataUrlImage(
+  value: string,
+  index: number,
+): InputImageFilePart {
+  const match = value.match(/^data:([^;,]+)?(;base64)?,(.*)$/s)
+  if (!match) {
+    throw new Error('参考图 data URL 格式不正确')
+  }
+  const mimeType = match[1] || 'image/png'
+  const encoded = match[3] || ''
+  const buffer = match[2]
+    ? Buffer.from(encoded, 'base64')
+    : Buffer.from(decodeURIComponent(encoded), 'utf8')
+  return {
+    buffer,
+    mimeType,
+    filename: `reference-${index + 1}${imageExtFromMime(mimeType)}`,
+  }
+}
+
+async function resolveInputImageFilePart(
+  input: string,
+  index: number,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+): Promise<InputImageFilePart | null> {
+  const value = input.trim()
+  if (!value) return null
+  if (isDataUrl(value)) return parseDataUrlImage(value, index)
+
+  if (isRemoteUrl(value)) {
+    const res = await fetchImpl(value, { signal })
+    if (!res.ok) {
+      throw new Error(`下载参考图失败：HTTP ${res.status} ${res.statusText}`)
+    }
+    const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png'
+    return {
+      buffer: Buffer.from(await res.arrayBuffer()),
+      mimeType,
+      filename: `reference-${index + 1}${imageExtFromMime(mimeType)}`,
+    }
+  }
+
+  const filePath = await resolveInputImageFilePath(value)
+  return {
+    buffer: await readFile(filePath),
+    mimeType: imageMimeFromPath(filePath),
+    filename: `reference-${index + 1}${extname(filePath) || '.png'}`,
+  }
+}
+
+async function createOpenAiImageEditForm(
+  req: GenerationRequest,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+): Promise<FormData> {
+  const form = new FormData()
+  form.append('model', req.model)
+  form.append('prompt', req.prompt)
+  form.append('n', String(Math.max(1, Math.min(req.count ?? 1, 10))))
+  form.append(
+    'size',
+    getOpenAiCompatibleImageSize({
+      model: req.model,
+      width: req.width,
+      height: req.height,
+    }),
+  )
+
+  for (const [index, input] of (req.inputImages ?? []).entries()) {
+    const part = await resolveInputImageFilePart(input, index, fetchImpl, signal)
+    if (!part) continue
+    const blob = new Blob([new Uint8Array(part.buffer)], {
+      type: part.mimeType,
+    })
+    form.append('image', blob, part.filename)
+  }
+  return form
 }
 
 export function getOpenAiCompatibleImageSize({
@@ -313,9 +497,6 @@ export async function generateOpenAiCompatibleImage(
   if (!apiKey) {
     throw new Error('第三方图片 API Key 未配置，请先在设置中配置 LLM Provider')
   }
-  if (req.inputImages && req.inputImages.length > 0) {
-    throw new Error('第三方图片 API 暂不支持参考图/图生图，请改用即梦模型或空白图片节点')
-  }
 
   const controller = new AbortController()
   const timeoutMs = deps.timeoutMs ?? 300_000
@@ -323,15 +504,37 @@ export async function generateOpenAiCompatibleImage(
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const res = await fetchImpl(`${baseUrl}/images/generations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(getOpenAiCompatibleImagePayload(req, baseUrl)),
-      signal: controller.signal,
-    })
+    const hasInputImages = !!req.inputImages && req.inputImages.length > 0
+    const isApimart = isApimartBaseUrl(baseUrl)
+    let res: Response
+    if (hasInputImages && !isApimart) {
+      res = await fetchImpl(`${baseUrl}/images/edits`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: await createOpenAiImageEditForm(
+          req,
+          fetchImpl,
+          controller.signal,
+        ),
+        signal: controller.signal,
+      })
+    } else {
+      const payload = getOpenAiCompatibleImagePayload(req, baseUrl)
+      if (isApimart && hasInputImages) {
+        payload.image_urls = await resolveInputImageDataUrls(req.inputImages)
+      }
+      res = await fetchImpl(`${baseUrl}/images/generations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+    }
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')

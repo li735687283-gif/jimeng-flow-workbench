@@ -10,7 +10,12 @@ import type {
   LlmOutputFormat,
   TextContentType,
 } from '@jimeng-flow/shared/textNode'
+import {
+  getModelConfigsByCapability,
+  type Settings,
+} from '@jimeng-flow/shared/settings'
 import { getSettings } from '../settings'
+import { generateCodexCliText } from '../codexImage'
 
 /** LLM 调用选项 */
 export interface GenerateOptions {
@@ -89,6 +94,21 @@ const DEFAULT_MODELS: LlmModelInfo[] = [
     estimatedLatency: '约 2-5s',
   },
 ]
+
+export type LlmGenerationProvider = 'openai-compatible' | 'codex'
+
+export function getLlmGenerationProviderForSettings(
+  model: string,
+  settings: Pick<Settings, 'modelConfigs'> | undefined,
+): LlmGenerationProvider {
+  const id = model.trim()
+  if (id.toLowerCase().startsWith('codex:')) return 'codex'
+  const configured = getModelConfigsByCapability(
+    settings?.modelConfigs,
+    'chat',
+  ).find((item) => item.id === id)
+  return configured?.provider === 'codex' ? 'codex' : 'openai-compatible'
+}
 
 /** 模型 estimatedLatency 估算（基于 id 简单匹配，仅供 UI 展示） */
 function guessLatency(modelId: string): string {
@@ -191,6 +211,24 @@ async function callChatCompletions(
   opts: GenerateOptions,
 ): Promise<GenerateResult> {
   const settings = await getSettings()
+  const provider = getLlmGenerationProviderForSettings(model, settings)
+  if (provider === 'codex') {
+    const result = await generateCodexCliText(
+      { model, messages },
+      { settings, timeoutMs: opts.timeoutMs },
+    )
+    const outputFormat: LlmOutputFormat = opts.outputFormat ?? 'auto'
+    const { contentType, promptCandidate } = detectContentTypeAndPrompt(
+      result.content,
+      outputFormat,
+    )
+    return {
+      content: result.content,
+      contentType,
+      promptCandidate,
+    }
+  }
+
   const baseUrl = (opts.baseUrl ?? settings.llmBaseUrl ?? '').replace(/\/+$/, '')
   const apiKey = opts.apiKey ?? settings.llmApiKey ?? ''
 

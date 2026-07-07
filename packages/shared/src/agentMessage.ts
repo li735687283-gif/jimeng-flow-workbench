@@ -16,10 +16,10 @@ export interface AgentRoleInfo {
 
 /** 所有可用角色信息 */
 export const AGENT_ROLES: AgentRoleInfo[] = [
-  { id: 'general', name: '通用助手', description: '全能型 AI 助手，涵盖创意、视觉、剪辑等多种能力', icon: '✨', color: '#6366f1' },
-  { id: 'director', name: '创意导演', description: '擅长故事策划、分镜设计、脚本撰写和创意构思', icon: '🎬', color: '#f59e0b' },
-  { id: 'visual', name: '视觉设计师', description: '专注于图片生成、风格优化、构图设计和图像编辑', icon: '🎨', color: '#ec4899' },
-  { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', icon: '✂️', color: '#10b981' },
+  { id: 'general', name: '通用助手', description: '全能型 AI 助手，涵盖创意、视觉、剪辑等多种能力', icon: '✨', color: '#d8d8d8' },
+  { id: 'director', name: '创意导演', description: '擅长故事策划、分镜设计、脚本撰写和创意构思', icon: '🎬', color: '#c2c2c2' },
+  { id: 'visual', name: '视觉设计师', description: '专注于图片生成、风格优化、构图设计和图像编辑', icon: '🎨', color: '#a8a8a8' },
+  { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', icon: '✂️', color: '#8f8f8f' },
 ]
 
 /** Agent 创作模板 */
@@ -133,8 +133,12 @@ export interface StoryboardItem {
   prompt: string
   /** 生成后的图片 assetId */
   imageAssetId?: string
+  /** 生成后的图片节点 id，用于后续视频节点连线 */
+  imageNodeId?: string
   /** 生成后的视频 assetId */
   videoAssetId?: string
+  /** 生成后的视频节点 id，用于后续重复抽卡和定位 */
+  videoNodeId?: string
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   Image as ImageIcon,
+  LocateFixed,
   Loader2,
   Mic,
   MicOff,
@@ -28,7 +29,7 @@ import {
   type GenerationResponse,
 } from '@jimeng-flow/shared/generateNode'
 import {
-  VIDEO_MODELS,
+  VIDEO_MODES,
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
   VIDEO_DURATIONS,
@@ -36,6 +37,8 @@ import {
   type VideoGenerationRequest,
   type VideoAspectRatio,
   type VideoResolution,
+  type VideoMode,
+  type VideoNodeData,
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
 import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
@@ -48,7 +51,38 @@ import type { BaseNodeData } from '../types/nodeTypes'
 import {
   getConfiguredDefaultImageModel,
   getConfiguredImageModels,
+  shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
+import {
+  createAgentImageNodeRecords,
+  shouldBlockAgentImageEditGeneration,
+} from '../utils/agentImageNodes'
+import {
+  applyAgentStoryboardVideoResult,
+  buildAgentStoryboardVideoMedia,
+  buildAgentVideoCompletionPatch,
+  buildAgentVideoRunningPatch,
+  buildAgentVideoReferences,
+  getAgentVideoGeneratedAssetIds,
+  getAgentVideoInputImageNodes,
+  getAgentStoryboardVideoSource,
+  getAgentStoryboardVideoTargetNodeId,
+  getAgentStoryboardItemMediaStatus,
+  getAgentStoryboardVideoActionLabel,
+  getAgentStoryboardVideoLocateLabel,
+  getAgentStoryboardVideoReferenceSources,
+  resolveAgentVideoMode,
+  selectAgentVideoTargetNodeId,
+} from '../utils/agentVideoGeneration'
+import {
+  getConfiguredDefaultVideoModel,
+  getConfiguredVideoModels,
+  getUnsupportedVideoModelMessage,
+  videoModelNeedsJimeng,
+} from '../utils/videoModels'
+import { getCurrentFlowId } from '../state/flowStore'
+import { resolveGenerationFlowId } from '../utils/generationFlow'
+import { getConfiguredChatModels } from '../utils/chatModels'
 
 type SpeechRecognitionResultLike = {
   readonly length: number
@@ -125,6 +159,7 @@ interface PendingVideoRequest {
 
 interface VideoGenerationParams {
   model: string
+  mode: VideoMode
   aspectRatio: VideoAspectRatio
   resolution: VideoResolution
   durationSeconds: number
@@ -192,9 +227,11 @@ function getMentionQuery(value: string): string | null {
 
 export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const nodes = useCanvasStore((s) => s.nodes)
+  const edges = useCanvasStore((s) => s.edges)
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId)
   const addNode = useCanvasStore((s) => s.addNode)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
+  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
   const onConnect = useCanvasStore((s) => s.onConnect)
   const messages = useAgentStore((s) => s.messages)
   const loading = useAgentStore((s) => s.loading)
@@ -212,10 +249,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setCenter } = useReactFlow()
   const imageModelOptions = useMemo(
-    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels),
-    [settings?.imageModels, settings?.llmModels],
+    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels, settings?.modelConfigs),
+    [settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
   )
   const defaultImageModelId = useMemo(
     () =>
@@ -223,10 +260,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         settings?.imageModels,
         settings?.defaultModel,
         settings?.llmModels,
+        settings?.modelConfigs,
       ),
-    [settings?.defaultModel, settings?.imageModels, settings?.llmModels],
+    [settings?.defaultModel, settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
   )
-
+  const videoModelOptions = useMemo(
+    () => getConfiguredVideoModels(settings?.videoModels, settings?.modelConfigs),
+    [settings?.videoModels, settings?.modelConfigs],
+  )
+  const defaultVideoModelId = useMemo(
+    () =>
+      getConfiguredDefaultVideoModel(
+        settings?.videoModels,
+        settings?.defaultVideoModel,
+        settings?.modelConfigs,
+      ),
+    [settings?.defaultVideoModel, settings?.videoModels, settings?.modelConfigs],
+  )
   const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
@@ -246,18 +296,28 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       sizeId: settings?.defaultSize || IMAGE_SIZES[0].id,
       count: 1,
     })
+  const activeAgentImageModelNeedsJimeng =
+    shouldRequireJimengCliForImageModel(imageGenerationParams.model)
   const [imageGenerationStatus, setImageGenerationStatus] = useState('')
   const [pendingVideoRequest, setPendingVideoRequest] =
     useState<PendingVideoRequest | null>(null)
   const [videoGenerationParams, setVideoGenerationParams] =
     useState<VideoGenerationParams>({
-      model: VIDEO_MODELS[0].id,
+      model: defaultVideoModelId,
+      mode: 'image_to_video',
       aspectRatio: '16:9',
       resolution: '720P',
       durationSeconds: 5,
       count: 1,
       quality: 'standard',
     })
+  const unsupportedAgentVideoModelMessage = useMemo(
+    () => getUnsupportedVideoModelMessage(videoGenerationParams.model),
+    [videoGenerationParams.model],
+  )
+  const activeAgentVideoModelNeedsJimeng = videoModelNeedsJimeng(
+    videoGenerationParams.model,
+  )
   const [videoGenerationStatus, setVideoGenerationStatus] = useState('')
   const [pendingEditRequest, setPendingEditRequest] =
     useState<PendingEditRequest | null>(null)
@@ -277,10 +337,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const currentModel = settings?.llmModel || FALLBACK_MODELS[0]
   const preferredModels = useMemo(() => {
-    const configured = settings?.llmModels ?? []
+    const configured = getConfiguredChatModels(
+      settings?.llmModels,
+      currentModel,
+      settings?.modelConfigs,
+    )
     if (configured.length === 0) return []
-    return uniqueModels([...configured, currentModel])
-  }, [currentModel, settings?.llmModels])
+    return uniqueModels(configured)
+  }, [currentModel, settings?.llmModels, settings?.modelConfigs])
+  const hasStructuredChatModels = useMemo(
+    () =>
+      (settings?.modelConfigs ?? []).some(
+        (model) =>
+          model.enabled !== false &&
+          model.capabilities.includes('chat'),
+      ),
+    [settings?.modelConfigs],
+  )
   const mentionQuery = getMentionQuery(draft)
   const maxPanelWidth =
     typeof window === 'undefined'
@@ -306,7 +379,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           uniqueModels([
             ...preferredModels,
             currentModel,
-            ...names,
+            ...(hasStructuredChatModels ? [] : names),
             ...FALLBACK_MODELS,
           ]),
         )
@@ -318,7 +391,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     return () => {
       cancelled = true
     }
-  }, [currentModel, preferredModels])
+  }, [currentModel, preferredModels, hasStructuredChatModels])
 
   useEffect(() => {
     setPanelWidth((value) => clamp(value, MIN_PANEL_WIDTH, maxPanelWidth))
@@ -333,6 +406,15 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       sizeId: settings?.defaultSize || params.sizeId,
     }))
   }, [defaultImageModelId, imageModelOptions, settings?.defaultSize])
+
+  useEffect(() => {
+    setVideoGenerationParams((params) => ({
+      ...params,
+      model: videoModelOptions.some((model) => model.id === params.model)
+        ? params.model
+        : defaultVideoModelId,
+    }))
+  }, [defaultVideoModelId, videoModelOptions])
 
   useEffect(() => {
     return () => {
@@ -538,18 +620,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       .nodes.find((node) => node.id === generateNodeId)
     const baseX = (current?.position?.x ?? 0) + 300
     const baseY = current?.position?.y ?? 0
-    const assetIds: string[] = []
-
-    results.forEach((result, index) => {
-      if (!result.assetId) return
-      assetIds.push(result.assetId)
+    return createAgentImageNodeRecords(results, (assetId, index) => {
       const imageNodeId = addNode('image', {
         x: baseX + index * 260,
         y: baseY,
       })
-      if (!imageNodeId) return
+      if (!imageNodeId) return null
       updateNodeData(imageNodeId, {
-        assetId: result.assetId,
+        assetId,
       } as unknown as Partial<BaseNodeData>)
       onConnect({
         source: generateNodeId,
@@ -557,14 +635,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         sourceHandle: null,
         targetHandle: null,
       })
+      return imageNodeId
     })
-
-    return assetIds
   }
 
   const startAgentImageGeneration = async () => {
     if (!pendingImageRequest) return
-    if (!isJimengConfigured) {
+    if (activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
       setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
@@ -604,7 +681,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     })
 
     const request: GenerationRequest = {
-      flowId: 'local',
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
       nodeId: generateNodeId,
       mediaType: 'image',
       prompt,
@@ -658,10 +735,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         },
         onComplete: (data) => {
           const results = data.results ?? []
-          const savedAssetIds = createImageNodesForResults(generateNodeId, results)
+          const createdImages = createImageNodesForResults(generateNodeId, results)
           const outputAssetIds =
-            savedAssetIds.length > 0
-              ? savedAssetIds
+            createdImages.assetIds.length > 0
+              ? createdImages.assetIds
               : results
                   .map((result) => result.assetId)
                   .filter((assetId): assetId is string => !!assetId)
@@ -697,7 +774,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 id: `video_auto_${Date.now()}`,
                 prompt: pendingImageRequest.prompt,
                 contextNodeIds: pendingImageRequest.contextNodeIds,
-                sourceImageNodeIds: outputAssetIds,
+                sourceImageNodeIds: createdImages.nodeIds,
               })
               setVideoGenerationStatus('')
               setSkillStep('video')
@@ -730,30 +807,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const startAgentVideoGeneration = async () => {
     if (!pendingVideoRequest) return
-    if (!isJimengConfigured) {
+    if (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
       setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
-
-    const contextNodes = pendingVideoRequest.contextNodeIds
-      .map((id) => nodes.find((node) => node.id === id))
-      .filter((node): node is (typeof nodes)[number] => !!node)
-    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
-    const inputImageAssetIds = imageContextNodes
-      .map((node) => (node.data as { assetId?: string }).assetId)
-      .filter((assetId): assetId is string => !!assetId)
-    // 如果有自动关联的图片结果，也加入参考
-    if (pendingVideoRequest.sourceImageNodeIds) {
-      pendingVideoRequest.sourceImageNodeIds.forEach((id) => {
-        const n = nodes.find((node) => node.id === id)
-        if (n && n.type === 'image') {
-          const assetId = (n.data as { assetId?: string }).assetId
-          if (assetId && !inputImageAssetIds.includes(assetId)) {
-            inputImageAssetIds.push(assetId)
-          }
-        }
-      })
+    if (unsupportedAgentVideoModelMessage) {
+      setVideoGenerationStatus(unsupportedAgentVideoModelMessage)
+      return
     }
+
+    const {
+      nodes: inputImageNodes,
+      assetIds: inputImageAssetIds,
+    } = getAgentVideoInputImageNodes({
+      contextNodeIds: pendingVideoRequest.contextNodeIds,
+      sourceImageNodeIds: pendingVideoRequest.sourceImageNodeIds,
+      nodes,
+    })
 
     const skillHint =
       activeSkills.length > 0
@@ -763,10 +833,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         : ''
     const prompt = `${pendingVideoRequest.prompt}${skillHint}`
 
-    const videoNodeId = addNode('video', getCanvasDropPosition())
+    const existingVideoNodeId = selectAgentVideoTargetNodeId(
+      pendingVideoRequest.contextNodeIds,
+      nodes,
+    )
+    const videoNodeId =
+      existingVideoNodeId ?? addNode('video', getCanvasDropPosition())
     if (!videoNodeId) return
 
-    imageContextNodes.forEach((node) => {
+    inputImageNodes.forEach((node) => {
+      const hasExistingEdge = edges.some(
+        (edge) => edge.source === node.id && edge.target === videoNodeId,
+      )
+      if (hasExistingEdge) return
       onConnect({
         source: node.id,
         target: videoNodeId,
@@ -775,13 +854,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       })
     })
 
+    const videoMode = resolveAgentVideoMode(
+      videoGenerationParams.mode,
+      inputImageAssetIds,
+    )
     const request: VideoGenerationRequest = {
-      flowId: 'local',
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
       nodeId: videoNodeId,
       mediaType: 'video',
-      mode: inputImageAssetIds.length > 0 ? 'image_to_video' : 'text_to_video',
+      mode: videoMode,
       prompt,
       inputImages: inputImageAssetIds,
+      references: buildAgentVideoReferences(videoGenerationParams.mode, inputImageAssetIds),
       model: videoGenerationParams.model,
       aspectRatio: videoGenerationParams.aspectRatio,
       resolution: videoGenerationParams.resolution,
@@ -793,24 +877,25 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const generateStore = useGenerateStore.getState()
     generateStore.setLastRequest(videoNodeId, request)
-    generateStore.setStatus(videoNodeId, 'queued')
+    generateStore.setStatus(videoNodeId, 'running')
     generateStore.setError(videoNodeId, undefined)
-    updateNodeData(videoNodeId, {
-      prompt,
-      model: videoGenerationParams.model,
-      aspectRatio: videoGenerationParams.aspectRatio,
-      resolution: videoGenerationParams.resolution,
-      quality: videoGenerationParams.quality,
-      durationSeconds: videoGenerationParams.durationSeconds,
-      count: videoGenerationParams.count,
-      mode: request.mode,
-      inputImageAssetIds,
-      status: 'queued',
-      error: undefined,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
+    const latestVideoData = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === videoNodeId)
+      ?.data as Partial<VideoNodeData> | undefined
+    updateNodeData(
+      videoNodeId,
+      buildAgentVideoRunningPatch(
+        request,
+        latestVideoData ?? {},
+      ) as unknown as Partial<BaseNodeData>,
+    )
 
-    setVideoGenerationStatus('已在画布创建视频节点，正在生成...')
+    setVideoGenerationStatus(
+      existingVideoNodeId
+        ? '已使用当前视频节点继续抽卡...'
+        : '已在画布创建视频节点，正在生成...',
+    )
 
     try {
       const response = await createGeneration(request)
@@ -834,26 +919,35 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           setVideoGenerationStatus(statusText)
         },
         onComplete: (data) => {
-          const results = data.results ?? []
-          const assetIds = results
-            .map((result) => result.assetId)
-            .filter((assetId): assetId is string => !!assetId)
+          const latestVideoData = useCanvasStore
+            .getState()
+            .nodes.find((node) => node.id === videoNodeId)
+            ?.data as { assetIds?: unknown; generationRuns?: unknown } | undefined
+          const currentAssetIds = Array.isArray(latestVideoData?.assetIds)
+            ? latestVideoData.assetIds.filter(
+                (assetId): assetId is string => typeof assetId === 'string',
+              )
+            : []
+          const completionPatch = buildAgentVideoCompletionPatch(
+            data,
+            request,
+            latestVideoData?.generationRuns,
+            undefined,
+            currentAssetIds,
+          )
 
           generateStore.setStatus(videoNodeId, data.status)
           if (data.error) generateStore.setError(videoNodeId, data.error)
-          updateNodeData(videoNodeId, {
-            status: data.status,
-            error: data.error,
-            assetIds,
-            generationId: data.id,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
+          updateNodeData(
+            videoNodeId,
+            completionPatch as unknown as Partial<BaseNodeData>,
+          )
           setPendingVideoRequest(null)
           setVideoGenerationStatus('已生成并写入画布')
           setSkillStep('done')
 
           // 添加结果到画廊
-          assetIds.forEach((assetId) => {
+          getAgentVideoGeneratedAssetIds(data).forEach((assetId) => {
             addGenerationResult({ assetId, type: 'video', prompt: pendingVideoRequest.prompt })
           })
           unsubscribe()
@@ -883,7 +977,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const startAgentEditGeneration = async () => {
     if (!pendingEditRequest) return
-    if (!isJimengConfigured) {
+    if (
+      shouldBlockAgentImageEditGeneration(
+        imageGenerationParams.model,
+        isJimengConfigured,
+      )
+    ) {
       setEditGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
@@ -947,10 +1046,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       })
       generateStore.setGenerationId(generateNodeId, response.id)
       const results = response.results ?? []
-      const savedAssetIds = createImageNodesForResults(generateNodeId, results)
+      const createdImages = createImageNodesForResults(generateNodeId, results)
       const outputAssetIds =
-        savedAssetIds.length > 0
-          ? savedAssetIds
+        createdImages.assetIds.length > 0
+          ? createdImages.assetIds
           : results
               .map((result) => result.assetId)
               .filter((assetId): assetId is string => !!assetId)
@@ -988,7 +1087,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }
 
   const startBatchImageGeneration = async (storyboard: StoryboardData) => {
-    if (!isJimengConfigured) {
+    if (activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
       setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
@@ -1022,6 +1121,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const generateStore = useGenerateStore.getState()
     const newImageAssetIds: string[] = []
+    const newImageNodeIds: string[] = []
 
     // 辅助函数：等待 SSE 完成
     const waitForGeneration = (id: string): Promise<GenerationResponse> => {
@@ -1040,7 +1140,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       if (!generateNodeId) continue
 
       const request: GenerationRequest = {
-        flowId: 'local',
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
         nodeId: generateNodeId,
         mediaType: 'image',
         prompt: item.prompt,
@@ -1090,6 +1190,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               targetHandle: null,
             })
             newImageAssetIds[i] = assetIds[0]
+            newImageNodeIds[i] = imageNodeId
             // 添加结果到画廊
             addGenerationResult({ assetId: assetIds[0], type: 'image', prompt: item.prompt })
           }
@@ -1120,6 +1221,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         const updatedItems = lastMsg.storyboard.items.map((item, index) => ({
           ...item,
           imageAssetId: newImageAssetIds[index] ?? item.imageAssetId,
+          imageNodeId: newImageNodeIds[index] ?? item.imageNodeId,
         }))
         useAgentStore.setState((state) => ({
           messages: state.messages.map((msg) =>
@@ -1135,34 +1237,103 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }
 
   const startBatchVideoGeneration = async (storyboard: StoryboardData) => {
-    if (!isJimengConfigured) {
+    if (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
       setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
 
     const basePos = getCanvasDropPosition()
     const videoNodeIds: string[] = []
+    const storyboardItemIds = storyboard.items.map((item) => item.id).join('|')
+    const storyboardMessageId = [...useAgentStore.getState().messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === 'assistant' &&
+          message.storyboard?.items.map((item) => item.id).join('|') ===
+            storyboardItemIds,
+      )?.id
 
     // 为每个有 imageAssetId 的镜头创建视频节点
     for (let i = 0; i < storyboard.items.length; i++) {
       const item = storyboard.items[i]
-      if (!item.imageAssetId) continue
-
-      const videoNodeId = addNode('video', {
-        x: basePos.x + i * 260,
-        y: basePos.y + 300,
+      const currentNodes = useCanvasStore.getState().nodes
+      const source = getAgentStoryboardVideoSource({
+        imageAssetId: item.imageAssetId,
+        imageNodeId: item.imageNodeId,
+        nodes: currentNodes,
       })
+      if (!source) continue
+      const nextItem = storyboard.items[i + 1]
+      const tailSource = nextItem
+        ? getAgentStoryboardVideoSource({
+            imageAssetId: nextItem.imageAssetId,
+            imageNodeId: nextItem.imageNodeId,
+            nodes: currentNodes,
+          })
+        : null
+      const referenceSources =
+        videoGenerationParams.mode === 'all_reference' ||
+        videoGenerationParams.mode === 'image_reference'
+          ? getAgentStoryboardVideoReferenceSources({
+              items: storyboard.items,
+              nodes: currentNodes,
+            })
+          : []
+
+      const existingVideoNodeId = getAgentStoryboardVideoTargetNodeId({
+        videoNodeId: item.videoNodeId,
+        nodes: currentNodes,
+      })
+      const videoNodeId =
+        existingVideoNodeId ??
+        addNode('video', {
+          x: basePos.x + i * 260,
+          y: basePos.y + 300,
+        })
       if (!videoNodeId) continue
 
       videoNodeIds.push(videoNodeId)
+      const media = buildAgentStoryboardVideoMedia({
+        requestedMode: videoGenerationParams.mode,
+        sourceAssetId: source.assetId,
+        tailAssetId: tailSource?.assetId,
+        referenceAssetIds: referenceSources.map((item) => item.assetId),
+      })
+      const candidateSources = [source, tailSource, ...referenceSources].filter(
+        (item): item is { assetId: string; nodeId: string | null } => !!item,
+      )
+      const sourceNodeIds = media.inputImages
+        .map(
+          (assetId) =>
+            candidateSources.find((item) => item.assetId === assetId)?.nodeId,
+        )
+        .filter((nodeId): nodeId is string => !!nodeId)
+      const uniqueSourceNodeIds = [...new Set(sourceNodeIds)]
+      uniqueSourceNodeIds.forEach((sourceNodeId) => {
+        const hasExistingEdge = useCanvasStore
+          .getState()
+          .edges.some(
+            (edge) => edge.source === sourceNodeId && edge.target === videoNodeId,
+          )
+        if (!hasExistingEdge) {
+          onConnect({
+            source: sourceNodeId,
+            target: videoNodeId,
+            sourceHandle: null,
+            targetHandle: null,
+          })
+        }
+      })
 
       const request: VideoGenerationRequest = {
-        flowId: 'local',
+        flowId: resolveGenerationFlowId(getCurrentFlowId()),
         nodeId: videoNodeId,
         mediaType: 'video',
-        mode: 'image_to_video',
+        mode: media.mode,
         prompt: item.shotDescription,
-        inputImages: [item.imageAssetId],
+        inputImages: media.inputImages,
+        references: media.references,
         model: videoGenerationParams.model,
         aspectRatio: videoGenerationParams.aspectRatio,
         resolution: videoGenerationParams.resolution,
@@ -1174,22 +1345,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
       const generateStore = useGenerateStore.getState()
       generateStore.setLastRequest(videoNodeId, request)
-      generateStore.setStatus(videoNodeId, 'queued')
+      generateStore.setStatus(videoNodeId, 'running')
       generateStore.setError(videoNodeId, undefined)
-      updateNodeData(videoNodeId, {
-        prompt: item.shotDescription,
-        model: videoGenerationParams.model,
-        aspectRatio: videoGenerationParams.aspectRatio,
-        resolution: videoGenerationParams.resolution,
-        quality: videoGenerationParams.quality,
-        durationSeconds: videoGenerationParams.durationSeconds,
-        count: 1,
-        mode: 'image_to_video',
-        inputImageAssetIds: [item.imageAssetId],
-        status: 'queued',
-        error: undefined,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
+      const latestVideoData = useCanvasStore
+        .getState()
+        .nodes.find((node) => node.id === videoNodeId)
+        ?.data as Partial<VideoNodeData> | undefined
+      updateNodeData(
+        videoNodeId,
+        buildAgentVideoRunningPatch(
+          request,
+          latestVideoData ?? {},
+        ) as unknown as Partial<BaseNodeData>,
+      )
 
       try {
         const response = await createGeneration(request)
@@ -1202,24 +1370,56 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             onError: (error) => { reject(new Error(error)); unsubscribe() },
           })
         })
-        const results = finalResponse.results ?? []
-        const assetIds = results
-          .map((result) => result.assetId)
-          .filter((assetId): assetId is string => !!assetId)
+        const latestVideoData = useCanvasStore
+          .getState()
+          .nodes.find((node) => node.id === videoNodeId)
+          ?.data as { assetIds?: unknown; generationRuns?: unknown } | undefined
+        const currentAssetIds = Array.isArray(latestVideoData?.assetIds)
+          ? latestVideoData.assetIds.filter(
+              (assetId): assetId is string => typeof assetId === 'string',
+            )
+          : []
+        const completionPatch = buildAgentVideoCompletionPatch(
+          finalResponse,
+          request,
+          latestVideoData?.generationRuns,
+          undefined,
+          currentAssetIds,
+        )
 
         generateStore.setStatus(videoNodeId, finalResponse.status)
         if (finalResponse.error) generateStore.setError(videoNodeId, finalResponse.error)
-        updateNodeData(videoNodeId, {
-          status: finalResponse.status,
-          error: finalResponse.error,
-          assetIds,
-          generationId: finalResponse.id,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
+        updateNodeData(
+          videoNodeId,
+          completionPatch as unknown as Partial<BaseNodeData>,
+        )
+        const generatedVideoAssetIds = getAgentVideoGeneratedAssetIds(finalResponse)
         // 添加结果到画廊
-        assetIds.forEach((assetId) => {
+        generatedVideoAssetIds.forEach((assetId) => {
           addGenerationResult({ assetId, type: 'video', prompt: item.shotDescription })
         })
+        if (storyboardMessageId && generatedVideoAssetIds[0]) {
+          useAgentStore.setState((state) => ({
+            messages: state.messages.map((message) =>
+              message.id === storyboardMessageId && message.storyboard
+                ? {
+                    ...message,
+                    storyboard: {
+                      ...message.storyboard,
+                      items: applyAgentStoryboardVideoResult(
+                        message.storyboard.items,
+                        i,
+                        {
+                          videoAssetId: generatedVideoAssetIds[0],
+                          videoNodeId,
+                        },
+                      ),
+                    },
+                  }
+                : message,
+            ),
+          }))
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         generateStore.setError(videoNodeId, message)
@@ -1235,6 +1435,21 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       setVideoGenerationStatus('视频生成已提交到画布')
       setSkillStep('done')
     }
+  }
+
+  const locateStoryboardVideoNode = (videoNodeId?: string) => {
+    const targetId = videoNodeId?.trim()
+    if (!targetId) return
+    const node = useCanvasStore
+      .getState()
+      .nodes.find((item) => item.id === targetId && item.type === 'video')
+    if (!node) return
+
+    setSelectedNode(node.id)
+    void setCenter(node.position.x + 310, node.position.y + 180, {
+      zoom: 1,
+      duration: 420,
+    })
   }
 
   const appendVoiceText = (text: string) => {
@@ -1597,7 +1812,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               borderRadius: 12,
               border: '1px solid rgba(255,255,255,0.12)',
               background: 'rgba(255,255,255,0.06)',
-              color: '#e2e8f0',
+              color: '#e6e6e6',
               fontSize: 11,
               cursor: 'pointer',
               transition: 'all 0.2s',
@@ -1616,7 +1831,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 right: 0,
                 zIndex: 50,
                 width: 220,
-                background: '#1e293b',
+                background: '#202020',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 10,
                 padding: 6,
@@ -1640,7 +1855,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     borderRadius: 6,
                     border: 'none',
                     background: role === r.id ? 'rgba(255,255,255,0.08)' : 'transparent',
-                    color: '#e2e8f0',
+                    color: '#e6e6e6',
                     cursor: 'pointer',
                     textAlign: 'left',
                     transition: 'background 0.15s',
@@ -1651,9 +1866,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                   <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{r.icon}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 1 }}>{r.description}</div>
+                    <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 1 }}>{r.description}</div>
                   </div>
-                  {role === r.id && <Check size={12} style={{ color: '#10b981', flexShrink: 0 }} />}
+                  {role === r.id && <Check size={12} style={{ color: '#f2f2f2', flexShrink: 0 }} />}
                 </button>
               ))}
             </div>
@@ -1735,9 +1950,24 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 <div className="agent-storyboard-items">
                   {message.storyboard.items.map((item) => (
                     <div key={item.id} className="agent-storyboard-item">
-                      <span className="agent-shot-number">镜头 {item.shotNumber}</span>
+                      <div className="agent-shot-head">
+                        <span className="agent-shot-number">镜头 {item.shotNumber}</span>
+                        <span className="agent-shot-media-status">
+                          {getAgentStoryboardItemMediaStatus(item)}
+                        </span>
+                      </div>
                       <span className="agent-shot-desc">{item.shotDescription}</span>
                       <span className="agent-shot-prompt">{item.prompt}</span>
+                      {getAgentStoryboardVideoLocateLabel(item) ? (
+                        <button
+                          type="button"
+                          className="agent-shot-locate-video"
+                          onClick={() => locateStoryboardVideoNode(item.videoNodeId)}
+                        >
+                          <LocateFixed size={11} strokeWidth={1.7} />
+                          {getAgentStoryboardVideoLocateLabel(item)}
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -1747,7 +1977,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                       type="button"
                       onClick={() => startBatchVideoGeneration(message.storyboard!)}
                     >
-                      <Film size={12} /> 生成视频
+                      <Film size={12} />{' '}
+                      {getAgentStoryboardVideoActionLabel(message.storyboard.items)}
                     </button>
                   ) : (
                     <button
@@ -2054,8 +2285,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 type="button"
                 className="agent-card-primary"
                 onClick={() => void startAgentImageGeneration()}
-                disabled={!isJimengConfigured}
-                title={!isJimengConfigured ? '未配置 dreamina CLI' : '生成到画布'}
+                disabled={activeAgentImageModelNeedsJimeng && !isJimengConfigured}
+                title={
+                  activeAgentImageModelNeedsJimeng && !isJimengConfigured
+                    ? '未配置 dreamina CLI'
+                    : '生成到画布'
+                }
               >
                 生成到画布
               </button>
@@ -2075,7 +2310,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
             <div className="agent-video-params">
               <span className="agent-video-param-tag">
-                <strong>模型</strong> {VIDEO_MODELS.find((m) => m.id === videoGenerationParams.model)?.label ?? videoGenerationParams.model}
+                <strong>模式</strong> {VIDEO_MODES.find((m) => m.id === videoGenerationParams.mode)?.label ?? videoGenerationParams.mode}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>模型</strong> {videoModelOptions.find((m) => m.id === videoGenerationParams.model)?.label ?? videoGenerationParams.model}
               </span>
               <span className="agent-video-param-tag">
                 <strong>比例</strong> {videoGenerationParams.aspectRatio}
@@ -2090,6 +2328,25 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
             <div className="agent-video-fields" style={{ marginTop: 10 }}>
               <label>
+                <span>模式</span>
+                <select
+                  value={videoGenerationParams.mode}
+                  onChange={(event) =>
+                    setVideoGenerationParams((params) => ({
+                      ...params,
+                      mode: event.target.value as VideoMode,
+                    }))
+                  }
+                >
+                  {VIDEO_MODES.map((mode) => (
+                    <option key={mode.id} value={mode.id}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
                 <span>模型</span>
                 <select
                   value={videoGenerationParams.model}
@@ -2100,7 +2357,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     }))
                   }
                 >
-                  {VIDEO_MODELS.map((model) => (
+                  {videoModelOptions.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.label}
                     </option>
@@ -2199,6 +2456,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               <div className="agent-card-status">{videoGenerationStatus}</div>
             )}
 
+            {unsupportedAgentVideoModelMessage && (
+              <div className="agent-card-status">
+                {unsupportedAgentVideoModelMessage}
+              </div>
+            )}
+
             <div className="agent-card-actions">
               <button
                 type="button"
@@ -2211,8 +2474,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 type="button"
                 className="agent-card-primary"
                 onClick={() => void startAgentVideoGeneration()}
-                disabled={!isJimengConfigured}
-                title={!isJimengConfigured ? '未配置 dreamina CLI' : '生成到画布'}
+                disabled={
+                  (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) ||
+                  !!unsupportedAgentVideoModelMessage
+                }
+                title={
+                  unsupportedAgentVideoModelMessage ||
+                  (activeAgentVideoModelNeedsJimeng && !isJimengConfigured
+                    ? '未配置 dreamina CLI'
+                    : '生成到画布')
+                }
               >
                 生成到画布
               </button>
@@ -2459,14 +2730,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 right: 0,
                 zIndex: 50,
                 width: 260,
-                background: '#1e293b',
+                background: '#202020',
                 border: '1px solid rgba(255,255,255,0.1)',
                 borderRadius: 10,
                 padding: 8,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
               }}
             >
-              <div style={{ fontSize: 11, color: '#94a3b8', padding: '4px 8px 8px', fontWeight: 600 }}>
+              <div style={{ fontSize: 11, color: '#a3a3a3', padding: '4px 8px 8px', fontWeight: 600 }}>
                 创作模板
               </div>
               {AGENT_TEMPLATES.map((t) => (
@@ -2490,7 +2761,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     borderRadius: 6,
                     border: 'none',
                     background: 'transparent',
-                    color: '#e2e8f0',
+                    color: '#e6e6e6',
                     cursor: 'pointer',
                     textAlign: 'left',
                     transition: 'background 0.15s',
@@ -2501,7 +2772,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                   <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
-                    <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
+                    <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
                   </div>
                 </button>
               ))}
@@ -2525,14 +2796,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                   right: 0,
                   zIndex: 50,
                   width: 260,
-                  background: '#1e293b',
+                  background: '#202020',
                   border: '1px solid rgba(255,255,255,0.1)',
                   borderRadius: 10,
                   padding: 8,
                   boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                 }}
               >
-                <div style={{ fontSize: 11, color: '#94a3b8', padding: '4px 8px 8px', fontWeight: 600 }}>
+                <div style={{ fontSize: 11, color: '#a3a3a3', padding: '4px 8px 8px', fontWeight: 600 }}>
                   创作模板
                 </div>
                 {AGENT_TEMPLATES.map((t) => (
@@ -2556,7 +2827,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                       borderRadius: 6,
                       border: 'none',
                       background: 'transparent',
-                      color: '#e2e8f0',
+                      color: '#e6e6e6',
                       cursor: 'pointer',
                       textAlign: 'left',
                       transition: 'background 0.15s',
@@ -2567,7 +2838,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
-                      <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
+                      <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
                     </div>
                   </button>
                 ))}

@@ -10,7 +10,15 @@ import type {
   GenerationRequest,
   GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
-import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
+import type {
+  VideoGenerationRequest,
+  VideoReferenceRole,
+} from '@jimeng-flow/shared/videoNode'
+import {
+  buildVideoReferencesFromInputImages,
+  getVideoReferenceInputs,
+  normalizeVideoReferences,
+} from '@jimeng-flow/shared/videoNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import type { AuthMode, Settings } from '@jimeng-flow/shared'
 import { getProjectRoot } from '../../config'
@@ -55,6 +63,11 @@ export interface JimengGenerateParams extends GenerationRequest {
 /** jimeng 视频调用参数：基于 VideoGenerationRequest，附超时设置 */
 export interface JimengGenerateVideoParams extends VideoGenerationRequest {
   timeoutMs?: number
+}
+
+export interface JimengResolvedVideoInput {
+  path: string
+  role?: VideoReferenceRole
 }
 
 interface CliRunResult {
@@ -227,6 +240,15 @@ function getVideoResolution(resolution: string): string | null {
     return normalized
   }
   return null
+}
+
+function appendVideoModelResolutionArgs(
+  args: string[],
+  modelVersion: string,
+  resolution: string | null,
+): void {
+  args.push(`--model_version=${modelVersion}`)
+  if (resolution) args.push(`--video_resolution=${resolution}`)
 }
 
 async function resolveInputPaths(inputImages: string[] | undefined): Promise<string[]> {
@@ -403,7 +425,27 @@ export async function generateImage(
 export async function generateVideo(
   params: JimengGenerateVideoParams,
 ): Promise<GenerationResult[]> {
-  const inputPaths = await resolveInputPaths(params.inputImages)
+  const references = normalizeVideoReferences(params.references)
+  const effectiveReferences =
+    references.length > 0
+      ? references
+      : buildVideoReferencesFromInputImages(params.mode, params.inputImages)
+  const referenceInputs = getVideoReferenceInputs(effectiveReferences)
+  const inputPaths = await resolveInputPaths(referenceInputs)
+  const resolvedInputs = inputPaths.map((path, index) => ({
+    path,
+    role: effectiveReferences[index]?.role,
+  }))
+  const args = buildJimengVideoArgs(params, resolvedInputs)
+
+  return submitAndCollect(args, 'video', params.timeoutMs ?? 600_000)
+}
+
+export function buildJimengVideoArgs(
+  params: JimengGenerateVideoParams,
+  inputs: JimengResolvedVideoInput[],
+): string[] {
+  const inputPaths = inputs.map((input) => input.path)
   const modelVersion = getVideoModelVersion(params.model)
   const requestedResolution = getVideoResolution(params.resolution)
   const resolution =
@@ -414,7 +456,9 @@ export async function generateVideo(
         : null
   const ratio = params.aspectRatio === 'Auto' ? null : params.aspectRatio
 
-  let args: string[]
+  const firstFrame = inputs.find((input) => input.role === 'first_frame')
+  const lastFrame = inputs.find((input) => input.role === 'last_frame')
+
   if (params.mode === 'all_reference' || params.mode === 'image_reference') {
     if (inputPaths.length === 0) {
       throw new JimengError(
@@ -423,7 +467,7 @@ export async function generateVideo(
         400,
       )
     }
-    args = [
+    const args = [
       'multimodal2video',
       `--prompt=${params.prompt}`,
       `--duration=${params.durationSeconds}`,
@@ -432,15 +476,34 @@ export async function generateVideo(
     inputPaths.forEach((path) => args.push(`--image=${path}`))
     if (ratio) args.push(`--ratio=${ratio}`)
     if (resolution) args.push(`--video_resolution=${resolution}`)
-  } else if (inputPaths.length >= 2 || params.mode === 'first_last_frame') {
-    args = [
+    return args
+  }
+
+  if (firstFrame && lastFrame) {
+    const args = [
+      'frames2video',
+      `--first=${firstFrame.path}`,
+      `--last=${lastFrame.path}`,
+      `--prompt=${params.prompt}`,
+      `--duration=${params.durationSeconds}`,
+    ]
+    appendVideoModelResolutionArgs(args, modelVersion, resolution)
+    return args
+  }
+
+  if (inputPaths.length >= 2 || params.mode === 'first_last_frame') {
+    const args = [
       'multiframe2video',
       `--images=${inputPaths.join(',')}`,
       `--prompt=${params.prompt}`,
       `--duration=${params.durationSeconds}`,
     ]
-  } else if (inputPaths.length === 1) {
-    args = [
+    appendVideoModelResolutionArgs(args, modelVersion, resolution)
+    return args
+  }
+
+  if (inputPaths.length === 1) {
+    const args = [
       'image2video',
       `--image=${inputPaths[0]}`,
       `--prompt=${params.prompt}`,
@@ -448,23 +511,51 @@ export async function generateVideo(
       `--model_version=${modelVersion}`,
     ]
     if (resolution) args.push(`--video_resolution=${resolution}`)
-  } else {
-    args = [
-      'text2video',
-      `--prompt=${params.prompt}`,
-      `--duration=${params.durationSeconds}`,
-      `--model_version=${modelVersion}`,
-    ]
-    if (ratio) args.push(`--ratio=${ratio}`)
-    if (resolution) args.push(`--video_resolution=${resolution}`)
+    return args
   }
 
-  return submitAndCollect(args, 'video', params.timeoutMs ?? 600_000)
+  const args = [
+    'text2video',
+    `--prompt=${params.prompt}`,
+    `--duration=${params.durationSeconds}`,
+    `--model_version=${modelVersion}`,
+  ]
+  if (ratio) args.push(`--ratio=${ratio}`)
+  if (resolution) args.push(`--video_resolution=${resolution}`)
+  return args
 }
 
 export interface RemoveBgParams {
   inputImage: string
   timeoutMs?: number
+}
+
+export interface UpscaleImageParams {
+  inputImage: string
+  resolutionType?: '2k' | '4k' | '8k'
+  timeoutMs?: number
+}
+
+export async function upscaleImage(
+  params: UpscaleImageParams,
+): Promise<GenerationResult[]> {
+  const inputPaths = await resolveInputPaths([params.inputImage])
+  if (inputPaths.length === 0) {
+    throw new JimengError('INVALID_INPUT', '缺少输入图片', 400)
+  }
+  const resolutionType = params.resolutionType ?? '2k'
+  if (!['2k', '4k', '8k'].includes(resolutionType)) {
+    throw new JimengError('INVALID_INPUT', '高清倍率仅支持 2k、4k、8k', 400)
+  }
+  return submitAndCollect(
+    [
+      'image_upscale',
+      `--image=${inputPaths[0]}`,
+      `--resolution_type=${resolutionType}`,
+    ],
+    'image',
+    params.timeoutMs ?? 300_000,
+  )
 }
 
 export async function removeBackground(

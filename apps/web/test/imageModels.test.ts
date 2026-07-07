@@ -5,7 +5,9 @@ import {
   getConfiguredImageModels,
   getImageModelMenuWidth,
   isLikelyImageModelId,
+  shouldRequireJimengCliForImageModel,
 } from '../src/utils/imageModels'
+import type { ModelConfig } from '@jimeng-flow/shared/settings'
 
 test('configured image models keep third-party API model ids', () => {
   const models = getConfiguredImageModels(['jimeng', 'gpt-image-1'])
@@ -39,6 +41,7 @@ test('configured image models include image-capable models from common llm model
     models.map((model) => model.id),
     [
       'jimeng-5.0',
+      'gpt-image-2',
       'gpt-image-2-official',
       'gemini-3-pro-image-preview',
       'banana-pro',
@@ -46,11 +49,44 @@ test('configured image models include image-capable models from common llm model
   )
 })
 
+test('configured image models keep OpenAI CLI image generation available', () => {
+  const models = getConfiguredImageModels(
+    ['jimeng-5.0'],
+    [
+      'gpt-image-2-official',
+      'claude-opus-4-8',
+      'gemini-3-pro-image-preview',
+    ],
+  )
+
+  assert.deepEqual(
+    models.map((model) => model.id),
+    [
+      'jimeng-5.0',
+      'gpt-image-2',
+      'gpt-image-2-official',
+      'gemini-3-pro-image-preview',
+    ],
+  )
+  assert.equal(
+    models.find((model) => model.id === 'gpt-image-2')?.description,
+    'OpenAI CLI 图片模型',
+  )
+})
+
 test('isLikelyImageModelId detects common image model ids without admitting text models', () => {
+  assert.equal(isLikelyImageModelId('$imagegen'), true)
   assert.equal(isLikelyImageModelId('gpt-image-2-official'), true)
   assert.equal(isLikelyImageModelId('gemini-3-pro-image-preview'), true)
   assert.equal(isLikelyImageModelId('banana-pro'), true)
   assert.equal(isLikelyImageModelId('claude-opus-4-8'), false)
+})
+
+test('configured image models migrate legacy imagegen to gpt image 2', () => {
+  const models = getConfiguredImageModels(['$imagegen', 'gpt-image-2'])
+
+  assert.deepEqual(models.map((model) => model.id), ['gpt-image-2'])
+  assert.equal(models[0].description, 'OpenAI CLI 图片模型')
 })
 
 test('image model menu width follows the longest visible model name', () => {
@@ -65,4 +101,45 @@ test('image model menu width follows the longest visible model name', () => {
   assert.equal(shortMenuWidth, 220)
   assert.ok(longMenuWidth > shortMenuWidth)
   assert.ok(longMenuWidth < 460)
+})
+
+test('only jimeng image models require dreamina CLI configuration', () => {
+  assert.equal(shouldRequireJimengCliForImageModel('jimeng-5.0'), true)
+  assert.equal(
+    shouldRequireJimengCliForImageModel('gpt-image-2-official'),
+    false,
+  )
+  assert.equal(
+    shouldRequireJimengCliForImageModel('gemini-3-pro-image-preview'),
+    false,
+  )
+})
+
+test('configured image models use only image-capable structured model configs', () => {
+  const modelConfigs: ModelConfig[] = [
+    {
+      id: 'gpt-4o-mini',
+      label: 'GPT 4o mini',
+      provider: 'openai-compatible',
+      capabilities: ['chat'],
+    },
+    {
+      id: 'gpt-image-2',
+      label: 'GPT Image 2',
+      provider: 'codex',
+      capabilities: ['image'],
+    },
+    {
+      id: 'veo3-fast',
+      label: 'Veo 3 Fast',
+      provider: 'openai-compatible',
+      capabilities: ['video'],
+    },
+  ]
+
+  const models = getConfiguredImageModels([], [], modelConfigs)
+
+  assert.deepEqual(models.map((model) => [model.id, model.label]), [
+    ['gpt-image-2', 'GPT Image 2'],
+  ])
 })

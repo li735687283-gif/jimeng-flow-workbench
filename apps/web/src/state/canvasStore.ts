@@ -14,10 +14,27 @@ import type {
   NodeChange,
   EdgeChange,
 } from '@xyflow/react'
+import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNode'
+import type { VideoMode } from '@jimeng-flow/shared/videoNode'
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
 
 const ARRANGE_GAP = 40
+const UPSCALE_NODE_GAP = 120
+const CONNECTABLE_IMAGE_TARGETS = new Set<FlowNodeType>([
+  'image',
+  'generate',
+  'video',
+])
+const VIDEO_MODES = new Set<VideoMode>([
+  'text_to_video',
+  'image_to_video',
+  'all_reference',
+  'first_last_frame',
+  'image_reference',
+])
+
+type UpscaleResolution = '2k' | '4k' | '8k'
 
 function getAssetId(node: Node | undefined): string | null {
   const assetId = (node?.data as BaseNodeData | undefined)?.assetId
@@ -46,24 +63,153 @@ function cleanupRemovedEdgeReferences(
     removalsByTarget.set(edge.target, removals)
   })
 
+  return cleanupImageAssetReferences(nodes, removalsByTarget)
+}
+
+function cleanupImageAssetReferences(
+  nodes: Node[],
+  removalsByTarget: Map<string, Set<string>>,
+): Node[] {
   if (removalsByTarget.size === 0) return nodes
 
   return nodes.map((node) => {
     const removals = removalsByTarget.get(node.id)
-    const inputImageAssetIds = (node.data as BaseNodeData).inputImageAssetIds
-    if (!removals || !Array.isArray(inputImageAssetIds)) return node
+    if (!removals) return node
 
-    const nextInputImageAssetIds = inputImageAssetIds.filter(
-      (assetId): assetId is string =>
-        typeof assetId === 'string' && !removals.has(assetId),
+    const data = node.data as BaseNodeData
+    const inputImageAssetIds = data.inputImageAssetIds
+    const references = data.references
+    const nextInputImageAssetIds = Array.isArray(inputImageAssetIds)
+      ? (inputImageAssetIds.filter(
+          (assetId): assetId is string =>
+            typeof assetId === 'string' && !removals.has(assetId),
+        ) as string[])
+      : null
+    const nextReferences = Array.isArray(references)
+      ? (references.filter((reference) => {
+          if (!reference || typeof reference !== 'object') return true
+          const assetId = (reference as { assetId?: unknown }).assetId
+          return typeof assetId !== 'string' || !removals.has(assetId)
+        }) as unknown[])
+      : null
+
+    const inputChanged =
+      Array.isArray(inputImageAssetIds) &&
+      nextInputImageAssetIds !== null &&
+      nextInputImageAssetIds.length !== inputImageAssetIds.length
+    const referencesChanged =
+      Array.isArray(references) &&
+      nextReferences !== null &&
+      nextReferences.length !== references.length
+    if (!inputChanged && !referencesChanged) return node
+
+    if (node.type === 'video') {
+      const nextInputs = nextInputImageAssetIds ?? stringArray(inputImageAssetIds)
+      const mode = syncVideoModeForConnectedImages(data.mode, nextInputs)
+
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          ...(inputChanged ? { inputImageAssetIds: nextInputs } : {}),
+          mode,
+          references: buildVideoReferencesFromInputImages(mode, nextInputs),
+        },
+      }
+    }
+
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        ...(inputChanged ? { inputImageAssetIds: nextInputImageAssetIds } : {}),
+        ...(referencesChanged ? { references: nextReferences } : {}),
+      },
+    }
+  })
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && !!item)
+    : []
+}
+
+function videoMode(value: unknown): VideoMode {
+  return typeof value === 'string' && VIDEO_MODES.has(value as VideoMode)
+    ? (value as VideoMode)
+    : 'text_to_video'
+}
+
+function syncVideoModeForConnectedImages(
+  value: unknown,
+  inputImages: string[],
+): VideoMode {
+  const mode = videoMode(value)
+  if (
+    inputImages.length > 0 &&
+    (mode === 'all_reference' || mode === 'image_reference')
+  ) {
+    return mode
+  }
+  if (inputImages.length >= 2) return 'first_last_frame'
+  if (inputImages.length === 1) return 'image_to_video'
+  return 'text_to_video'
+}
+
+function syncConnectedImageReference(
+  nodes: Node[],
+  connection: Connection,
+): Node[] {
+  const sourceId = connection.source
+  const targetId = connection.target
+  if (!sourceId || !targetId || sourceId === targetId) return nodes
+
+  const nodesById = new Map(nodes.map((node) => [node.id, node]))
+  const source = nodesById.get(sourceId)
+  const target = nodesById.get(targetId)
+  const assetId = getAssetId(source)
+  if (!assetId || !target || !CONNECTABLE_IMAGE_TARGETS.has(target.type as FlowNodeType)) {
+    return nodes
+  }
+
+  return nodes.map((node) => {
+    if (node.id !== targetId) return node
+
+    const data = node.data as BaseNodeData
+    const inputImageAssetIds = stringArray(data.inputImageAssetIds)
+    const nextInputImageAssetIds = inputImageAssetIds.includes(assetId)
+      ? inputImageAssetIds
+      : [...inputImageAssetIds, assetId]
+    const inputChanged =
+      nextInputImageAssetIds.length !== inputImageAssetIds.length ||
+      !Array.isArray(data.inputImageAssetIds)
+
+    if (node.type !== 'video') {
+      return inputChanged
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              inputImageAssetIds: nextInputImageAssetIds,
+            },
+          }
+        : node
+    }
+
+    const mode = syncVideoModeForConnectedImages(data.mode, nextInputImageAssetIds)
+    const references = buildVideoReferencesFromInputImages(
+      mode,
+      nextInputImageAssetIds,
     )
-    if (nextInputImageAssetIds.length === inputImageAssetIds.length) return node
 
     return {
       ...node,
       data: {
         ...node.data,
         inputImageAssetIds: nextInputImageAssetIds,
+        mode,
+        references,
       },
     }
   })
@@ -80,9 +226,14 @@ interface CanvasState {
   onNodesDelete: (nodes: Node[]) => void
   onEdgesDelete: (edges: Edge[]) => void
   addNode: (type: FlowNodeType, position: { x: number; y: number }) => string
+  createUpscaleImageNode: (
+    sourceId: string,
+    resolution: UpscaleResolution,
+  ) => string
   removeNode: (id: string) => void
   clearDeletedNodeIds: () => void
   removeEdge: (id: string) => void
+  removeIncomingImageReference: (targetNodeId: string, assetId: string) => void
   updateNodeData: (id: string, data: Partial<BaseNodeData>) => void
   setSelectedNode: (id: string | null) => void
   arrangeGrid: (nodeIds: string[]) => void
@@ -108,14 +259,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   onConnect: (connection: Connection) => {
-    set({
-      edges: addEdge({ ...connection, type: 'cut' }, get().edges),
-    })
+    set((state) => ({
+      nodes: syncConnectedImageReference(state.nodes, connection),
+      edges: addEdge({ ...connection, type: 'cut' }, state.edges),
+    }))
   },
 
   onNodesDelete: (nodes: Node[]) => {
     const ids = new Set(nodes.map((n) => n.id))
     set((state) => ({
+      nodes: cleanupRemovedEdgeReferences(
+        state.nodes,
+        state.edges.filter((edge) => ids.has(edge.source)),
+      ).filter((n) => !ids.has(n.id)),
       deletedNodeIds: Array.from(
         new Set([...state.deletedNodeIds, ...ids]),
       ),
@@ -153,12 +309,65 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     return node.id
   },
 
+  createUpscaleImageNode: (sourceId, resolution) => {
+    const nodes = get().nodes
+    const source = nodes.find((node) => node.id === sourceId)
+    const def = nodeRegistry.image
+    if (!source || !def) return ''
+
+    const sourceSize = getNodeSize(source)
+    const sourceData = source.data as BaseNodeData
+    const assetId = getAssetId(source)
+    const sameTypeCount = nodes.filter((node) => node.type === 'image').length + 1
+    const node = def.create(
+      {
+        x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
+        y: source.position.y,
+      },
+      sameTypeCount,
+    )
+    const nextData: BaseNodeData = {
+      ...node.data,
+      title: `${sourceData.title ?? '图片'} 高清`,
+      status: 'running',
+      inputImageAssetIds: assetId ? [assetId] : [],
+      upscaleSourceNodeId: sourceId,
+      upscaleResolution: resolution,
+      width: sourceData.width,
+      height: sourceData.height,
+      ratio: sourceData.ratio,
+    }
+    const derivedNode: Node = {
+      ...node,
+      data: nextData,
+    }
+
+    set((state) => ({
+      nodes: [...state.nodes, derivedNode],
+      edges: addEdge(
+        {
+          source: sourceId,
+          target: derivedNode.id,
+          sourceHandle: null,
+          targetHandle: null,
+          type: 'cut',
+        },
+        state.edges,
+      ),
+      selectedNodeId: derivedNode.id,
+    }))
+    return derivedNode.id
+  },
+
   removeNode: (id) => {
     set((state) => ({
       deletedNodeIds: state.deletedNodeIds.includes(id)
         ? state.deletedNodeIds
         : [...state.deletedNodeIds, id],
-      nodes: state.nodes.filter((n) => n.id !== id),
+      nodes: cleanupRemovedEdgeReferences(
+        state.nodes,
+        state.edges.filter((edge) => edge.source === id),
+      ).filter((n) => n.id !== id),
       edges: state.edges.filter(
         (e) => e.source !== id && e.target !== id,
       ),
@@ -176,6 +385,31 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       ),
       edges: state.edges.filter((e) => e.id !== id),
     }))
+  },
+
+  removeIncomingImageReference: (targetNodeId, assetId) => {
+    if (!targetNodeId || !assetId) return
+    set((state) => {
+      const nodesById = new Map(state.nodes.map((node) => [node.id, node]))
+      const removedEdges = state.edges.filter(
+        (edge) =>
+          edge.target === targetNodeId &&
+          getAssetId(nodesById.get(edge.source)) === assetId,
+      )
+      const removedEdgeIds = new Set(removedEdges.map((edge) => edge.id))
+      const removalsByTarget = new Map([[targetNodeId, new Set([assetId])]])
+
+      return {
+        nodes:
+          removedEdges.length > 0
+            ? cleanupRemovedEdgeReferences(state.nodes, removedEdges)
+            : cleanupImageAssetReferences(state.nodes, removalsByTarget),
+        edges:
+          removedEdges.length > 0
+            ? state.edges.filter((edge) => !removedEdgeIds.has(edge.id))
+            : state.edges,
+      }
+    })
   },
 
   updateNodeData: (id, data) => {

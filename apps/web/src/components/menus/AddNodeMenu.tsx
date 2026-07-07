@@ -1,12 +1,5 @@
-import {
-  AlignJustify,
-  AudioLines,
-  Image as ImageIcon,
-  Upload,
-  Video,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import type { FlowNodeType } from '../../types/nodeTypes'
+import { NODE_MENU_ITEMS, type NodeMenuItem } from './nodeMenuItems'
 
 export interface AddNodeMenuState {
   x: number
@@ -20,23 +13,6 @@ interface AddNodeMenuProps {
   onUpload: () => void
   onClose: () => void
 }
-
-interface AddNodeMenuItem {
-  key: string
-  label: string
-  icon: LucideIcon
-  nodeType?: FlowNodeType
-  action?: 'upload'
-  disabled?: boolean
-}
-
-const nodeItems: AddNodeMenuItem[] = [
-  { key: 'text', label: '文本', icon: AlignJustify, nodeType: 'text' },
-  { key: 'image', label: '图片', icon: ImageIcon, nodeType: 'image' },
-  { key: 'video', label: '视频', icon: Video, nodeType: 'video' },
-  { key: 'audio', label: '音频', icon: AudioLines, disabled: true },
-  { key: 'upload', label: '上传', icon: Upload, action: 'upload' },
-]
 
 export function AddNodeMenu({
   state,
@@ -53,7 +29,7 @@ export function AddNodeMenu({
       >
         <div className="add-node-menu-title">添加节点</div>
         <div className="add-node-menu-list">
-          {nodeItems.map((item) => (
+          {NODE_MENU_ITEMS.map((item) => (
             <AddNodeMenuButton
               key={item.key}
               item={item}
@@ -74,7 +50,7 @@ function AddNodeMenuButton({
   onUpload,
   onClose,
 }: {
-  item: AddNodeMenuItem
+  item: NodeMenuItem
   onSelect: (type: FlowNodeType) => void
   onUpload: () => void
   onClose: () => void

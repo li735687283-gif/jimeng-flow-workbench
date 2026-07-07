@@ -34,8 +34,14 @@ function hasStringValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function hasStringArrayValue(value: unknown): boolean {
+  return Array.isArray(value) && value.some(hasStringValue)
+}
+
 function hasGeneratedAsset(node: FlowNode | undefined): boolean {
-  return hasStringValue(node?.data.assetId)
+  return (
+    hasStringValue(node?.data.assetId) || hasStringArrayValue(node?.data.assetIds)
+  )
 }
 
 function shouldKeepOmittedCurrentNode(
@@ -94,6 +100,41 @@ function mergeGeneratedImageData(
   }
 }
 
+function mergeGeneratedVideoData(
+  incomingData: FlowNode['data'],
+  currentData: FlowNode['data'],
+): FlowNode['data'] {
+  return {
+    ...incomingData,
+    status: currentData.status,
+    error: currentData.error,
+    assetIds: currentData.assetIds,
+    generationRuns: currentData.generationRuns,
+    prompt: currentData.prompt,
+    model: currentData.model,
+    inputImageAssetIds: currentData.inputImageAssetIds,
+    references: currentData.references,
+    mode: currentData.mode,
+    aspectRatio: currentData.aspectRatio,
+    resolution: currentData.resolution,
+    quality: currentData.quality,
+    durationSeconds: currentData.durationSeconds,
+    count: currentData.count,
+    generateAudio: currentData.generateAudio,
+    updatedAt: currentData.updatedAt,
+  }
+}
+
+function mergeGeneratedNodeData(
+  incoming: FlowNode,
+  current: FlowNode,
+): FlowNode['data'] {
+  if (incoming.type === 'video' || current.type === 'video') {
+    return mergeGeneratedVideoData(incoming.data, current.data)
+  }
+  return mergeGeneratedImageData(incoming.data, current.data)
+}
+
 export function mergeNodesForFlowUpdate(
   currentNodes: FlowNode[],
   incomingNodes: FlowNode[],
@@ -110,7 +151,7 @@ export function mergeNodesForFlowUpdate(
 
     return {
       ...incoming,
-      data: mergeGeneratedImageData(incoming.data, current.data),
+      data: mergeGeneratedNodeData(incoming, current),
     }
   })
 

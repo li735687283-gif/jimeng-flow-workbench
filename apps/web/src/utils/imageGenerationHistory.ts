@@ -30,7 +30,7 @@ export interface ImageGenerationHistoryItem {
   assetId: string
 }
 
-const HISTORY_PREVIEW_SCALE = 2.4
+const HISTORY_PREVIEW_SCALE = 2.8
 
 export function buildImageGenerationRunFromResponse(
   response: GenerationResponse,

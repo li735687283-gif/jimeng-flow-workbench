@@ -1,135 +1,439 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import { Play, Film, Link2, Image as ImageIcon, AlertCircle } from 'lucide-react'
-import { NodeWrapper } from './NodeWrapper'
-import { useCanvasStore } from '../state/canvasStore'
-import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
+import { Film, Video } from 'lucide-react'
+import { createGeneration, subscribeGeneration } from '../api/generations'
 import { getAssetFileUrl } from '../api/assets'
-import {
-  VIDEO_MODES,
-  mergeVideoDefaults,
-  type VideoNodeData,
-  type VideoMode,
-} from '@jimeng-flow/shared/videoNode'
+import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
+import { VideoGenerationHistoryStrip } from '../components/VideoGenerationHistoryStrip'
+import { NodeWrapper } from './NodeWrapper'
+import { useAgentStore } from '../state/agentStore'
+import { useCanvasStore } from '../state/canvasStore'
+import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
+import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
+import { useSettingsStore } from '../state/settingsStore'
 import type { BaseNodeData } from '../types/nodeTypes'
+import { shouldCloseFloatingEditorOnPointerDown } from '../utils/editorPointer'
+import { resolveGenerationFlowId } from '../utils/generationFlow'
+import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
+import {
+  buildVideoCompletionNodePatch,
+  buildVideoRunningNodePatch,
+  getVideoSubmitLabel,
+  resolveVideoInputImages,
+  resolveVideoModeForInputImages,
+} from '../utils/videoGenerationState'
+import {
+  getConfiguredDefaultVideoModel,
+  getConfiguredVideoModels,
+  getUnsupportedVideoModelMessage,
+  videoModelNeedsJimeng,
+} from '../utils/videoModels'
+import {
+  buildVideoReferencesFromInputImages,
+  mergeVideoDefaults,
+  type VideoAspectRatio,
+  type VideoGenerationRequest,
+  type VideoNodeData,
+  type VideoResolution,
+} from '@jimeng-flow/shared/videoNode'
+import type { GenerationResponse } from '@jimeng-flow/shared/generateNode'
+import {
+  getEditorStateFromVideoGenerationHistoryItem,
+  getVideoGenerationHistoryItems,
+  type VideoGenerationHistoryItem,
+} from '../utils/videoGenerationHistory'
 
-const quickBtnStyle = {
-  padding: 0,
-  background: 'transparent',
-  color: '#f2f2f2',
-  border: 'none',
-  borderRadius: 0,
-  cursor: 'pointer',
-  fontSize: 14,
-  fontFamily: 'inherit' as const,
-  display: 'inline-flex' as const,
-  alignItems: 'center',
-  justifyContent: 'flex-start',
-  gap: 10,
-  transition: 'background 0.15s, border-color 0.15s',
-}
+const EDITOR_CLOSE_ANIMATION_MS = 260
 
-const STATUS_LABEL: Record<string, string> = {
-  idle: '待生成',
-  queued: '排队中',
-  running: '生成中',
-  success: '已生成',
-  error: '失败',
-}
-
-const statusBadgeStyle = (status: string): CSSProperties => {
-  if (status === 'success') {
-    return {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 3,
-      background: 'rgba(255, 255, 255, 0.12)',
-      color: '#ededed',
-      fontSize: 10,
-      padding: '2px 6px',
-      borderRadius: 4,
-      fontWeight: 500,
-    }
-  }
-  if (status === 'error') {
-    return {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 3,
-      background: 'rgba(255, 255, 255, 0.08)',
-      color: '#cfcfcf',
-      fontSize: 10,
-      padding: '2px 6px',
-      borderRadius: 4,
-      fontWeight: 500,
-    }
-  }
-  if (status === 'running' || status === 'queued') {
-    return {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 3,
-      background: 'rgba(255, 255, 255, 0.1)',
-      color: '#ededed',
-      fontSize: 10,
-      padding: '2px 6px',
-      borderRadius: 4,
-      fontWeight: 500,
-    }
-  }
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 3,
-    background: 'transparent',
-    color: 'var(--text-dim)',
-    fontSize: 10,
-    padding: '2px 6px',
-    borderRadius: 4,
-    fontWeight: 500,
-  }
-}
-
-const errorRowStyle: CSSProperties = {
+const EMPTY_VIDEO_FRAME_STYLE: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 4,
-  background: 'rgba(255, 255, 255, 0.08)',
-  border: '1px solid #cfcfcf',
-  borderRadius: 4,
-  padding: '4px 6px',
-  color: '#cfcfcf',
-  fontSize: 10,
+  flexDirection: 'column',
+  width: 620,
+  aspectRatio: '16 / 9',
+  minHeight: 0,
+  position: 'relative',
+}
+
+const VIDEO_DISPLAY_STYLE: CSSProperties = {
+  width: 720,
+  maxWidth: '72vw',
+  borderRadius: 12,
+  overflow: 'hidden',
+  cursor: 'pointer',
+}
+
+function normalizeVideoCount(value: number): VideoNodeData['count'] {
+  return value === 2 || value === 4 ? value : 1
 }
 
 export function VideoNode({ id, data, selected }: NodeProps) {
   const nodeData = mergeVideoDefaults(data as Partial<VideoNodeData>)
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
-  const edges = useCanvasStore((s) => s.edges)
-  const callState = useGenerateStore(
-    (s) => s.states[id] ?? IDLE_CALL_STATE,
+  const settings = useSettingsStore((state) => state.settings)
+  const isJimengConfigured = useSettingsStore((state) => state.isJimengConfigured)
+  const nodes = useCanvasStore((state) => state.nodes)
+  const edges = useCanvasStore((state) => state.edges)
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const removeIncomingImageReference = useCanvasStore(
+    (state) => state.removeIncomingImageReference,
   )
+  const callState = useGenerateStore((state) => state.states[id] ?? IDLE_CALL_STATE)
+  const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const generationUnsubscribeRef = useRef<(() => void) | null>(null)
 
-  const connectedCount = edges.filter((e) => e.target === id).length
-  const [hint, setHint] = useState<string | null>(null)
+  const [editorMounted, setEditorMounted] = useState(false)
+  const [editorClosing, setEditorClosing] = useState(false)
+  const [prompt, setPrompt] = useState(nodeData.prompt)
+  const [selectedModelId, setSelectedModelId] = useState('')
+  const [modelTouched, setModelTouched] = useState(false)
+  const [aspectRatio, setAspectRatio] =
+    useState<VideoAspectRatio>(nodeData.aspectRatio)
+  const [resolution, setResolution] =
+    useState<VideoResolution>(nodeData.resolution)
+  const [durationSeconds, setDurationSeconds] = useState(
+    nodeData.durationSeconds,
+  )
+  const [count, setCount] = useState<VideoNodeData['count']>(nodeData.count)
+  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
+  const [countMenuOpen, setCountMenuOpen] = useState(false)
+  const [sendError, setSendError] = useState('')
 
-  const setMode = (mode: VideoMode) => {
-    const label = VIDEO_MODES.find((m) => m.id === mode)?.label ?? mode
-    updateNodeData(id, { mode })
-    setHint(`已切换为「${label}」，请在底部 Composer 配置参数`)
-    window.setTimeout(() => setHint(null), 2400)
-  }
+  useEffect(() => {
+    return () => {
+      generationUnsubscribeRef.current?.()
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setPrompt(nodeData.prompt)
+    setAspectRatio(nodeData.aspectRatio)
+    setResolution(nodeData.resolution)
+    setDurationSeconds(nodeData.durationSeconds)
+    setCount(nodeData.count)
+  }, [
+    nodeData.aspectRatio,
+    nodeData.count,
+    nodeData.durationSeconds,
+    nodeData.prompt,
+    nodeData.resolution,
+  ])
+
+  const videoModelOptions = useMemo(
+    () => getConfiguredVideoModels(settings?.videoModels, settings?.modelConfigs),
+    [settings?.modelConfigs, settings?.videoModels],
+  )
+  useEffect(() => {
+    const fallbackModel = getConfiguredDefaultVideoModel(
+      settings?.videoModels,
+      nodeData.model || settings?.defaultVideoModel,
+      settings?.modelConfigs,
+    )
+    setSelectedModelId((current) => {
+      if (
+        modelTouched &&
+        current &&
+        videoModelOptions.some((model) => model.id === current)
+      ) {
+        return current
+      }
+      return fallbackModel
+    })
+  }, [
+    modelTouched,
+    nodeData.model,
+    settings?.defaultVideoModel,
+    settings?.modelConfigs,
+    settings?.videoModels,
+    videoModelOptions,
+  ])
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
+
+  const handleOpenEditor = useCallback(() => {
+    clearCloseTimer()
+    setEditorMounted(true)
+    setEditorClosing(false)
+  }, [clearCloseTimer])
+
+  const handleCloseEditor = useCallback(() => {
+    if (!editorMounted || editorClosing) return
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+    setEditorClosing(true)
+    clearCloseTimer()
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      setEditorMounted(false)
+      setEditorClosing(false)
+    }, EDITOR_CLOSE_ANIMATION_MS)
+  }, [clearCloseTimer, editorClosing, editorMounted])
+
+  useEffect(() => {
+    if (!editorMounted) return
+    const handleDocumentPointerDown = (event: globalThis.PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const isInsideEditorOwner = !!target.closest(`[data-flow-node-id="${id}"]`)
+      if (
+        shouldCloseFloatingEditorOnPointerDown({
+          button: event.button,
+          isInsideEditorOwner,
+        })
+      ) {
+        handleCloseEditor()
+      }
+    }
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleCloseEditor()
+    }
+    document.addEventListener('pointerdown', handleDocumentPointerDown, true)
+    window.addEventListener('keydown', handleDocumentKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
+      window.removeEventListener('keydown', handleDocumentKeyDown)
+    }
+  }, [editorMounted, handleCloseEditor, id])
 
   const firstAssetId = nodeData.assetIds[0]
-  const modeLabel =
-    VIDEO_MODES.find((m) => m.id === nodeData.mode)?.label ?? nodeData.mode
-
-  // 透传状态到 BaseNodeData（Inspector / NodeWrapper 通过 data.status 读取）
-  const baseData = data as BaseNodeData
   const displayStatus =
-    callState.status !== 'idle' ? callState.status : baseData.status ?? 'idle'
-  const error = callState.error ?? nodeData.error
+    callState.status !== 'idle'
+      ? callState.status
+      : (data as BaseNodeData).status ?? nodeData.status
+  const running = displayStatus === 'queued' || displayStatus === 'running'
+  const submitLabel = getVideoSubmitLabel(running, nodeData.assetIds.length > 0)
+  const upstreamImageAssetIds = useMemo(
+    () =>
+      getImageGenerationInputImages({
+        assetId: undefined,
+        modelId: selectedModelId,
+        nodeId: id,
+        nodes,
+        edges,
+      }),
+    [edges, id, nodes, selectedModelId],
+  )
+  const referenceAssetIds = useMemo(
+    () =>
+      resolveVideoInputImages(nodeData.inputImageAssetIds, upstreamImageAssetIds, {
+        preferUpstream: true,
+      }),
+    [nodeData.inputImageAssetIds, upstreamImageAssetIds],
+  )
+  const handleRemoveReferenceAsset = useCallback(
+    (assetId: string) => {
+      removeIncomingImageReference(id, assetId)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [id, removeIncomingImageReference],
+  )
+  const generationHistoryItems = useMemo(
+    () => getVideoGenerationHistoryItems(nodeData.generationRuns),
+    [nodeData.generationRuns],
+  )
+  const selectedModel =
+    videoModelOptions.find((model) => model.id === selectedModelId) ??
+    videoModelOptions[0]
+  const activeVideoModelNeedsJimeng = videoModelNeedsJimeng(
+    selectedModel?.id ?? '',
+  )
+  const unsupportedModelMessage = getUnsupportedVideoModelMessage(
+    selectedModel?.id ?? '',
+  )
+
+  const clearGenerationSubscription = () => {
+    generationUnsubscribeRef.current?.()
+    generationUnsubscribeRef.current = null
+  }
+
+  const applyProgress = (response: GenerationResponse) => {
+    updateNodeData(id, {
+      status: response.status,
+      error: response.error,
+      generationId: response.id,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+    useGenerateStore.getState().patch(id, {
+      status: response.status,
+      error: response.error,
+      generationId: response.id,
+    })
+  }
+
+  const applyResponse = async (
+    response: GenerationResponse,
+    request: VideoGenerationRequest,
+  ) => {
+    const latestData = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === id)
+      ?.data as Partial<VideoNodeData> | undefined
+    const completionPatch = buildVideoCompletionNodePatch(
+      response,
+      request,
+      latestData ?? nodeData,
+    )
+    updateNodeData(
+      id,
+      completionPatch as unknown as Partial<BaseNodeData>,
+    )
+    useGenerateStore.getState().patch(id, {
+      status: response.status,
+      error: response.error,
+      generationId: response.id,
+    })
+    if (response.status === 'success') {
+      try {
+        await useFlowStore.getState().saveCurrent()
+      } catch (error) {
+        setSendError(
+          `视频已生成，但保存到画布失败：${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        )
+        return
+      }
+      handleCloseEditor()
+      return
+    }
+    setSendError(response.error ?? '视频生成失败')
+  }
+
+  const handleGenerationResponse = (
+    response: GenerationResponse,
+    request: VideoGenerationRequest,
+  ) => {
+    clearGenerationSubscription()
+    if (response.status === 'success' || response.status === 'error') {
+      void applyResponse(response, request)
+      return
+    }
+    applyProgress(response)
+    generationUnsubscribeRef.current = subscribeGeneration(response.id, {
+      onUpdate: (data) => {
+        if (data.status !== 'success' && data.status !== 'error') {
+          applyProgress(data)
+        }
+      },
+      onComplete: (data) => {
+        void applyResponse(data, request)
+        clearGenerationSubscription()
+      },
+      onError: (error) => {
+        updateNodeData(id, {
+          status: 'error',
+          error,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+        useGenerateStore.getState().patch(id, { status: 'error', error })
+        setSendError(error)
+        clearGenerationSubscription()
+      },
+    })
+  }
+
+  const handleSend = async () => {
+    if (running) return
+    const trimmedPrompt = prompt.trim()
+    if (!trimmedPrompt) {
+      setSendError('请输入视频提示词')
+      return
+    }
+    if (!selectedModel) {
+      setSendError('请选择视频模型')
+      return
+    }
+    if (activeVideoModelNeedsJimeng && !isJimengConfigured) {
+      setSendError('未配置 dreamina CLI，请先在设置中配置')
+      return
+    }
+    if (unsupportedModelMessage) {
+      setSendError(unsupportedModelMessage)
+      return
+    }
+
+    const inputImages = referenceAssetIds
+    const mode = resolveVideoModeForInputImages(nodeData.mode, inputImages)
+    const request: VideoGenerationRequest = {
+      flowId: resolveGenerationFlowId(getCurrentFlowId()),
+      nodeId: id,
+      mediaType: 'video',
+      mode,
+      prompt: trimmedPrompt,
+      inputImages,
+      references: buildVideoReferencesFromInputImages(mode, inputImages),
+      model: selectedModel.id,
+      aspectRatio,
+      resolution,
+      quality: nodeData.quality,
+      durationSeconds,
+      count,
+      generateAudio: nodeData.generateAudio,
+    }
+
+    const latestData = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === id)
+      ?.data as Partial<VideoNodeData> | undefined
+    updateNodeData(
+      id,
+      buildVideoRunningNodePatch(request, latestData ?? nodeData) as unknown as Partial<BaseNodeData>,
+    )
+    useGenerateStore.getState().patch(id, {
+      status: 'queued',
+      error: undefined,
+      lastRequest: request,
+      generationId: undefined,
+    })
+    setSendError('')
+
+    try {
+      await useFlowStore.getState().saveCurrent()
+      const response = await createGeneration(request)
+      handleGenerationResponse(response, request)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      updateNodeData(id, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      useGenerateStore.getState().patch(id, {
+        status: 'error',
+        error: message,
+      })
+      setSendError(message)
+    }
+  }
+
+  const handleSelectHistory = (item: VideoGenerationHistoryItem) => {
+    const state = getEditorStateFromVideoGenerationHistoryItem(item)
+    const { run } = item
+    updateNodeData(id, {
+      ...state,
+      generationId: run.generationId,
+      status: run.status === 'success' ? 'success' : run.status,
+      error: run.error,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+    useAgentStore.setState((agentState) => ({
+      messages: applyAgentStoryboardVideoRestoreResult(agentState.messages, {
+        videoNodeId: id,
+        videoAssetId: item.assetId,
+      }),
+    }))
+    void useFlowStore.getState().saveCurrent().catch(() => undefined)
+  }
 
   return (
     <NodeWrapper
@@ -141,164 +445,103 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       nodeType="video"
       mediaDisplay={!!firstAssetId}
     >
-      {firstAssetId ? (
-        <div
-          className="media-display-node video-media-display"
-          style={{
-            width: 620,
-            maxWidth: '72vw',
-            borderRadius: 12,
-            overflow: 'hidden',
-          }}
-        >
-          <video
-            src={getAssetFileUrl(firstAssetId)}
-            controls
-            muted
-            style={{
-              width: '100%',
-              maxHeight: 420,
-              objectFit: 'contain',
-              display: 'block',
-            }}
-          />
-        </div>
-      ) : (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            width: 620,
-            minHeight: 320,
-            position: 'relative',
-          }}
-        >
-          {/* 视频预览区 */}
-          <div
-            className="node-preview-area"
-            style={{
-              width: 620,
-              height: 220,
-              background: 'transparent',
-              borderRadius: 11,
-              overflow: 'hidden',
-              position: 'relative',
-              padding: 0,
-              margin: 0,
-              minWidth: 0,
-              minHeight: 0,
-            }}
-          >
+      <>
+        {firstAssetId ? (
+          <div className="video-media-stack">
             <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                height: '100%',
-              }}
+              className="media-display-node video-media-display"
+              data-node-handle-anchor
+              style={VIDEO_DISPLAY_STYLE}
+              onClick={handleOpenEditor}
             >
-              <Play
-                size={58}
-                strokeWidth={2}
-                className="node-placeholder-icon"
+              <video
+                src={getAssetFileUrl(firstAssetId)}
+                controls
+                muted
+                style={{
+                  width: '100%',
+                  maxHeight: 420,
+                  objectFit: 'contain',
+                  display: 'block',
+                }}
+              />
+            </div>
+            <VideoGenerationHistoryStrip
+              items={generationHistoryItems}
+              currentAssetId={firstAssetId}
+              onSelect={handleSelectHistory}
+            />
+          </div>
+        ) : (
+          <div
+            className="image-node-container video-node-container"
+            data-node-handle-anchor
+            onClick={handleOpenEditor}
+            style={EMPTY_VIDEO_FRAME_STYLE}
+          >
+            <div className="node-preview-area image-node-preview">
+              <Video
+                size={64}
+                strokeWidth={1.8}
+                className="node-placeholder-icon video-placeholder-icon"
               />
             </div>
           </div>
+        )}
 
-          {/* 状态徽章 */}
-          {displayStatus !== 'idle' ? (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: 10,
-                padding: '0 28px',
-              }}
-            >
-              <span style={statusBadgeStyle(displayStatus)}>
-                {STATUS_LABEL[displayStatus] ?? displayStatus}
-              </span>
-              <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>
-                {modeLabel}
-              </span>
-            </div>
-          ) : null}
-
-          {/* 错误信息 */}
-          {error ? (
-            <div style={errorRowStyle}>
-              <AlertCircle size={11} style={{ flexShrink: 0 }} />
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-                title={error}
-              >
-                {error}
-              </span>
-            </div>
-          ) : null}
-
-          {/* Quick actions */}
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-start',
-              gap: 14,
-              padding: displayStatus !== 'idle' ? '8px 28px 28px' : '0 28px 32px',
+        {editorMounted ? (
+          <VideoGenerationPanel
+            closing={editorClosing}
+            prompt={prompt}
+            referenceAssetIds={referenceAssetIds}
+            modelOptions={videoModelOptions}
+            selectedModelId={selectedModel?.id ?? ''}
+            modelMenuOpen={modelMenuOpen}
+            qualityMenuOpen={qualityMenuOpen}
+            countMenuOpen={countMenuOpen}
+            aspectRatio={aspectRatio}
+            resolution={resolution}
+            durationSeconds={durationSeconds}
+            count={count}
+            running={running}
+            submitLabel={submitLabel}
+            sendError={sendError || callState.error}
+            onPromptChange={(value) => {
+              setPrompt(value)
+              if (sendError) setSendError('')
             }}
-          >
-            <div style={{ color: '#8e8e8e', fontSize: 14 }}>尝试:</div>
-            <button
-              type="button"
-              style={quickBtnStyle}
-              onClick={() => setMode('image_to_video')}
-              title="使用首帧图片生成视频"
-            >
-              <ImageIcon size={15} strokeWidth={1.8} />
-              首帧生成视频
-            </button>
-            <button
-              type="button"
-              style={quickBtnStyle}
-              onClick={() => setMode('first_last_frame')}
-              title="使用首尾帧图片生成视频"
-            >
-              <Film size={15} strokeWidth={1.8} />
-              首尾帧生成视频
-            </button>
-          </div>
-
-          {/* 已连接输入 */}
-          {connectedCount > 0 ? (
-            <div
-              style={{
-                position: 'absolute',
-                right: 14,
-                bottom: 12,
-                display: 'flex',
-                alignItems: 'center',
-                fontSize: 10,
-                color: 'var(--text-dim)',
-                gap: 3,
-              }}
-            >
-              <Link2 size={10} strokeWidth={1.6} />
-              {connectedCount}
-            </div>
-          ) : null}
-
-          {hint && (
-            <div style={{ fontSize: 10, color: 'var(--accent)' }}>{hint}</div>
-          )}
-        </div>
-      )}
+            onModelToggle={() => {
+              setModelMenuOpen((open) => !open)
+              setQualityMenuOpen(false)
+              setCountMenuOpen(false)
+            }}
+            onSelectModel={(modelId) => {
+              setModelTouched(true)
+              setSelectedModelId(modelId)
+              setModelMenuOpen(false)
+            }}
+            onQualityToggle={() => {
+              setQualityMenuOpen((open) => !open)
+              setModelMenuOpen(false)
+              setCountMenuOpen(false)
+            }}
+            onAspectRatioChange={setAspectRatio}
+            onResolutionChange={setResolution}
+            onDurationChange={setDurationSeconds}
+            onCountToggle={() => {
+              setCountMenuOpen((open) => !open)
+              setModelMenuOpen(false)
+              setQualityMenuOpen(false)
+            }}
+            onCountChange={(value) => {
+              setCount(normalizeVideoCount(value))
+              setCountMenuOpen(false)
+            }}
+            onRemoveReference={handleRemoveReferenceAsset}
+            onSend={() => void handleSend()}
+          />
+        ) : null}
+      </>
     </NodeWrapper>
   )
 }

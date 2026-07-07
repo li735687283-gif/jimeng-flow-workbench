@@ -11,6 +11,22 @@ export interface TestConnectionResult {
   message?: string
 }
 
+export interface CodexStatus {
+  available: boolean
+  cliFound: boolean
+  authFound: boolean
+  helperFound: boolean
+  codexPath: string
+  authFile?: string
+  helperPath?: string
+  setupCommands?: {
+    installCodex: string
+    installImageHelper: string
+    login: string
+  }
+  message: string
+}
+
 /** 获取当前 settings（合并默认值后的完整内容） */
 export async function getSettings(): Promise<Settings> {
   const res = await fetch('/api/settings', {
@@ -55,6 +71,18 @@ export async function testJimengConnection(
     throw new Error(`检测 dreamina CLI 失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as TestConnectionResult
+}
+
+/** 检测本机 OpenAI Codex CLI 与登录态是否可用 */
+export async function getCodexStatus(): Promise<CodexStatus> {
+  const res = await fetch('/api/codex/status', {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error(`检测 OpenAI CLI 失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as CodexStatus
 }
 
 /**

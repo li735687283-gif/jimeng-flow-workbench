@@ -18,9 +18,10 @@ import {
   retryGeneration,
   addGenerationListener,
   removeGenerationListener,
+  generateImageResultsForRequest,
   type GenerationRecord,
 } from '../services/generations'
-import { JimengError, removeBackground, generateImage } from '../services/jimeng'
+import { JimengError, removeBackground } from '../services/jimeng'
 import type { GenerationStatus } from '@jimeng-flow/shared/generateNode'
 
 /** 构造统一错误响应 */
@@ -137,8 +138,20 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         count: 1,
         seed: null,
       }
-      const res = await generateImage(genReq)
-      return reply.code(201).send({ id: `edit_${Date.now()}`, status: 'success', results: res })
+      const result = await generateImageResultsForRequest(genReq)
+      if (result.successCount === 0) {
+        throw new JimengError(
+          'JIMENG_BAD_RESPONSE',
+          result.error || '图片编辑生成失败',
+          502,
+        )
+      }
+      return reply.code(201).send({
+        id: `edit_${Date.now()}`,
+        status: 'success',
+        results: result.results,
+        error: result.error,
+      })
     } catch (err) {
       app.log.error({ err }, '[generations/edit] 调用失败')
       const payload = errorPayload(err)

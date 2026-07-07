@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import {
-  ArrowLeft,
-  FilePlus,
-  FolderOpen,
-  Plus,
-  Save,
-  Settings,
-} from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { CanvasView } from './components/canvas/CanvasView'
+import { CanvasBottomToolbar } from './components/canvas/CanvasBottomToolbar'
+import { AssetLibraryModal } from './components/AssetLibraryModal'
 import { AgentPanel } from './components/AgentPanel'
 import { FlowsHistoryModal } from './components/FlowsHistoryModal'
 import { SettingsModal } from './components/SettingsModal'
 import { useCanvasStore } from './state/canvasStore'
-import { useFlowStore } from './state/flowStore'
 import { useSettingsStore } from './state/settingsStore'
 import { useAutoSave } from './hooks/useAutoSave'
+import {
+  buildAssetInsertPatch,
+  buildAssetRestorePatch,
+  resolveAssetSourceNodeId,
+} from './utils/assetLibrarySelection'
+import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
 import agentAvatarUrl from '../../../image/agent-avatar-black.png'
 import './App.css'
@@ -25,12 +25,14 @@ function AppInner() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [openModalOpen, setOpenModalOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(true)
+  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
 
   const addNode = useCanvasStore((s) => s.addNode)
-  const createFlow = useFlowStore((s) => s.createFlow)
-  const saveCurrent = useFlowStore((s) => s.saveCurrent)
+  const nodes = useCanvasStore((s) => s.nodes)
+  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
+  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const loadSettings = useSettingsStore((s) => s.loadSettings)
-  const { screenToFlowPosition } = useReactFlow()
+  const { fitView, screenToFlowPosition } = useReactFlow()
 
   // 启用自动保存（首次挂载时若无 currentFlowId 会自动新建空工作流）
   useAutoSave()
@@ -41,35 +43,74 @@ function AppInner() {
     })
   }, [loadSettings])
 
-  const handleNew = useCallback(() => {
-    void createFlow().catch((err: unknown) => {
-      console.error('[App] 新建工作流失败:', err)
-    })
-  }, [createFlow])
+  const getCanvasCenterPosition = useCallback(() => {
+    const canvasEl = document.querySelector('.react-flow') as HTMLElement | null
+    if (!canvasEl) return { x: 250, y: 200 }
 
-  const handleSave = useCallback(() => {
-    void saveCurrent().catch((err: unknown) => {
-      console.error('[App] 保存工作流失败:', err)
+    const rect = canvasEl.getBoundingClientRect()
+    return screenToFlowPosition({
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
     })
-  }, [saveCurrent])
+  }, [screenToFlowPosition])
 
   const handleSelectFromLibrary = useCallback(
     (type: FlowNodeType) => {
-      // 在画布中央创建节点
-      const canvasEl = document.querySelector(
-        '.react-flow',
-      ) as HTMLElement | null
-      let position = { x: 250, y: 200 }
-      if (canvasEl) {
-        const rect = canvasEl.getBoundingClientRect()
-        position = screenToFlowPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2,
+      addNode(type, getCanvasCenterPosition())
+    },
+    [addNode, getCanvasCenterPosition],
+  )
+
+  const handleLocateNodes = useCallback(() => {
+    void fitView({ padding: 0.2, duration: 320 })
+  }, [fitView])
+
+  const handleSelectAsset = useCallback(
+    (asset: Asset) => {
+      const sourceNodeId = resolveAssetSourceNodeId(
+        asset,
+        nodes.map((node) => node.id),
+      )
+
+      if (sourceNodeId) {
+        const sourceNode = nodes.find((node) => node.id === sourceNodeId)
+        if (!sourceNode) return
+
+        const patch = buildAssetRestorePatch(asset, sourceNode)
+        if (patch) updateNodeData(sourceNodeId, patch)
+
+        setSelectedNode(sourceNodeId)
+        setAssetLibraryOpen(false)
+        void fitView({
+          nodes: [{ id: sourceNodeId }],
+          padding: 0.45,
+          duration: 320,
+          maxZoom: 1,
+        })
+        return
+      }
+
+      const nodeId = addNode(asset.type, getCanvasCenterPosition())
+      const patch = buildAssetInsertPatch(asset)
+      if (nodeId && patch) updateNodeData(nodeId, patch)
+      setAssetLibraryOpen(false)
+      if (nodeId) {
+        void fitView({
+          nodes: [{ id: nodeId }],
+          padding: 0.45,
+          duration: 320,
+          maxZoom: 1,
         })
       }
-      addNode(type, position)
     },
-    [addNode, screenToFlowPosition],
+    [
+      addNode,
+      fitView,
+      getCanvasCenterPosition,
+      nodes,
+      setSelectedNode,
+      updateNodeData,
+    ],
   )
 
   return (
@@ -84,75 +125,13 @@ function AppInner() {
           </button>
         </div>
 
-        <div className="canvas-topbar canvas-topbar-right">
-          <button
-            type="button"
-            className="ghost-icon-btn"
-            onClick={handleNew}
-            title="新建工作流"
-          >
-            <FilePlus size={15} />
-          </button>
-          <button
-            type="button"
-            className="ghost-icon-btn"
-            onClick={handleSave}
-            title="保存"
-          >
-            <Save size={15} />
-          </button>
-          <button
-            type="button"
-            className="ghost-icon-btn"
-            onClick={() => setOpenModalOpen(true)}
-            title="打开"
-          >
-            <FolderOpen size={15} />
-          </button>
-          <button
-            type="button"
-            className="ghost-icon-btn"
-            onClick={() => setSettingsOpen(true)}
-            title="设置"
-          >
-            <Settings size={15} />
-          </button>
-        </div>
-
-        <div className="canvas-bottom-dock">
-          <button
-            type="button"
-            className="dock-primary"
-            onClick={() => handleSelectFromLibrary('text')}
-            title="添加文本节点"
-          >
-            <Plus size={20} />
-          </button>
-          <button
-            type="button"
-            className="dock-btn"
-            onClick={() => handleSelectFromLibrary('image')}
-            title="添加图片节点"
-          >
-            图片
-          </button>
-          <button
-            type="button"
-            className="dock-btn"
-            onClick={() => handleSelectFromLibrary('video')}
-            title="添加视频节点"
-          >
-            视频
-          </button>
-          <button
-            type="button"
-            className="dock-btn"
-            onClick={() => handleSelectFromLibrary('generate')}
-            title="添加即梦生成节点"
-          >
-            生成
-          </button>
-        </div>
+        <CanvasBottomToolbar
+          onAddNode={() => handleSelectFromLibrary('text')}
+          onOpenAssetLibrary={() => setAssetLibraryOpen(true)}
+          onOpenHistory={() => setOpenModalOpen(true)}
+          onLocateNodes={handleLocateNodes}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
       </main>
 
       {agentOpen ? (
@@ -175,6 +154,12 @@ function AppInner() {
       )}
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      <AssetLibraryModal
+        open={assetLibraryOpen}
+        onClose={() => setAssetLibraryOpen(false)}
+        onSelectAsset={handleSelectAsset}
+      />
 
       <FlowsHistoryModal
         open={openModalOpen}

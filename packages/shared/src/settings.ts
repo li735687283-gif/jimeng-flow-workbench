@@ -5,6 +5,217 @@
 /** 旧 HTTP 适配器鉴权方式（保留用于兼容已有配置） */
 export type AuthMode = "apiKey" | "cookie" | "token";
 
+export type ModelCapability = "chat" | "image" | "video";
+
+export type ModelProvider =
+  | "dreamina"
+  | "codex"
+  | "openai-compatible"
+  | "custom";
+
+/** 带来源和能力的模型配置，用于逐步替代旧的字符串数组模型列表。 */
+export interface ModelConfig {
+  id: string;
+  label?: string;
+  provider?: ModelProvider | string;
+  capabilities: ModelCapability[];
+  enabled?: boolean;
+}
+
+const MODEL_CAPABILITY_SET = new Set<ModelCapability>([
+  "chat",
+  "image",
+  "video",
+]);
+
+function normalizeCapabilities(value: unknown): ModelCapability[] {
+  const raw = Array.isArray(value) ? value : [value];
+  const capabilities = raw.filter(
+    (item): item is ModelCapability =>
+      typeof item === "string" &&
+      MODEL_CAPABILITY_SET.has(item as ModelCapability),
+  );
+  return Array.from(new Set(capabilities));
+}
+
+export function normalizeModelConfigs(value: unknown): ModelConfig[] {
+  if (!Array.isArray(value)) return [];
+
+  const map = new Map<string, ModelConfig>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const raw = item as Record<string, unknown>;
+    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    if (!id) continue;
+
+    const capabilities = normalizeCapabilities(raw.capabilities);
+    if (capabilities.length === 0) continue;
+
+    const previous = map.get(id);
+    const mergedCapabilities = previous
+      ? Array.from(new Set([...previous.capabilities, ...capabilities]))
+      : capabilities;
+    const next: ModelConfig = {
+      id,
+      capabilities: mergedCapabilities,
+    };
+
+    const label = typeof raw.label === "string" ? raw.label.trim() : "";
+    const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
+    if (label || previous?.label) next.label = label || previous?.label;
+    if (provider || previous?.provider) next.provider = provider || previous?.provider;
+    if (raw.enabled === false || previous?.enabled === false) next.enabled = false;
+
+    map.set(id, next);
+  }
+
+  return Array.from(map.values());
+}
+
+export function getModelConfigsByCapability(
+  modelConfigs: unknown,
+  capability: ModelCapability,
+): ModelConfig[] {
+  return normalizeModelConfigs(modelConfigs).filter(
+    (model) =>
+      model.enabled !== false &&
+      model.capabilities.includes(capability),
+  );
+}
+
+function normalizeLegacyModelId(modelId: string): string {
+  const id = modelId.trim();
+  return id.toLowerCase() === "$imagegen" ? "gpt-image-2" : id;
+}
+
+function uniqueLegacyModelIds(models: Array<string | undefined>): string[] {
+  return Array.from(
+    new Set(
+      models
+        .map((model) => normalizeLegacyModelId(model ?? ""))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function isLikelyLegacyImageModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes("image") ||
+    id.includes("imagen") ||
+    id.includes("banana") ||
+    id.includes("gpt-image") ||
+    id.includes("dall-e") ||
+    id.includes("flux") ||
+    id.includes("sdxl") ||
+    id.includes("stable-diffusion") ||
+    id.includes("seedream")
+  );
+}
+
+function isLikelyLegacyVideoModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return (
+    id.includes("video") ||
+    id.includes("veo") ||
+    id.includes("kling") ||
+    id.includes("seedance") ||
+    id.includes("runway") ||
+    id.includes("pika") ||
+    id.includes("luma") ||
+    id.includes("hailuo")
+  );
+}
+
+function inferProviderForModel(
+  modelId: string,
+  capability: ModelCapability,
+): ModelProvider {
+  const id = modelId.toLowerCase();
+  if (capability === "chat") {
+    if (id.startsWith("codex:")) return "codex";
+  }
+  if (capability === "image") {
+    if (id === "gpt-image-2" || id.startsWith("codex:")) return "codex";
+    if (id.startsWith("jimeng")) return "dreamina";
+  }
+  if (capability === "video") {
+    if (id.includes("seedance") || id.startsWith("jimeng")) return "dreamina";
+  }
+  return "openai-compatible";
+}
+
+function addModelConfig(
+  map: Map<string, ModelConfig>,
+  modelId: string,
+  capability: ModelCapability,
+  provider: ModelProvider,
+): void {
+  const id = normalizeLegacyModelId(modelId);
+  if (!id) return;
+  const previous = map.get(id);
+  const capabilities = previous
+    ? Array.from(new Set([...previous.capabilities, capability]))
+    : [capability];
+  map.set(id, {
+    id,
+    label: previous?.label,
+    provider: previous?.provider || provider,
+    capabilities,
+    ...(previous?.enabled === false ? { enabled: false } : {}),
+  });
+}
+
+export function buildModelConfigsFromSettings(
+  settings: Partial<Settings>,
+): ModelConfig[] {
+  const map = new Map<string, ModelConfig>();
+
+  for (const model of normalizeModelConfigs(settings.modelConfigs)) {
+    map.set(model.id, model);
+  }
+
+  const chatModelIds = uniqueLegacyModelIds([
+    ...(settings.llmModels ?? []),
+    settings.llmModel,
+  ]).filter(
+    (modelId) =>
+      !isLikelyLegacyImageModel(modelId) &&
+      !isLikelyLegacyVideoModel(modelId),
+  );
+  for (const modelId of chatModelIds) {
+    addModelConfig(map, modelId, "chat", inferProviderForModel(modelId, "chat"));
+  }
+
+  const imageModelIds = uniqueLegacyModelIds([
+    ...(settings.imageModels ?? []),
+    settings.defaultModel,
+  ]);
+  for (const modelId of imageModelIds) {
+    addModelConfig(
+      map,
+      modelId,
+      "image",
+      inferProviderForModel(modelId, "image"),
+    );
+  }
+
+  const videoModelIds = uniqueLegacyModelIds([
+    ...(settings.videoModels ?? []),
+    settings.defaultVideoModel,
+  ]);
+  for (const modelId of videoModelIds) {
+    addModelConfig(
+      map,
+      modelId,
+      "video",
+      inferProviderForModel(modelId, "video"),
+    );
+  }
+
+  return Array.from(map.values());
+}
+
 /** 全局 Settings 配置 */
 export interface Settings {
   /** 旧 HTTP 适配器服务地址（保留用于兼容已有配置） */
@@ -37,6 +248,8 @@ export interface Settings {
 
   /** 默认视频模型 */
   defaultVideoModel: string;
+  /** 常用视频模型列表；视频节点和 Agent 视频生成只显示这些常用模型 */
+  videoModels: string[];
   /** 默认视频比例，例如 16:9 */
   defaultVideoAspectRatio: string;
   /** 默认视频分辨率，例如 720P */
@@ -49,6 +262,9 @@ export interface Settings {
   defaultVideoCount: number;
   /** 默认视频是否生成音频 */
   defaultVideoGenerateAudio: boolean;
+
+  /** 结构化模型配置：逐步表达 provider + capability，兼容旧字符串数组。 */
+  modelConfigs: ModelConfig[];
 }
 
 /** 默认 Settings 值（参考 PRD 11.3 与任务说明） */
@@ -70,10 +286,12 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultSize: "1024x1024",
 
   defaultVideoModel: "seedance-2.0",
+  videoModels: ["seedance-2.0"],
   defaultVideoAspectRatio: "16:9",
   defaultVideoResolution: "720P",
   defaultVideoQuality: "standard",
   defaultVideoDurationSeconds: 5,
   defaultVideoCount: 1,
   defaultVideoGenerateAudio: true,
+  modelConfigs: [],
 };

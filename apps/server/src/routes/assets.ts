@@ -11,9 +11,12 @@
 
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { extname } from 'node:path'
+import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
+import { basename, extname, resolve } from 'node:path'
+import type { GenerationResult } from '@jimeng-flow/shared/generateNode'
+import { getProjectRoot } from '../config'
 import { saveUploadFile, getAsset, listAssets, getAssetFilePath } from '../services/assets'
+import { JimengError, upscaleImage } from '../services/jimeng'
 
 interface UploadBody {
   fileName: string
@@ -45,6 +48,83 @@ const MIME_BY_EXT: Record<string, string> = {
 
 function mimeForFile(absPath: string, fallback: string): string {
   return MIME_BY_EXT[extname(absPath).toLowerCase()] ?? fallback
+}
+
+function errorPayload(err: unknown) {
+  if (err instanceof JimengError) {
+    return {
+      statusCode: err.statusCode,
+      error: err.statusCode >= 500 ? 'Bad Gateway' : 'Bad Request',
+      message: err.message,
+      code: err.code,
+    }
+  }
+  const message = err instanceof Error ? err.message : String(err)
+  return { statusCode: 500, error: 'Internal Server Error', message }
+}
+
+async function readRemoteImage(
+  url: string,
+): Promise<{ buffer: Buffer; mimeType: string; ext: string }> {
+  const res = await fetch(url)
+  if (!res.ok) {
+    throw new Error(`下载高清结果失败：HTTP ${res.status} ${res.statusText}`)
+  }
+  const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png'
+  const ext =
+    mimeType === 'image/jpeg'
+      ? '.jpg'
+      : mimeType === 'image/webp'
+        ? '.webp'
+        : mimeType === 'image/gif'
+          ? '.gif'
+          : '.png'
+  return {
+    buffer: Buffer.from(await res.arrayBuffer()),
+    mimeType,
+    ext,
+  }
+}
+
+async function saveUpscaleResult(
+  result: GenerationResult,
+  sourceAssetId: string,
+  resolutionType: string,
+) {
+  if (result.localPath) {
+    const ext = extname(result.localPath) || '.png'
+    const buffer = await readFile(result.localPath)
+    return saveUploadFile({
+      fileBuffer: buffer,
+      originalName: `upscale-${sourceAssetId}${ext}`,
+      mimeType: mimeForFile(result.localPath, 'image/png'),
+      inputAssetIds: [sourceAssetId],
+      provider: 'dreamina',
+      params: {
+        operation: 'image_upscale',
+        resolutionType,
+        localPath: result.localPath,
+      },
+    })
+  }
+
+  const remoteUrl = result.remoteUrl || result.url
+  if (!remoteUrl) {
+    throw new Error('高清结果缺少文件地址')
+  }
+  const { buffer, mimeType, ext } = await readRemoteImage(remoteUrl)
+  return saveUploadFile({
+    fileBuffer: buffer,
+    originalName: `upscale-${sourceAssetId}${ext}`,
+    mimeType,
+    inputAssetIds: [sourceAssetId],
+    provider: 'dreamina',
+    params: {
+      operation: 'image_upscale',
+      resolutionType,
+      remoteUrl,
+    },
+  })
 }
 
 const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
@@ -143,6 +223,121 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       return asset
     },
   )
+
+  // GET /api/assets/:assetId/download
+  app.get<{ Params: { assetId: string } }>(
+    '/api/assets/:assetId/download',
+    async (req, reply) => {
+      const asset = await getAsset(req.params.assetId)
+      if (!asset) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: '资产不存在',
+        })
+      }
+      const absPath = getAssetFilePath(asset)
+      try {
+        await stat(absPath)
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') {
+          return reply.code(404).send({
+            statusCode: 404,
+            error: 'Not Found',
+            message: '资产文件不存在',
+          })
+        }
+        throw err
+      }
+      const fallbackMime = asset.type === 'video' ? 'video/mp4' : 'image/png'
+      const mime = mimeForFile(absPath, fallbackMime)
+      reply.header('Content-Type', mime)
+      reply.header(
+        'Content-Disposition',
+        `attachment; filename="${asset.id}${extname(absPath) || '.png'}"`,
+      )
+      return reply.send(createReadStream(absPath))
+    },
+  )
+
+  // POST /api/assets/:assetId/export
+  app.post<{ Params: { assetId: string } }>(
+    '/api/assets/:assetId/export',
+    async (req, reply) => {
+      const asset = await getAsset(req.params.assetId)
+      if (!asset) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: '资产不存在',
+        })
+      }
+      const absPath = getAssetFilePath(asset)
+      try {
+        await stat(absPath)
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ENOENT') {
+          return reply.code(404).send({
+            statusCode: 404,
+            error: 'Not Found',
+            message: '资产文件不存在',
+          })
+        }
+        throw err
+      }
+      const exportDir = resolve(getProjectRoot(), 'workspace/outputs/downloads')
+      await mkdir(exportDir, { recursive: true })
+      const targetPath = resolve(exportDir, basename(absPath))
+      await copyFile(absPath, targetPath)
+      return { path: targetPath }
+    },
+  )
+
+  // POST /api/assets/:assetId/upscale
+  app.post<{
+    Params: { assetId: string }
+    Body: { resolutionType?: '2k' | '4k' | '8k' }
+  }>('/api/assets/:assetId/upscale', async (req, reply) => {
+    const sourceAsset = await getAsset(req.params.assetId)
+    if (!sourceAsset) {
+      return reply.code(404).send({
+        statusCode: 404,
+        error: 'Not Found',
+        message: '资产不存在',
+      })
+    }
+    if (sourceAsset.type !== 'image') {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '只有图片资产可以高清',
+      })
+    }
+
+    const resolutionType = req.body?.resolutionType ?? '2k'
+    try {
+      const results = await upscaleImage({
+        inputImage: req.params.assetId,
+        resolutionType,
+      })
+      const first = results[0]
+      if (!first) {
+        return reply.code(502).send({
+          statusCode: 502,
+          error: 'Bad Gateway',
+          message: 'dreamina 未返回高清结果',
+        })
+      }
+      const asset = await saveUpscaleResult(first, req.params.assetId, resolutionType)
+      return reply.code(201).send(asset)
+    } catch (err) {
+      app.log.error({ err }, '[assets/upscale] 调用失败')
+      const payload = errorPayload(err)
+      return reply.code(payload.statusCode).send(payload)
+    }
+  })
 
   // GET /api/assets/:assetId/file
   app.get<{ Params: { assetId: string } }>(

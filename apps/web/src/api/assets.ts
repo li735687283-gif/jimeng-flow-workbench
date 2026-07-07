@@ -10,6 +10,34 @@ export function getAssetFileUrl(id: string): string {
   return `/api/assets/${encodeURIComponent(id)}/file`
 }
 
+/** 返回资产下载 URL（触发浏览器下载） */
+export function getAssetDownloadUrl(id: string): string {
+  return `/api/assets/${encodeURIComponent(id)}/download`
+}
+
+/** 触发浏览器下载当前资产 */
+export function downloadAssetFile(id: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = getAssetDownloadUrl(id)
+  anchor.download = ''
+  anchor.rel = 'noopener'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
+/** 将资产导出到本地 workspace/outputs/downloads 文件夹 */
+export async function exportAssetFile(id: string): Promise<{ path: string }> {
+  const res = await fetch(`/api/assets/${encodeURIComponent(id)}/export`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `导出资产失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as { path: string }
+}
+
 /** 将 File 读取为纯 base64 字符串（不含 data: 前缀） */
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -67,4 +95,21 @@ export async function listAssets(): Promise<Asset[]> {
     throw new Error(`列出资产失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Asset[]
+}
+
+/** 使用 dreamina image_upscale 高清当前图片资产，返回新资产 */
+export async function upscaleImageAsset(
+  assetId: string,
+  resolutionType = '2k',
+): Promise<Asset> {
+  const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}/upscale`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resolutionType }),
+  })
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `图片高清失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Asset
 }

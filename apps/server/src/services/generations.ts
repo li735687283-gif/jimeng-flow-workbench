@@ -22,11 +22,29 @@ import {
   appendImageGenerationRun,
   isJimengImageModel,
 } from '@jimeng-flow/shared/generateNode'
-import type { VideoGenerationRequest } from '@jimeng-flow/shared/videoNode'
+import type {
+  VideoMediaReference,
+  VideoGenerationRequest,
+  VideoGenerationRun,
+} from '@jimeng-flow/shared/videoNode'
+import type {
+  ModelCapability,
+  Settings,
+} from '@jimeng-flow/shared/settings'
+import { getModelConfigsByCapability } from '@jimeng-flow/shared/settings'
+import {
+  appendVideoGenerationRun,
+  buildVideoReferencesFromInputImages,
+  isJimengVideoModel,
+  normalizeVideoReferences,
+} from '@jimeng-flow/shared/videoNode'
 import { generateImage, generateVideo, JimengError } from './jimeng'
 import { generateOpenAiCompatibleImage } from './openaiImage'
+import { generateOpenAiCompatibleVideo } from './openaiVideo'
+import { generateCodexCliImage, isCodexImageModel } from './codexImage'
 import { saveUploadFile } from './assets'
 import { getFlow, updateFlow } from './flows'
+import { getSettings } from './settings'
 
 /** 生成任务 ID：gen_<timestamp>_<random> */
 function makeGenerationId(): string {
@@ -66,6 +84,27 @@ interface ImageGenerationFlowPatch {
   quality?: string
   ratio?: string
   resolution?: string
+  assetIds: string[]
+  status: GenerationStatus
+  error?: string
+  createdAt?: string
+  updatedAt: string
+}
+
+interface VideoGenerationFlowPatch {
+  nodeId: string
+  generationId: string
+  prompt: string
+  model: string
+  mode: VideoGenerationRequest['mode']
+  aspectRatio: VideoGenerationRequest['aspectRatio']
+  resolution: VideoGenerationRequest['resolution']
+  quality: VideoGenerationRequest['quality']
+  durationSeconds: number
+  count: number
+  generateAudio: boolean
+  inputImageAssetIds?: string[]
+  references?: VideoMediaReference[]
   assetIds: string[]
   status: GenerationStatus
   error?: string
@@ -172,6 +211,111 @@ export function applyImageGenerationResultToFlow(
   }
 }
 
+function buildVideoGenerationRun(
+  patch: VideoGenerationFlowPatch,
+): VideoGenerationRun {
+  const generationRun: VideoGenerationRun = {
+    id: patch.generationId,
+    generationId: patch.generationId,
+    status: patch.status,
+    assetIds: patch.assetIds,
+    prompt: patch.prompt,
+    model: patch.model,
+    mode: patch.mode,
+    aspectRatio: patch.aspectRatio,
+    resolution: patch.resolution,
+    quality: patch.quality,
+    durationSeconds: patch.durationSeconds,
+    count: patch.count,
+    generateAudio: patch.generateAudio,
+    inputImageAssetIds: patch.inputImageAssetIds ?? [],
+    references: normalizeVideoReferences(patch.references).length > 0
+      ? normalizeVideoReferences(patch.references)
+      : buildVideoReferencesFromInputImages(
+          patch.mode,
+          patch.inputImageAssetIds ?? [],
+        ),
+    createdAt: patch.createdAt ?? patch.updatedAt,
+    finishedAt: patch.updatedAt,
+  }
+  if (patch.error) generationRun.error = patch.error
+  return generationRun
+}
+
+function applyVideoGenerationPatchToNode(
+  node: FlowNode,
+  patch: VideoGenerationFlowPatch,
+): FlowNode {
+  const generationRun = buildVideoGenerationRun(patch)
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      status: patch.status,
+      error: patch.error,
+      assetIds: patch.assetIds,
+      generationId: patch.generationId,
+      prompt: patch.prompt,
+      model: patch.model,
+      mode: patch.mode,
+      aspectRatio: patch.aspectRatio,
+      resolution: patch.resolution,
+      quality: patch.quality,
+      durationSeconds: patch.durationSeconds,
+      count: patch.count,
+      generateAudio: patch.generateAudio,
+      inputImageAssetIds: patch.inputImageAssetIds ?? [],
+      references: normalizeVideoReferences(patch.references),
+      generationRuns: appendVideoGenerationRun(
+        node.data.generationRuns,
+        generationRun,
+      ),
+      updatedAt: patch.updatedAt,
+    },
+  }
+}
+
+function createRecoveredVideoNode(flow: Flow, patch: VideoGenerationFlowPatch): FlowNode {
+  const maxX = flow.nodes.reduce(
+    (value, node) => Math.max(value, node.position?.x ?? 0),
+    0,
+  )
+  const videoNodeCount = flow.nodes.filter((node) => node.type === 'video').length
+  return applyVideoGenerationPatchToNode(
+    {
+      id: patch.nodeId,
+      type: 'video',
+      position: {
+        x: maxX + 620,
+        y: 220,
+      },
+      data: {
+        title: `视频节点 ${videoNodeCount + 1}`,
+        status: 'idle',
+      },
+    },
+    patch,
+  )
+}
+
+export function applyVideoGenerationResultToFlow(
+  flow: Flow,
+  patch: VideoGenerationFlowPatch,
+): Flow {
+  let matched = false
+  const nodes = flow.nodes.map((node) => {
+    if (node.id !== patch.nodeId) return node
+    matched = true
+    return applyVideoGenerationPatchToNode(node, patch)
+  })
+
+  if (matched) return { ...flow, nodes }
+  return {
+    ...flow,
+    nodes: [...nodes, createRecoveredVideoNode(flow, patch)],
+  }
+}
+
 /** 状态监听器存储 */
 const listeners = new Map<string, Set<GenerationStatusListener>>()
 
@@ -245,8 +389,69 @@ function extFromImageMime(mimeType: string): string {
   return '.png'
 }
 
+export type ImageGenerationProvider =
+  | 'dreamina'
+  | 'codex'
+  | 'openai-compatible'
+
+export type VideoGenerationProvider =
+  | 'dreamina'
+  | 'openai-compatible'
+
+export function getImageGenerationProvider(
+  model: string,
+): ImageGenerationProvider {
+  if (isJimengImageModel(model)) return 'dreamina'
+  if (isCodexImageModel(model)) return 'codex'
+  return 'openai-compatible'
+}
+
+function configuredProviderForModel(
+  model: string,
+  settings: Pick<Settings, 'modelConfigs'> | undefined,
+  capability: ModelCapability,
+): string | undefined {
+  const id = model.trim()
+  if (!id) return undefined
+  return getModelConfigsByCapability(settings?.modelConfigs, capability)
+    .find((item) => item.id === id)
+    ?.provider
+    ?.trim()
+}
+
+export function getImageGenerationProviderForSettings(
+  model: string,
+  settings?: Pick<Settings, 'modelConfigs'>,
+): ImageGenerationProvider {
+  const provider = configuredProviderForModel(model, settings, 'image')
+  if (provider === 'dreamina') return 'dreamina'
+  if (provider === 'codex') return 'codex'
+  if (provider === 'openai-compatible' || provider === 'custom') {
+    return 'openai-compatible'
+  }
+  return getImageGenerationProvider(model)
+}
+
 function imageProviderForModel(model: string): string {
-  return isJimengImageModel(model) ? 'dreamina' : 'openai-compatible'
+  return getImageGenerationProvider(model)
+}
+
+export function getVideoGenerationProvider(
+  model: string,
+): VideoGenerationProvider {
+  return isJimengVideoModel(model) ? 'dreamina' : 'openai-compatible'
+}
+
+export function getVideoGenerationProviderForSettings(
+  model: string,
+  settings?: Pick<Settings, 'modelConfigs'>,
+): VideoGenerationProvider {
+  const provider = configuredProviderForModel(model, settings, 'video')
+  if (provider === 'dreamina') return 'dreamina'
+  if (provider === 'openai-compatible' || provider === 'custom') {
+    return 'openai-compatible'
+  }
+  return getVideoGenerationProvider(model)
 }
 
 function mimeFromVideoExt(ext: string): string {
@@ -293,6 +498,51 @@ async function persistImageGenerationResultToFlow(
     }
   } catch (err) {
     console.warn('[generations] 写回图片生成结果到 flow 失败:', err)
+  }
+}
+
+async function persistVideoGenerationResultToFlow(
+  req: VideoGenerationRequest,
+  record: GenerationRecord,
+): Promise<void> {
+  const flowId = req.flowId?.trim()
+  if (!flowId || flowId === 'local') return
+
+  const assetIds =
+    record.results
+      ?.map((result) => result.assetId)
+      .filter((assetId): assetId is string => !!assetId) ?? []
+
+  try {
+    const flow = await getFlow(flowId)
+    const next = applyVideoGenerationResultToFlow(flow, {
+      nodeId: req.nodeId,
+      generationId: record.id,
+      prompt: req.prompt,
+      model: req.model,
+      mode: req.mode,
+      aspectRatio: req.aspectRatio,
+      resolution: req.resolution,
+      quality: req.quality,
+      durationSeconds: req.durationSeconds,
+      count: req.count,
+      generateAudio: req.generateAudio,
+      inputImageAssetIds: req.inputImages ?? [],
+      references: normalizeVideoReferences(req.references).length > 0
+        ? normalizeVideoReferences(req.references)
+        : buildVideoReferencesFromInputImages(req.mode, req.inputImages),
+      assetIds,
+      status: record.status,
+      error: record.error,
+      createdAt: record.createdAt,
+      updatedAt: record.finishedAt ?? new Date().toISOString(),
+    })
+
+    if (next !== flow) {
+      await updateFlow(flowId, { nodes: next.nodes })
+    }
+  } catch (err) {
+    console.warn('[generations] 写回视频生成结果到 flow 失败:', err)
   }
 }
 
@@ -354,8 +604,9 @@ async function downloadVideo(
 async function saveImageGenerationResult(
   result: GenerationResult,
   req: GenerationRequest,
+  providerOverride?: ImageGenerationProvider,
 ): Promise<GenerationResult> {
-  const provider = imageProviderForModel(req.model)
+  const provider = providerOverride ?? imageProviderForModel(req.model)
 
   if (result.localPath) {
     const ext = extname(result.localPath) || '.png'
@@ -441,11 +692,85 @@ async function saveImageGenerationResult(
   }
 }
 
+interface ImageGenerationResultsForRequestDeps {
+  settings?: Pick<Settings, 'modelConfigs'>
+  generateImageImpl?: typeof generateImage
+  generateCodexCliImageImpl?: typeof generateCodexCliImage
+  generateOpenAiCompatibleImageImpl?: typeof generateOpenAiCompatibleImage
+  saveImageGenerationResultImpl?: (
+    result: GenerationResult,
+    req: GenerationRequest,
+    provider: ImageGenerationProvider,
+  ) => Promise<GenerationResult>
+}
+
+export interface ImageGenerationResultsForRequest {
+  provider: ImageGenerationProvider
+  results: GenerationResult[]
+  successCount: number
+  errors: string[]
+  error?: string
+}
+
+function summarizeImageSaveErrors(
+  successCount: number,
+  totalCount: number,
+  errors: string[],
+): string | undefined {
+  if (errors.length === 0) return undefined
+  return successCount > 0
+    ? `部分图片保存失败（${successCount}/${totalCount} 成功）：${errors.join('；')}`
+    : `所有图片保存失败：${errors.join('；')}`
+}
+
+export async function generateImageResultsForRequest(
+  req: GenerationRequest,
+  deps: ImageGenerationResultsForRequestDeps = {},
+): Promise<ImageGenerationResultsForRequest> {
+  const settings = deps.settings ?? await getSettings()
+  const provider = getImageGenerationProviderForSettings(req.model, settings)
+  const rawResults = provider === 'dreamina'
+    ? await (deps.generateImageImpl ?? generateImage)(req)
+    : provider === 'codex'
+      ? await (deps.generateCodexCliImageImpl ?? generateCodexCliImage)(req)
+      : await (deps.generateOpenAiCompatibleImageImpl ?? generateOpenAiCompatibleImage)(req)
+
+  const saved: GenerationResult[] = []
+  let successCount = 0
+  const errors: string[] = []
+  const saveResult = deps.saveImageGenerationResultImpl ?? saveImageGenerationResult
+
+  for (const result of rawResults) {
+    try {
+      const savedResult = await saveResult(result, req, provider)
+      saved.push(savedResult)
+      successCount++
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      saved.push({
+        ...result,
+        assetId: undefined,
+      })
+      errors.push(message)
+    }
+  }
+
+  return {
+    provider,
+    results: saved,
+    successCount,
+    errors,
+    error: summarizeImageSaveErrors(successCount, rawResults.length, errors),
+  }
+}
+
 /** 把单个视频生成结果保存为 Asset（下载 → saveUploadFile） */
 async function saveVideoGenerationResult(
   result: GenerationResult,
   req: VideoGenerationRequest,
+  providerOverride?: VideoGenerationProvider,
 ): Promise<GenerationResult> {
+  const provider = providerOverride ?? getVideoGenerationProvider(req.model)
   if (result.localPath) {
     const ext = extname(result.localPath) || '.mp4'
     const buffer = await readFile(result.localPath)
@@ -456,7 +781,7 @@ async function saveVideoGenerationResult(
       prompt: req.prompt,
       sourceNodeId: req.nodeId,
       inputAssetIds: req.inputImages,
-      provider: 'dreamina',
+      provider,
       params: {
         model: req.model,
         mode: req.mode,
@@ -489,7 +814,7 @@ async function saveVideoGenerationResult(
     prompt: req.prompt,
     sourceNodeId: req.nodeId,
     inputAssetIds: req.inputImages,
-    provider: 'dreamina',
+    provider,
     params: {
       model: req.model,
       mode: req.mode,
@@ -570,37 +895,14 @@ async function runImageGeneration(
     record.status = 'running'
     notifyListeners(record)
 
-    const results = isJimengImageModel(req.model)
-      ? await generateImage(req)
-      : await generateOpenAiCompatibleImage(req)
+    const settings = await getSettings()
+    const generationResult = await generateImageResultsForRequest(req, {
+      settings,
+    })
 
-    // 顺序下载并保存每张图为 Asset（避免并发占用过多内存）
-    const saved: GenerationResult[] = []
-    let successCount = 0
-    const errors: string[] = []
-    for (const r of results) {
-      try {
-        const s = await saveImageGenerationResult(r, req)
-        saved.push(s)
-        successCount++
-      } catch (err) {
-        // 单张下载/保存失败：保留 remoteUrl，不阻断整体
-        const msg = err instanceof Error ? err.message : String(err)
-        saved.push({
-          ...r,
-          assetId: undefined,
-        })
-        errors.push(msg)
-      }
-    }
-
-    record.results = saved
-    record.status = successCount > 0 ? 'success' : 'error'
-    if (errors.length > 0) {
-      record.error = successCount > 0
-        ? `部分图片保存失败（${successCount}/${results.length} 成功）：${errors.join('；')}`
-        : `所有图片保存失败：${errors.join('；')}`
-    }
+    record.results = generationResult.results
+    record.status = generationResult.successCount > 0 ? 'success' : 'error'
+    if (generationResult.error) record.error = generationResult.error
     record.finishedAt = new Date().toISOString()
     await persistImageGenerationResultToFlow(req, record)
     notifyListeners(record)
@@ -649,7 +951,11 @@ async function runVideoGeneration(
     record.status = 'running'
     notifyListeners(record)
 
-    const results = await generateVideo(req)
+    const settings = await getSettings()
+    const provider = getVideoGenerationProviderForSettings(req.model, settings)
+    const results = provider === 'dreamina'
+      ? await generateVideo(req)
+      : await generateOpenAiCompatibleVideo(req)
 
     // 顺序下载并保存每个视频为 Asset
     const saved: GenerationResult[] = []
@@ -657,7 +963,7 @@ async function runVideoGeneration(
     const errors: string[] = []
     for (const r of results) {
       try {
-        const s = await saveVideoGenerationResult(r, req)
+        const s = await saveVideoGenerationResult(r, req, provider)
         saved.push(s)
         successCount++
       } catch (err) {
@@ -678,11 +984,13 @@ async function runVideoGeneration(
         : `所有视频保存失败：${errors.join('；')}`
     }
     record.finishedAt = new Date().toISOString()
+    await persistVideoGenerationResultToFlow(req, record)
     notifyListeners(record)
   } catch (err) {
     record.status = 'error'
     record.error = err instanceof Error ? err.message : String(err)
     record.finishedAt = new Date().toISOString()
+    await persistVideoGenerationResultToFlow(req, record)
     notifyListeners(record)
   }
 }

@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Settings } from '@jimeng-flow/shared'
-import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
+import { DEFAULT_SETTINGS, normalizeModelConfigs } from '@jimeng-flow/shared'
 
 // 当前文件所在目录：apps/server/src/config/
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -40,6 +40,10 @@ function mergeWithDefaults(raw: unknown): Settings {
     const value = obj[key as string]
     if (value === undefined || value === null) return
     const defaultValue = DEFAULT_SETTINGS[key]
+    if (key === 'modelConfigs') {
+      ;(result[key] as unknown) = normalizeModelConfigs(value)
+      return
+    }
     // 数值类型校验
     if (typeof defaultValue === 'number') {
       if (typeof value === 'number' && Number.isFinite(value)) {
