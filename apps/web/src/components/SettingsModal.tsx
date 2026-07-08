@@ -23,6 +23,7 @@ import {
   testJimengConnection,
   testLlmConnection,
 } from '../api/settings'
+import { getAssetFileUrl, uploadAsset } from '../api/assets'
 
 export interface SettingsModalProps {
   open: boolean
@@ -109,6 +110,47 @@ const iconButtonStyle: React.CSSProperties = {
 const helperTextStyle: React.CSSProperties = {
   color: '#777',
   fontSize: 11,
+}
+
+const homeVisualGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr',
+  gap: '12px',
+}
+
+const homeVisualSlotStyle: React.CSSProperties = {
+  position: 'relative',
+  display: 'flex',
+  minHeight: 142,
+  flexDirection: 'column',
+  justifyContent: 'center',
+  gap: 7,
+  overflow: 'hidden',
+  padding: '14px',
+  border: '1px dashed rgba(255, 255, 255, 0.2)',
+  borderRadius: 10,
+  background: '#202020',
+  color: '#d8d8d8',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  textAlign: 'left',
+}
+
+const homeVisualPreviewStyle: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  opacity: 0.78,
+}
+
+const homeVisualContentStyle: React.CSSProperties = {
+  position: 'relative',
+  zIndex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
 }
 
 const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
@@ -268,6 +310,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [loadingLlmModels, setLoadingLlmModels] = useState(false)
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
   const autoFetchedModelsRef = useRef(false)
+  const homeHeroInputRef = useRef<HTMLInputElement>(null)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
@@ -303,6 +346,71 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const updateHomeVisualFromFile = async (file: File | undefined) => {
+    if (!file) return
+    setSaveError(null)
+    if (!file.type.startsWith('image/')) {
+      setSaveError('请选择图片文件')
+      return
+    }
+    try {
+      const asset = await uploadAsset(file)
+      update('homeHeroImagePath', getAssetFileUrl(asset.id))
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const renderHomeVisualSlot = (
+    title: string,
+    emptyHint: string,
+    inputRef: React.RefObject<HTMLInputElement | null>,
+  ) => {
+    const value = form.homeHeroImagePath?.trim() ?? ''
+
+    return (
+      <div style={fieldStyle}>
+        <span style={labelStyle}>{title}</span>
+        <button
+          type="button"
+          style={homeVisualSlotStyle}
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault()
+            void updateHomeVisualFromFile(e.dataTransfer.files[0])
+          }}
+        >
+          {value && <img src={value} alt="" aria-hidden="true" style={homeVisualPreviewStyle} />}
+          <span style={homeVisualContentStyle}>
+            <strong style={{ color: '#f0f0f0', fontSize: 13 }}>{title}</strong>
+            <span style={{ color: '#b8b8b8', fontSize: 12 }}>拖入图片或点击选择</span>
+            <span style={{ color: '#777', fontSize: 11 }}>{emptyHint}</span>
+          </span>
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            void updateHomeVisualFromFile(e.currentTarget.files?.[0])
+            e.currentTarget.value = ''
+          }}
+        />
+        {value && (
+          <button
+            type="button"
+            style={{ ...subtleButtonStyle, alignSelf: 'flex-start', padding: '5px 9px' }}
+            onClick={() => update('homeHeroImagePath', '')}
+          >
+            清除
+          </button>
+        )}
+      </div>
+    )
   }
 
   const handleSave = async () => {
@@ -660,6 +768,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               加载设置失败：{loadError}
             </div>
           )}
+
+          {/* Home */}
+          <section style={sectionStyle}>
+            <div style={sectionTitleStyle}>首页视觉</div>
+            <div style={homeVisualGridStyle}>
+              {renderHomeVisualSlot(
+                '首页背景',
+                '留空使用默认背景',
+                homeHeroInputRef,
+              )}
+            </div>
+          </section>
 
           {/* Dreamina CLI */}
           <section style={sectionStyle}>

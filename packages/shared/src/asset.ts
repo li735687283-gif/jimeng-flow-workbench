@@ -27,6 +27,8 @@ export interface Asset {
   provider?: string
   /** 生成参数快照（可选） */
   params?: Record<string, unknown>
+  /** 是否展示在首页精选作品区（可选） */
+  showcase?: boolean
   /** 创建时间 ISO 字符串 */
   createdAt: string
 }

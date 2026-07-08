@@ -246,6 +246,8 @@ export interface Settings {
 
   /** 输出目录，相对项目根 */
   outputDir: string;
+  /** 首页封面背景图片 URL；留空时使用前端内置背景 */
+  homeHeroImagePath?: string;
 
   /** 旧版默认图片模型；保留字段兼容，前端不再用它决定新建节点默认值 */
   defaultModel: string;
@@ -288,6 +290,7 @@ export const DEFAULT_SETTINGS: Settings = {
   llmApiKey: "",
 
   outputDir: "./workspace/outputs",
+  homeHeroImagePath: "",
 
   defaultModel: "",
   imageModels: ["jimeng"],

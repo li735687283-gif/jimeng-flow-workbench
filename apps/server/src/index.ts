@@ -8,6 +8,7 @@ import assetsRoutes from './routes/assets'
 import generationsRoutes from './routes/generations'
 import agentRoutes from './routes/agent'
 import codexRoutes from './routes/codex'
+import videosRoutes from './routes/videos'
 
 const PORT = Number(process.env.PORT ?? 8787)
 const HOST = '0.0.0.0'
@@ -38,6 +39,7 @@ const start = async () => {
     await app.register(generationsRoutes)
     await app.register(agentRoutes)
     await app.register(codexRoutes)
+    await app.register(videosRoutes)
     await app.listen({ port: PORT, host: HOST })
     app.log.info(`即梦 Flow 后端监听 http://localhost:${PORT}`)
   } catch (err) {

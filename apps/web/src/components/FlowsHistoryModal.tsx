@@ -11,6 +11,7 @@ import { useFlowStore } from '../state/flowStore'
 export interface FlowsHistoryModalProps {
   open: boolean
   onClose: () => void
+  onFlowReady?: () => void
 }
 
 /** 把 ISO 8601 字符串格式化为 yyyy-MM-dd HH:mm */
@@ -24,7 +25,11 @@ function formatTime(iso: string): string {
   }
 }
 
-export function FlowsHistoryModal({ open, onClose }: FlowsHistoryModalProps) {
+export function FlowsHistoryModal({
+  open,
+  onClose,
+  onFlowReady,
+}: FlowsHistoryModalProps) {
   const flowList = useFlowStore((s) => s.flowList)
   const loading = useFlowStore((s) => s.loading)
   const loadFlowList = useFlowStore((s) => s.loadFlowList)
@@ -51,6 +56,7 @@ export function FlowsHistoryModal({ open, onClose }: FlowsHistoryModalProps) {
     try {
       await loadFlow(id)
       onClose()
+      onFlowReady?.()
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -63,6 +69,7 @@ export function FlowsHistoryModal({ open, onClose }: FlowsHistoryModalProps) {
     try {
       await createFlow()
       onClose()
+      onFlowReady?.()
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : String(err))
     }

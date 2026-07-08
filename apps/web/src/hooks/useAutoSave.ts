@@ -16,13 +16,15 @@ const AUTOSAVE_DELAY = 1500
  * - 挂载时若 currentFlowId 为空，先 loadFlowList 取最近工作流恢复；
  *   列表为空时才 createFlow 新建空工作流。
  * - 订阅画布 nodes/edges 变化，节流后保存到后端
- * 仅需在顶层组件调用一次：useAutoSave()
+ * 仅需在顶层组件调用一次：useAutoSave(enabled)
  */
-export function useAutoSave(): void {
+export function useAutoSave(enabled = true): void {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initializedRef = useRef(false)
 
   useEffect(() => {
+    if (!enabled) return
+
     // 首次加载：恢复最近工作流或新建空 flow
     if (!initializedRef.current) {
       initializedRef.current = true
@@ -72,5 +74,5 @@ export function useAutoSave(): void {
         timerRef.current = null
       }
     }
-  }, [])
+  }, [enabled])
 }
