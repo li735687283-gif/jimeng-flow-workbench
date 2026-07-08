@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import {
-  BookmarkPlus,
-  Check,
-  Search,
+  ArrowRight,
+  ChevronDown,
+  Plus,
   Star,
   Trash2,
   X,
@@ -92,71 +92,96 @@ function readCustomTemplates(): PromptTemplate[] {
   }
 }
 
-function getPromptTitle(prompt: string) {
-  const firstLine = prompt.trim().split(/\r?\n/)[0]?.trim() ?? ''
-  return firstLine.slice(0, 18) || '我的提示词'
-}
-
 export function PromptTemplateLibrary({
-  currentPrompt,
+  currentPrompt: _currentPrompt,
   style,
   onApply,
   onClose,
 }: PromptTemplateLibraryProps) {
   const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>([])
-  const [query, setQuery] = useState('')
   const [category, setCategory] = useState('全部')
   const [savedId, setSavedId] = useState('')
+  const [newOpen, setNewOpen] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newCategory, setNewCategory] = useState('')
+  const [newPrompt, setNewPrompt] = useState('')
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false)
+  const categoryFieldRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     setCustomTemplates(readCustomTemplates())
   }, [])
+
+  useEffect(() => {
+    if (!categoryDropdownOpen) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!categoryFieldRef.current) return
+      if (categoryFieldRef.current.contains(event.target as Node)) return
+      setCategoryDropdownOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [categoryDropdownOpen])
 
   const templates = useMemo(
     () => [...customTemplates, ...BUILTIN_PROMPT_TEMPLATES],
     [customTemplates],
   )
   const categories = useMemo(() => {
-    return ['全部', '我的', ...Array.from(new Set(BUILTIN_PROMPT_TEMPLATES.map((item) => item.category)))]
-  }, [])
+    const builtinCats = BUILTIN_PROMPT_TEMPLATES.map((item) => item.category)
+    const customCats = customTemplates
+      .filter((item) => item.category && item.category !== '我的')
+      .map((item) => item.category)
+    return ['全部', '我的', ...Array.from(new Set([...builtinCats, ...customCats]))]
+  }, [customTemplates])
   const filteredTemplates = useMemo(() => {
-    const keyword = query.trim().toLowerCase()
     return templates.filter((template) => {
       const matchesCategory =
         category === '全部' ||
         (category === '我的' ? template.source === 'custom' : template.category === category)
-      if (!matchesCategory) return false
-      if (!keyword) return true
-      return `${template.title} ${template.description} ${template.prompt}`
-        .toLowerCase()
-        .includes(keyword)
+      return matchesCategory
     })
-  }, [category, query, templates])
+  }, [category, templates])
 
   const persistCustomTemplates = (nextTemplates: PromptTemplate[]) => {
     setCustomTemplates(nextTemplates)
     localStorage.setItem(CUSTOM_PROMPT_TEMPLATES_KEY, JSON.stringify(nextTemplates))
   }
 
-  const handleSaveCurrent = () => {
-    const prompt = currentPrompt.trim()
-    if (!prompt) return
+  const handleDeleteCustomTemplate = (id: string) => {
+    persistCustomTemplates(customTemplates.filter((template) => template.id !== id))
+  }
+
+  const handleOpenNew = () => {
+    setNewTitle('')
+    setNewCategory('')
+    setNewPrompt('')
+    setNewOpen(true)
+  }
+
+  const handleSaveNew = () => {
+    const title = newTitle.trim()
+    const prompt = newPrompt.trim()
+    if (!title || !prompt) return
+    const cat = newCategory.trim() || '我的'
     const nextTemplate: PromptTemplate = {
       id: `custom_${Date.now()}`,
-      title: getPromptTitle(prompt),
-      category: '我的',
-      description: '从当前节点收藏',
+      title,
+      category: cat,
+      description: '自定义模板',
       prompt,
       source: 'custom',
     }
     persistCustomTemplates([nextTemplate, ...customTemplates])
-    setCategory('我的')
+    setCategory(cat)
     setSavedId(nextTemplate.id)
+    setNewOpen(false)
   }
 
-  const handleDeleteCustomTemplate = (id: string) => {
-    persistCustomTemplates(customTemplates.filter((template) => template.id !== id))
-  }
+  const categoryOptions = useMemo(
+    () => categories.filter((item) => item !== '全部' && item !== '我的'),
+    [categories],
+  )
 
   return (
     <section className="prompt-template-library" style={style}>
@@ -171,24 +196,92 @@ export function PromptTemplateLibrary({
       </header>
 
       <div className="prompt-template-library-controls">
-        <label className="prompt-template-search">
-          <Search size={16} strokeWidth={1.8} />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索模板..."
-          />
-        </label>
         <button
           type="button"
-          className="prompt-template-save-current"
-          onClick={handleSaveCurrent}
-          disabled={!currentPrompt.trim()}
+          className="prompt-template-new-btn"
+          onClick={handleOpenNew}
         >
-          <BookmarkPlus size={16} strokeWidth={1.8} />
-          <span>收藏当前</span>
+          <Plus size={16} strokeWidth={1.8} />
+          <span>新建</span>
         </button>
       </div>
+
+      {newOpen ? (
+        <div className="prompt-template-new-form">
+          <label className="prompt-template-new-field">
+            <span>标题</span>
+            <input
+              value={newTitle}
+              onChange={(event) => setNewTitle(event.target.value)}
+              placeholder="输入模板标题"
+            />
+          </label>
+          <div
+            className="prompt-template-new-field prompt-template-category-select"
+            ref={categoryFieldRef}
+          >
+            <span>分类</span>
+            <button
+              type="button"
+              className="prompt-template-category-trigger"
+              onClick={() => setCategoryDropdownOpen((open) => !open)}
+            >
+              <span>{newCategory || '选择或输入分类'}</span>
+              <ChevronDown size={14} strokeWidth={1.8} />
+            </button>
+            {categoryDropdownOpen ? (
+              <div className="prompt-template-category-dropdown">
+                {categoryOptions.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    className={`prompt-template-category-option${
+                      item === newCategory ? ' active' : ''
+                    }`}
+                    onClick={() => {
+                      setNewCategory(item)
+                      setCategoryDropdownOpen(false)
+                    }}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <input
+              className="prompt-template-category-input"
+              value={newCategory}
+              onChange={(event) => setNewCategory(event.target.value)}
+              placeholder="或自定义分类名"
+            />
+          </div>
+          <label className="prompt-template-new-field prompt-template-new-prompt-field">
+            <span>提示词</span>
+            <textarea
+              value={newPrompt}
+              onChange={(event) => setNewPrompt(event.target.value)}
+              placeholder="粘贴提示词内容..."
+            />
+          </label>
+          <div className="prompt-template-new-actions">
+            <button
+              type="button"
+              className="prompt-template-new-cancel"
+              onClick={() => setNewOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="prompt-template-new-save"
+              onClick={handleSaveNew}
+              disabled={!newTitle.trim() || !newPrompt.trim()}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="prompt-template-tabs">
         {categories.map((item) => (
@@ -227,7 +320,6 @@ export function PromptTemplateLibrary({
                 <Star size={15} strokeWidth={1.8} />
               )}
             </div>
-            <p>{template.description}</p>
             <div className="prompt-template-preview">{template.prompt}</div>
             <button
               type="button"
@@ -236,9 +328,10 @@ export function PromptTemplateLibrary({
                 onApply(template.prompt)
                 onClose()
               }}
+              aria-label="应用模板"
+              title="应用模板"
             >
-              {template.id === savedId ? <Check size={15} strokeWidth={1.8} /> : null}
-              <span>应用模板</span>
+              <ArrowRight size={15} strokeWidth={1.8} />
             </button>
           </article>
         ))}

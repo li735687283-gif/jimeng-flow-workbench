@@ -16,6 +16,7 @@ import {
   ChevronDown,
   History,
   Image as ImageIcon,
+  LayoutTemplate,
   Sparkles,
 } from 'lucide-react'
 import {
@@ -235,46 +236,6 @@ function getDisplayFrameStyle(size: { width: number; height: number }): CSSPrope
     maxHeight: '62vh',
     aspectRatio: `${size.width} / ${size.height}`,
   }
-}
-
-function PromptLibraryIcon() {
-  return (
-    <svg
-      className="prompt-library-icon"
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M4.2 5.8h2.4v8.1H4.2a1 1 0 0 1-1-1V6.8a1 1 0 0 1 1-1Z"
-        stroke="currentColor"
-        strokeWidth="1.55"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.6 5.1h2.5v8.8H6.6V5.1Z"
-        stroke="currentColor"
-        strokeWidth="1.55"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9.1 5.8h2.4a1 1 0 0 1 1 1v6.1a1 1 0 0 1-1 1H9.1V5.8Z"
-        stroke="currentColor"
-        strokeWidth="1.55"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5.1 4.5 12.9 2.7l.6 2.5-7.8 1.8-.6-2.5Z"
-        fill="#2a2a2a"
-        stroke="currentColor"
-        strokeWidth="1.45"
-        strokeLinejoin="round"
-      />
-      <path d="M4.6 8.1h1.1M7.2 8.1H8M9.7 8.1h1.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  )
 }
 
 export function ImageNode({ id, data, selected }: NodeProps) {
@@ -1517,11 +1478,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                     promptMenuOpen ? ' active' : ''
                   }`}
                   onPointerDown={handlePromptMenuPointerDown}
-                  title="提示词操作"
-                  aria-label="提示词操作"
+                  aria-label="提示词模板库"
                   aria-expanded={promptMenuOpen}
                 >
-                  <PromptLibraryIcon />
+                  <LayoutTemplate size={17} strokeWidth={1.8} />
                 </button>
               </div>
               {promptMenuOpen && typeof document !== 'undefined'
