@@ -549,20 +549,16 @@ export function CanvasView() {
       </ReactFlow>
 
       {nodes.length === 0 && (
-        <div className="canvas-empty-state">
-          <button
-            type="button"
-            className="canvas-empty-plus"
-            onClick={() => handleCreateNode('text', screenToFlowPosition({
-              x: window.innerWidth / 2,
-              y: window.innerHeight / 2,
-            }))}
-            title="添加文本节点"
-          >
-            <Plus size={28} strokeWidth={1.5} />
-          </button>
+        <div className="canvas-empty-state" aria-hidden="true">
+          <div className="canvas-empty-ring">
+            <span className="canvas-empty-ripple canvas-empty-ripple-1" />
+            <span className="canvas-empty-ripple canvas-empty-ripple-2" />
+            <span className="canvas-empty-ripple canvas-empty-ripple-3" />
+            <span className="canvas-empty-plus">
+              <Plus size={28} strokeWidth={1.5} />
+            </span>
+          </div>
           <div className="canvas-empty-title">双击画布开始创作</div>
-          <div className="canvas-empty-subtitle">或使用底部按钮添加节点</div>
         </div>
       )}
 

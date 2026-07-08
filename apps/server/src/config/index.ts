@@ -36,6 +36,13 @@ function mergeWithDefaults(raw: unknown): Settings {
   if (!raw || typeof raw !== 'object') return result
   const obj = raw as Record<string, unknown>
 
+  // 先复制所有未知字段（保证向前兼容：新增字段不会被丢弃）
+  for (const key of Object.keys(obj)) {
+    if (!(key in DEFAULT_SETTINGS)) {
+      ;(result as Record<string, unknown>)[key] = obj[key]
+    }
+  }
+
   ;(Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).forEach((key) => {
     const value = obj[key as string]
     if (value === undefined || value === null) return

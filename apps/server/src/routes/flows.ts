@@ -11,6 +11,7 @@
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import type {
   CreateFlowRequest,
+  DuplicateFlowRequest,
   Flow,
   FlowSummary,
   UpdateFlowRequest,
@@ -21,6 +22,7 @@ import {
   createFlow,
   updateFlow,
   deleteFlow,
+  duplicateFlow,
 } from '../services/flows'
 
 const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
@@ -119,6 +121,35 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     async (req): Promise<{ ok: true; id: string }> => {
       await deleteFlow(req.params.id)
       return { ok: true, id: req.params.id }
+    },
+  )
+
+  // POST /api/flows/:id/duplicate → 复制工作流
+  app.post<{ Params: { id: string }; Body: DuplicateFlowRequest }>(
+    '/api/flows/:id/duplicate',
+    async (req, reply): Promise<Flow | unknown> => {
+      const body = req.body ?? {}
+      if (typeof body !== 'object' || Array.isArray(body)) {
+        return reply.code(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: '请求体必须为对象',
+        })
+      }
+      const nameOverride = typeof body.name === 'string' ? body.name : undefined
+      try {
+        return await duplicateFlow(req.params.id, nameOverride)
+      } catch (err) {
+        if ((err as Error & { code?: string }).code === 'FLOW_NOT_FOUND') {
+          return reply.code(404).send({
+            statusCode: 404,
+            error: 'Not Found',
+            message: (err as Error).message,
+            code: 'FLOW_NOT_FOUND',
+          })
+        }
+        throw err
+      }
     },
   )
 }

@@ -1,13 +1,14 @@
-// 首页精选视频管理 API。
-// 文件上传由 /api/assets/upload 负责，本路由保存视频卡片业务字段。
+// 首页精选作品管理 API（支持图片和视频）。
+// 文件上传由 /api/assets/upload 负责，本路由保存作品卡片业务字段。
 
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
-import type { CreateVideoRequest, UpdateVideoRequest } from '@jimeng-flow/shared/video'
+import type { CreateWorkRequest, UpdateWorkRequest, WorkMediaType } from '@jimeng-flow/shared/video'
 import {
-  createVideo,
-  listFeaturedVideos,
-  listVideos,
-  updateVideo,
+  createWork,
+  listFeaturedWorks,
+  listGalleryWorks,
+  listWorks,
+  updateWork,
 } from '../services/videos'
 
 function parseBoolean(value: unknown): boolean | undefined {
@@ -22,45 +23,56 @@ function parseNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+function parseMediaType(value: unknown): WorkMediaType | undefined {
+  if (value === 'video' || value === 'image') return value
+  return undefined
+}
+
 function errorPayload(err: unknown) {
   const message = err instanceof Error ? err.message : String(err)
   const code = (err as Error & { code?: string }).code
-  if (code === 'VIDEO_NOT_FOUND') {
+  if (code === 'WORK_NOT_FOUND' || code === 'VIDEO_NOT_FOUND') {
     return { statusCode: 404, error: 'Not Found', message }
   }
-  if (code === 'VIDEO_BAD_ASSET') {
+  if (code === 'WORK_BAD_ASSET' || code === 'VIDEO_BAD_ASSET') {
     return { statusCode: 400, error: 'Bad Request', message }
   }
   return { statusCode: 500, error: 'Internal Server Error', message }
 }
 
-const videosRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
+const worksRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   app.get<{
     Querystring: {
       page?: string
       pageSize?: string
       q?: string
+      mediaType?: string
       isFeatured?: string
       isPinned?: string
     }
   }>('/api/videos', async (req) => {
-    return await listVideos({
+    return await listWorks({
       page: parseNumber(req.query.page),
       pageSize: parseNumber(req.query.pageSize),
       q: req.query.q,
+      mediaType: parseMediaType(req.query.mediaType),
       isFeatured: parseBoolean(req.query.isFeatured),
       isPinned: parseBoolean(req.query.isPinned),
     })
   })
 
   app.get('/api/videos/featured', async () => {
-    return await listFeaturedVideos()
+    return await listFeaturedWorks()
   })
 
-  app.post<{ Body: CreateVideoRequest }>('/api/videos', async (req, reply) => {
+  app.get('/api/videos/gallery', async () => {
+    return await listGalleryWorks()
+  })
+
+  app.post<{ Body: CreateWorkRequest }>('/api/videos', async (req, reply) => {
     try {
-      const video = await createVideo(req.body)
-      return reply.code(201).send(video)
+      const work = await createWork(req.body)
+      return reply.code(201).send(work)
     } catch (err) {
       const payload = errorPayload(err)
       return reply.code(payload.statusCode).send(payload)
@@ -69,10 +81,10 @@ const videosRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
 
   app.put<{
     Params: { videoId: string }
-    Body: UpdateVideoRequest
+    Body: UpdateWorkRequest
   }>('/api/videos/:videoId', async (req, reply) => {
     try {
-      return await updateVideo(req.params.videoId, req.body)
+      return await updateWork(req.params.videoId, req.body)
     } catch (err) {
       const payload = errorPayload(err)
       return reply.code(payload.statusCode).send(payload)
@@ -80,4 +92,4 @@ const videosRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   })
 }
 
-export default videosRoutes
+export default worksRoutes

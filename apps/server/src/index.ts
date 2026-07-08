@@ -1,5 +1,6 @@
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
 import type { ApiHealthResponse } from '@jimeng-flow/shared'
 import settingsRoutes from './routes/settings'
 import flowsRoutes from './routes/flows'
@@ -32,6 +33,12 @@ const start = async () => {
   try {
     // 先注册 cors，再注册业务路由
     await app.register(cors, { origin: true })
+    await app.register(multipart, {
+      limits: {
+        fileSize: 500 * 1024 * 1024, // 500MB
+        files: 1,
+      },
+    })
     await app.register(settingsRoutes)
     await app.register(flowsRoutes)
     await app.register(llmRoutes)

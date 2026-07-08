@@ -44,6 +44,44 @@ function hasGeneratedAsset(node: FlowNode | undefined): boolean {
   )
 }
 
+function extractCoverAssetId(flow: Flow): string | null {
+  if (!Array.isArray(flow.nodes)) return null
+
+  const isAssetId = (v: unknown): v is string =>
+    typeof v === 'string' && v.startsWith('asset_')
+
+  for (const node of flow.nodes) {
+    const data = node.data as Record<string, unknown>
+    if (isAssetId(data.assetId)) return data.assetId
+    if (Array.isArray(data.outputAssetIds)) {
+      const found = data.outputAssetIds.find(isAssetId)
+      if (found) return found
+    }
+    if (Array.isArray(data.assetIds)) {
+      const found = data.assetIds.find(isAssetId)
+      if (found) return found
+    }
+  }
+
+  for (const node of flow.nodes) {
+    const data = node.data as Record<string, unknown>
+    const refs = data.references
+    if (Array.isArray(refs)) {
+      for (const ref of refs) {
+        if (ref && typeof ref === 'object' && isAssetId((ref as Record<string, unknown>).assetId)) {
+          return (ref as Record<string, unknown>).assetId as string
+        }
+      }
+    }
+    if (Array.isArray(data.inputImageAssetIds)) {
+      const found = data.inputImageAssetIds.find(isAssetId)
+      if (found) return found
+    }
+  }
+
+  return null
+}
+
 function shouldKeepOmittedCurrentNode(
   node: FlowNode,
   deletedNodeIds: ReadonlySet<string>,
@@ -224,6 +262,7 @@ export async function listFlows(): Promise<FlowSummary[]> {
         createdAt: flow.createdAt,
         updatedAt: flow.updatedAt,
         nodeCount: Array.isArray(flow.nodes) ? flow.nodes.length : 0,
+        coverAssetId: extractCoverAssetId(flow),
       })
     } catch {
       // 损坏文件跳过，不影响整体列表
@@ -262,7 +301,7 @@ export async function getFlow(id: string): Promise<Flow> {
 
 /**
  * 创建新工作流。
- * @param name 可选名称，默认 "未命名工作流"
+ * @param name 可选名称，默认 "无限画布"
  * @returns 新建的 Flow（已写盘）
  */
 export async function createFlow(name?: string): Promise<Flow> {
@@ -270,7 +309,7 @@ export async function createFlow(name?: string): Promise<Flow> {
   const now = nowIso()
   const flow: Flow = {
     id: generateFlowId(),
-    name: name?.trim() || '未命名工作流',
+    name: name?.trim() || '无限画布',
     nodes: [],
     edges: [],
     createdAt: now,
@@ -326,4 +365,53 @@ export async function deleteFlow(id: string): Promise<void> {
     if (code === 'ENOENT') return
     throw err
   }
+}
+
+/**
+ * 复制工作流：复制全部节点/连线，生成新 id。
+ * @param id 原工作流 id
+ * @param nameOverride 可选名称覆盖，默认 "原名 副本"
+ */
+export async function duplicateFlow(id: string, nameOverride?: string): Promise<Flow> {
+  const current = await getFlow(id)
+  const newId = generateFlowId()
+  const now = nowIso()
+
+  let nodeCounter = 0
+  let edgeCounter = 0
+  const newNodeId = () => `node_${Date.now().toString(36)}_${nodeCounter++}_${randomBytes(2).toString('hex')}`
+  const newEdgeId = () => `edge_${Date.now().toString(36)}_${edgeCounter++}_${randomBytes(2).toString('hex')}`
+
+  const idMap = new Map<string, string>()
+  for (const node of current.nodes) {
+    idMap.set(node.id, newNodeId())
+  }
+  for (const edge of current.edges) {
+    idMap.set(edge.id, newEdgeId())
+  }
+
+  const remappedNodes = current.nodes.map((node) => ({
+    ...node,
+    id: idMap.get(node.id) ?? node.id,
+  }))
+  const remappedEdges = current.edges.map((edge) => ({
+    ...edge,
+    id: idMap.get(edge.id) ?? edge.id,
+    source: idMap.get(edge.source) ?? edge.source,
+    target: idMap.get(edge.target) ?? edge.target,
+  }))
+
+  const copy: Flow = {
+    ...current,
+    id: newId,
+    name: nameOverride?.trim() || `${current.name} 副本`,
+    nodes: remappedNodes,
+    edges: remappedEdges,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  await mkdir(FLOWS_DIR, { recursive: true })
+  await writeFile(flowFile(newId), JSON.stringify(copy, null, 2), 'utf8')
+  return copy
 }

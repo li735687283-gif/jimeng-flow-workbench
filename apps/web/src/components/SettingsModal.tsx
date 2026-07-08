@@ -24,6 +24,7 @@ import {
   testLlmConnection,
 } from '../api/settings'
 import { getAssetFileUrl, uploadAsset } from '../api/assets'
+import defaultMokHeroUrl from '../assets/mok-hero.png'
 
 export interface SettingsModalProps {
   open: boolean
@@ -116,6 +117,54 @@ const homeVisualGridStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr',
   gap: '12px',
+}
+
+const sliderControlStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+}
+
+const sliderLabelStyle: React.CSSProperties = {
+  ...labelStyle,
+  minWidth: '70px',
+  flexShrink: 0,
+}
+
+const sliderInputStyle: React.CSSProperties = {
+  flex: 1,
+  accentColor: '#888',
+  cursor: 'pointer',
+}
+
+const sliderValueStyle: React.CSSProperties = {
+  ...labelStyle,
+  minWidth: '48px',
+  textAlign: 'right',
+  fontVariantNumeric: 'tabular-nums',
+}
+
+const mokPreviewContainerStyle: React.CSSProperties = {
+  position: 'relative',
+  width: '100%',
+  height: '220px',
+  background: '#111111',
+  borderRadius: '8px',
+  overflow: 'hidden',
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'center',
+  border: '1px solid #2a2a2a',
+}
+
+const mokPreviewImageStyle: React.CSSProperties = {
+  display: 'block',
+  width: 'auto',
+  height: 'auto',
+  maxWidth: '100%',
+  maxHeight: '100%',
+  objectFit: 'contain',
+  transition: 'none',
 }
 
 const homeVisualSlotStyle: React.CSSProperties = {
@@ -311,6 +360,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
   const autoFetchedModelsRef = useRef(false)
   const homeHeroInputRef = useRef<HTMLInputElement>(null)
+  const homeMokHeroInputRef = useRef<HTMLInputElement>(null)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
@@ -348,7 +398,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const updateHomeVisualFromFile = async (file: File | undefined) => {
+  const updateHomeVisualFromFile = async (file: File | undefined, field: 'homeHeroImagePath' | 'homeMokHeroImagePath') => {
     if (!file) return
     setSaveError(null)
     if (!file.type.startsWith('image/')) {
@@ -357,30 +407,78 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
     try {
       const asset = await uploadAsset(file)
-      update('homeHeroImagePath', getAssetFileUrl(asset.id))
+      update(field, getAssetFileUrl(asset.id))
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : String(err))
     }
   }
 
+  const renderSlider = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    unit: string,
+    onChange: (v: number) => void,
+  ) => (
+    <div style={sliderControlStyle}>
+      <span style={sliderLabelStyle}>{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={sliderInputStyle}
+      />
+      <span style={sliderValueStyle}>{value.toFixed(step < 1 ? 2 : 0)}{unit}</span>
+    </div>
+  )
+
   const renderHomeVisualSlot = (
     title: string,
     emptyHint: string,
     inputRef: React.RefObject<HTMLInputElement | null>,
+    inputId: string,
+    field: 'homeHeroImagePath' | 'homeMokHeroImagePath',
+    options?: {
+      isMokHero?: boolean
+    },
   ) => {
-    const value = form.homeHeroImagePath?.trim() ?? ''
+    const value = form[field]?.trim() ?? ''
+    const isMok = options?.isMokHero
 
     return (
       <div style={fieldStyle}>
         <span style={labelStyle}>{title}</span>
-        <button
-          type="button"
-          style={homeVisualSlotStyle}
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
+        <label
+          htmlFor={inputId}
+          style={{ ...homeVisualSlotStyle, cursor: 'pointer' }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'copy'
+          }}
+          onDragEnter={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            e.currentTarget.style.borderColor = '#666'
+            e.currentTarget.style.background = '#222'
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            e.currentTarget.style.borderColor = ''
+            e.currentTarget.style.background = ''
+          }}
           onDrop={(e) => {
             e.preventDefault()
-            void updateHomeVisualFromFile(e.dataTransfer.files[0])
+            e.stopPropagation()
+            e.currentTarget.style.borderColor = ''
+            e.currentTarget.style.background = ''
+            void updateHomeVisualFromFile(e.dataTransfer.files[0], field)
           }}
         >
           {value && <img src={value} alt="" aria-hidden="true" style={homeVisualPreviewStyle} />}
@@ -389,14 +487,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             <span style={{ color: '#b8b8b8', fontSize: 12 }}>拖入图片或点击选择</span>
             <span style={{ color: '#777', fontSize: 11 }}>{emptyHint}</span>
           </span>
-        </button>
+        </label>
         <input
+          id={inputId}
           ref={inputRef}
           type="file"
           accept="image/*"
           style={{ display: 'none' }}
           onChange={(e) => {
-            void updateHomeVisualFromFile(e.currentTarget.files?.[0])
+            void updateHomeVisualFromFile(e.currentTarget.files?.[0], field)
             e.currentTarget.value = ''
           }}
         />
@@ -404,10 +503,78 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <button
             type="button"
             style={{ ...subtleButtonStyle, alignSelf: 'flex-start', padding: '5px 9px' }}
-            onClick={() => update('homeHeroImagePath', '')}
+            onClick={() => update(field, '')}
           >
             清除
           </button>
+        )}
+        {isMok && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px', padding: '10px', background: '#181818', borderRadius: '8px', border: '1px solid #2a2a2a' }}>
+            <span style={{ ...labelStyle, color: '#c0c0c0', marginBottom: '2px' }}>实时预览</span>
+            <div style={mokPreviewContainerStyle}>
+              <img
+                src={value || defaultMokHeroUrl}
+                alt="预览"
+                style={{
+                  ...mokPreviewImageStyle,
+                  marginTop: `${(form.homeMokHeroMarginTop ?? 0) * 0.8}px`,
+                  maxWidth: `${200 * (form.homeMokHeroScale ?? 1)}px`,
+                  width: `${Math.min(80 * (form.homeMokHeroScale ?? 1), 80)}%`,
+                  transform: `translate(${(form.homeMokHeroOffsetX ?? 0) * 0.6}px, ${(form.homeMokHeroOffsetY ?? 0) * 0.6}px)`,
+                }}
+              />
+            </div>
+            <span style={{ ...labelStyle, color: '#c0c0c0', marginTop: '6px' }}>尺寸与位置调整</span>
+            <span style={{ color: '#888', fontSize: '11px', marginTop: '-4px' }}>拖动滑块实时预览，点击「保存」后应用到首页</span>
+            {renderSlider(
+              '大小',
+              form.homeMokHeroScale ?? 1,
+              0.4,
+              1.6,
+              0.05,
+              'x',
+              (v) => update('homeMokHeroScale', v),
+            )}
+            {renderSlider(
+              '左右',
+              form.homeMokHeroOffsetX ?? 0,
+              -100,
+              100,
+              1,
+              'px',
+              (v) => update('homeMokHeroOffsetX', v),
+            )}
+            {renderSlider(
+              '上下',
+              form.homeMokHeroOffsetY ?? 0,
+              -80,
+              80,
+              1,
+              'px',
+              (v) => update('homeMokHeroOffsetY', v),
+            )}
+            {renderSlider(
+              '上边距',
+              form.homeMokHeroMarginTop ?? 0,
+              -20,
+              80,
+              1,
+              'px',
+              (v) => update('homeMokHeroMarginTop', v),
+            )}
+            <button
+              type="button"
+              style={{ ...subtleButtonStyle, alignSelf: 'flex-start', padding: '4px 10px', fontSize: '11px', marginTop: '2px' }}
+              onClick={() => {
+                update('homeMokHeroScale', 1)
+                update('homeMokHeroOffsetX', 0)
+                update('homeMokHeroOffsetY', 0)
+                update('homeMokHeroMarginTop', 0)
+              }}
+            >
+              重置为默认
+            </button>
+          </div>
         )}
       </div>
     )
@@ -700,6 +867,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         zIndex: 1000,
       }}
       onClick={handleCancel}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'none'
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
     >
       <div
         className="settings-modal-content"
@@ -774,9 +950,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             <div style={sectionTitleStyle}>首页视觉</div>
             <div style={homeVisualGridStyle}>
               {renderHomeVisualSlot(
+                '首页主图（MO.K）',
+                '留空使用默认 MO.K 黑猫图',
+                homeMokHeroInputRef,
+                'settings-home-mok-hero-input',
+                'homeMokHeroImagePath',
+                { isMokHero: true },
+              )}
+              {renderHomeVisualSlot(
                 '首页背景',
-                '留空使用默认背景',
+                '留空使用默认深色背景',
                 homeHeroInputRef,
+                'settings-home-hero-input',
+                'homeHeroImagePath',
               )}
             </div>
           </section>

@@ -44,10 +44,17 @@ export interface FlowSummary {
   createdAt: string
   updatedAt: string
   nodeCount: number
+  /** 封面图 Asset ID（从节点中提取的第一张图片），无则为 null */
+  coverAssetId: string | null
 }
 
 /** 创建工作流时的请求体 */
 export interface CreateFlowRequest {
+  name?: string
+}
+
+/** 复制工作流时的请求体 */
+export interface DuplicateFlowRequest {
   name?: string
 }
 

@@ -248,6 +248,16 @@ export interface Settings {
   outputDir: string;
   /** 首页封面背景图片 URL；留空时使用前端内置背景 */
   homeHeroImagePath?: string;
+  /** 首页主图（MOK猫）URL；留空时使用前端内置默认图 */
+  homeMokHeroImagePath?: string;
+  /** 首页主图缩放比例 (0.4 - 1.6)，默认 1 */
+  homeMokHeroScale?: number;
+  /** 首页主图垂直偏移（像素，正数向下），默认 0 */
+  homeMokHeroOffsetY?: number;
+  /** 首页主图水平偏移（像素，正数向右），默认 0 */
+  homeMokHeroOffsetX?: number;
+  /** 首页主图上边距（像素），默认 4 */
+  homeMokHeroMarginTop?: number;
 
   /** 旧版默认图片模型；保留字段兼容，前端不再用它决定新建节点默认值 */
   defaultModel: string;
@@ -291,6 +301,11 @@ export const DEFAULT_SETTINGS: Settings = {
 
   outputDir: "./workspace/outputs",
   homeHeroImagePath: "",
+  homeMokHeroImagePath: "",
+  homeMokHeroScale: 1,
+  homeMokHeroOffsetX: 0,
+  homeMokHeroOffsetY: 0,
+  homeMokHeroMarginTop: 0,
 
   defaultModel: "",
   imageModels: ["jimeng"],

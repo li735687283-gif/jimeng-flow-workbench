@@ -38,43 +38,22 @@ export async function exportAssetFile(id: string): Promise<{ path: string }> {
   return (await res.json()) as { path: string }
 }
 
-/** 将 File 读取为纯 base64 字符串（不含 data: 前缀） */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = reader.result
-      if (typeof result !== 'string') {
-        reject(new Error('文件读取失败'))
-        return
-      }
-      // result 形如 "data:<mime>;base64,<base64>"
-      const idx = result.indexOf(',')
-      resolve(idx >= 0 ? result.slice(idx + 1) : result)
-    }
-    reader.onerror = () => reject(reader.error ?? new Error('文件读取失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
 /**
  * 上传本地文件为资产。
- * - 内部将 File 转 base64，POST JSON 到后端
+ * - 使用 multipart/form-data 流式上传，适合大文件（视频等），避免 base64 内存膨胀
  * - 返回后端写入的 Asset
  */
 export async function uploadAsset(file: File): Promise<Asset> {
-  const dataBase64 = await fileToBase64(file)
-  const res = await fetch('/api/assets/upload', {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+
+  const res = await fetch('/api/assets/upload/file', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      dataBase64,
-    }),
+    body: formData,
   })
   if (!res.ok) {
-    throw new Error(`上传资产失败：${res.status} ${res.statusText}`)
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `上传资产失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Asset
 }

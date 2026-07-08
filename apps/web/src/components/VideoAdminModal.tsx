@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Film, Pencil, Save, Search, Upload, X } from 'lucide-react'
-import type { ManagedVideo, VideoListResponse } from '@jimeng-flow/shared/video'
+import { Film, Image as ImageIcon, Pencil, Plus, Save, Star, Upload, X, Trash2, Check } from 'lucide-react'
+import type { ManagedWork, WorkListResponse, WorkMediaType } from '@jimeng-flow/shared/video'
 import { uploadAsset } from '../api/assets'
 import {
-  createVideo,
-  listVideos,
-  updateVideo,
+  createWork,
+  listWorks,
+  updateWork,
 } from '../api/videos'
 
-type BooleanFilter = 'all' | 'true' | 'false'
-
-interface VideoFormState {
+interface WorkFormState {
+  mediaType: WorkMediaType
   title: string
   description: string
   sortOrder: string
@@ -22,11 +21,12 @@ interface VideoFormState {
 export interface VideoAdminModalProps {
   open: boolean
   onClose: () => void
-  initialVideos?: ManagedVideo[]
-  onVideosChanged?: () => void
+  onWorksChanged?: () => void
+  onPlayVideo?: (src: string, title?: string) => void
 }
 
-const EMPTY_FORM: VideoFormState = {
+const EMPTY_FORM: WorkFormState = {
+  mediaType: 'video',
   title: '',
   description: '',
   sortOrder: '0',
@@ -35,47 +35,36 @@ const EMPTY_FORM: VideoFormState = {
   isPublished: true,
 }
 
-function toBooleanFilter(value: BooleanFilter): boolean | undefined {
-  if (value === 'true') return true
-  if (value === 'false') return false
-  return undefined
-}
+type TabFilter = 'all' | 'video' | 'image' | 'featured'
 
 function sortOrderValue(value: string): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function buildInitialResponse(videos: ManagedVideo[] | undefined): VideoListResponse {
-  const items = videos ?? []
-  return {
-    items,
-    total: items.length,
-    page: 1,
-    pageSize: 8,
-  }
-}
-
 export function VideoAdminModal({
   open,
   onClose,
-  initialVideos,
-  onVideosChanged,
+  onWorksChanged,
+  onPlayVideo,
 }: VideoAdminModalProps) {
-  const [response, setResponse] = useState<VideoListResponse>(() =>
-    buildInitialResponse(initialVideos),
-  )
-  const [query, setQuery] = useState('')
-  const [featuredFilter, setFeaturedFilter] = useState<BooleanFilter>('all')
-  const [pinnedFilter, setPinnedFilter] = useState<BooleanFilter>('all')
+  const [response, setResponse] = useState<WorkListResponse>({
+    items: [],
+    total: 0,
+    page: 1,
+    pageSize: 8,
+  })
   const [page, setPage] = useState(1)
+  const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<VideoFormState>(EMPTY_FORM)
-  const [videoFile, setVideoFile] = useState<File | null>(null)
+  const [editingWork, setEditingWork] = useState<ManagedWork | null>(null)
+  const [form, setForm] = useState<WorkFormState>(EMPTY_FORM)
+  const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null)
   const pageSize = 8
 
   const pageCount = useMemo(
@@ -84,16 +73,15 @@ export function VideoAdminModal({
   )
 
   const refresh = useCallback(
-    async (nextPage = 1) => {
+    async (nextPage = 1, tab: TabFilter = activeTab) => {
       setLoading(true)
       setError(null)
       try {
-        const next = await listVideos({
+        const next = await listWorks({
           page: nextPage,
           pageSize,
-          q: query,
-          isFeatured: toBooleanFilter(featuredFilter),
-          isPinned: toBooleanFilter(pinnedFilter),
+          mediaType: tab === 'all' || tab === 'featured' ? undefined : tab,
+          isFeatured: tab === 'featured' ? true : undefined,
         })
         setResponse(next)
         setPage(next.page)
@@ -103,51 +91,138 @@ export function VideoAdminModal({
         setLoading(false)
       }
     },
-    [featuredFilter, pinnedFilter, query],
+    [activeTab],
   )
 
   useEffect(() => {
     if (!open) return
-    if (initialVideos) {
-      setResponse(buildInitialResponse(initialVideos))
-      return
+    void refresh(1, activeTab)
+  }, [activeTab, open, refresh])
+
+  useEffect(() => {
+    return () => {
+      if (mediaPreviewUrl && mediaPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(mediaPreviewUrl)
+      }
+      if (coverPreviewUrl && coverPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(coverPreviewUrl)
+      }
     }
-    void refresh(1)
-  }, [initialVideos, open, refresh])
+  }, [mediaPreviewUrl, coverPreviewUrl])
 
   const resetForm = () => {
-    setEditingId(null)
+    if (mediaPreviewUrl && mediaPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaPreviewUrl)
+    }
+    if (coverPreviewUrl && coverPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(coverPreviewUrl)
+    }
+    setEditingWork(null)
     setForm(EMPTY_FORM)
-    setVideoFile(null)
+    setMediaFile(null)
     setCoverFile(null)
+    setMediaPreviewUrl(null)
+    setCoverPreviewUrl(null)
   }
 
-  const handleEdit = (video: ManagedVideo) => {
-    setEditingId(video.id)
+  const handleAddNew = () => {
+    resetForm()
+    setForm({ ...EMPTY_FORM })
+  }
+
+  const handleEdit = (work: ManagedWork) => {
+    if (mediaPreviewUrl && mediaPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaPreviewUrl)
+    }
+    if (coverPreviewUrl && coverPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(coverPreviewUrl)
+    }
+    setEditingWork(work)
     setForm({
-      title: video.title,
-      description: video.description,
-      sortOrder: String(video.sortOrder),
-      isFeatured: video.isFeatured,
-      isPinned: video.isPinned,
-      isPublished: video.isPublished,
+      mediaType: work.mediaType,
+      title: work.title,
+      description: work.description,
+      sortOrder: String(work.sortOrder),
+      isFeatured: work.isFeatured,
+      isPinned: work.isPinned,
+      isPublished: work.isPublished,
     })
-    setVideoFile(null)
+    setMediaFile(null)
     setCoverFile(null)
+    setMediaPreviewUrl(work.mediaUrl)
+    setCoverPreviewUrl(work.coverUrl === work.mediaUrl ? null : work.coverUrl)
+  }
+
+  const handleMediaTypeChange = (type: WorkMediaType) => {
+    if (editingWork) return
+    setForm((prev) => ({ ...prev, mediaType: type }))
+    if (type === 'image') {
+      if (mediaPreviewUrl && mediaPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(mediaPreviewUrl)
+      }
+      if (coverPreviewUrl && coverPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(coverPreviewUrl)
+      }
+      setMediaFile(null)
+      setCoverFile(null)
+      setMediaPreviewUrl(null)
+      setCoverPreviewUrl(null)
+    }
+  }
+
+  const handleMediaFileChange = (file: File | null) => {
+    if (mediaPreviewUrl && mediaPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaPreviewUrl)
+    }
+    setMediaFile(file)
+    if (file) {
+      const url = URL.createObjectURL(file)
+      setMediaPreviewUrl(url)
+      if (form.mediaType === 'image') {
+        setCoverPreviewUrl(url)
+        setCoverFile(null)
+      }
+    } else if (editingWork) {
+      setMediaPreviewUrl(editingWork.mediaUrl)
+      if (editingWork.mediaType === 'image') {
+        setCoverPreviewUrl(null)
+      } else {
+        setCoverPreviewUrl(editingWork.coverUrl)
+      }
+    } else {
+      setMediaPreviewUrl(null)
+      if (form.mediaType === 'image') {
+        setCoverPreviewUrl(null)
+      }
+    }
+  }
+
+  const handleCoverFileChange = (file: File | null) => {
+    if (coverPreviewUrl && coverPreviewUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(coverPreviewUrl)
+    }
+    setCoverFile(file)
+    if (file) {
+      setCoverPreviewUrl(URL.createObjectURL(file))
+    } else if (editingWork) {
+      setCoverPreviewUrl(editingWork.coverUrl !== editingWork.mediaUrl ? editingWork.coverUrl : null)
+    } else {
+      setCoverPreviewUrl(null)
+    }
   }
 
   const handleSubmit = async () => {
     setSaving(true)
     setError(null)
     try {
-      const uploadedVideo = videoFile ? await uploadAsset(videoFile) : null
+      const uploadedMedia = mediaFile ? await uploadAsset(mediaFile) : null
       const uploadedCover = coverFile ? await uploadAsset(coverFile) : null
 
-      if (editingId) {
-        await updateVideo(editingId, {
+      if (editingWork) {
+        await updateWork(editingWork.id, {
           title: form.title,
           description: form.description,
-          videoAssetId: uploadedVideo?.id,
+          mediaAssetId: uploadedMedia?.id,
           coverAssetId: uploadedCover?.id,
           isFeatured: form.isFeatured,
           isPinned: form.isPinned,
@@ -155,14 +230,19 @@ export function VideoAdminModal({
           sortOrder: sortOrderValue(form.sortOrder),
         })
       } else {
-        if (!uploadedVideo || !uploadedCover) {
-          throw new Error('新建视频需要同时上传视频文件和封面图')
+        if (!uploadedMedia) {
+          throw new Error(form.mediaType === 'video' ? '请上传视频文件' : '请上传图片文件')
         }
-        await createVideo({
+        const isVideo = form.mediaType === 'video'
+        if (isVideo && !uploadedCover) {
+          throw new Error('视频作品需要上传封面图')
+        }
+        await createWork({
+          mediaType: form.mediaType,
           title: form.title,
           description: form.description,
-          videoAssetId: uploadedVideo.id,
-          coverAssetId: uploadedCover.id,
+          mediaAssetId: uploadedMedia.id,
+          coverAssetId: isVideo ? uploadedCover!.id : uploadedMedia.id,
           isFeatured: form.isFeatured,
           isPinned: form.isPinned,
           isPublished: form.isPublished,
@@ -171,8 +251,8 @@ export function VideoAdminModal({
       }
 
       resetForm()
-      onVideosChanged?.()
-      if (!initialVideos) await refresh(1)
+      onWorksChanged?.()
+      await refresh(page, activeTab)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -180,7 +260,33 @@ export function VideoAdminModal({
     }
   }
 
+  const handleTabChange = (tab: TabFilter) => {
+    setActiveTab(tab)
+    setPage(1)
+  }
+
+  const [togglingFeatured, setTogglingFeatured] = useState<string | null>(null)
+
+  const handleToggleFeatured = async (work: ManagedWork) => {
+    setTogglingFeatured(work.id)
+    setError(null)
+    try {
+      await updateWork(work.id, {
+        isFeatured: !work.isFeatured,
+      })
+      onWorksChanged?.()
+      await refresh(page, activeTab)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTogglingFeatured(null)
+    }
+  }
+
   if (!open) return null
+
+  const isImageType = form.mediaType === 'image'
+  const requireCover = isImageType ? false : true
 
   return (
     <div className="modal-overlay video-admin-overlay" onClick={onClose}>
@@ -190,10 +296,10 @@ export function VideoAdminModal({
       >
         <header className="video-admin-header">
           <div>
-            <span className="video-admin-kicker">Featured Video</span>
+            <span className="video-admin-kicker">Works</span>
             <h3>
               <Film size={17} />
-              视频管理
+              作品管理
             </h3>
           </div>
           <button type="button" className="video-admin-icon-btn" onClick={onClose} aria-label="关闭">
@@ -204,13 +310,45 @@ export function VideoAdminModal({
         {error && <p className="video-admin-error">{error}</p>}
 
         <div className="video-admin-layout">
-          <section className="video-admin-form" aria-label="视频编辑">
+          <section className="video-admin-form" aria-label="作品编辑">
+            <div className="video-admin-form-head">
+              {editingWork ? (
+                <div className="video-admin-editing-badge">
+                  <Pencil size={12} />
+                  <span>正在编辑：{editingWork.title}</span>
+                </div>
+              ) : (
+                <div className="video-admin-type-toggle">
+                  <button
+                    type="button"
+                    className={form.mediaType === 'video' ? 'active' : ''}
+                    onClick={() => handleMediaTypeChange('video')}
+                  >
+                    <Film size={13} />
+                    视频作品
+                  </button>
+                  <button
+                    type="button"
+                    className={form.mediaType === 'image' ? 'active' : ''}
+                    onClick={() => handleMediaTypeChange('image')}
+                  >
+                    <ImageIcon size={13} />
+                    图片作品
+                  </button>
+                </div>
+              )}
+              <button type="button" className="video-admin-add-btn" onClick={handleAddNew}>
+                <Plus size={14} />
+                新增作品
+              </button>
+            </div>
+
             <label>
               <span>标题</span>
               <input
                 value={form.title}
                 onChange={(event) => setForm({ ...form, title: event.target.value })}
-                placeholder="视频标题"
+                placeholder="作品标题"
               />
             </label>
             <label>
@@ -235,30 +373,101 @@ export function VideoAdminModal({
             </label>
 
             <div className="video-admin-upload-row">
-              <label className="video-admin-file-slot">
-                <Upload size={15} />
-                <span>上传视频</span>
-                <small>{videoFile?.name ?? 'MP4 / WebM / MOV'}</small>
+              <label className={`video-admin-file-slot ${mediaPreviewUrl ? 'has-preview' : ''}`}>
+                {mediaPreviewUrl ? (
+                  <div className="video-admin-preview-wrap">
+                    {isImageType ? (
+                      <img src={mediaPreviewUrl} alt="作品预览" />
+                    ) : (
+                      <video src={mediaPreviewUrl} muted playsInline preload="metadata" />
+                    )}
+                    <div className="video-admin-preview-info">
+                      <span className="video-admin-preview-label">
+                        {isImageType ? '图片' : '视频'}
+                      </span>
+                      <span className="video-admin-preview-name">
+                        {mediaFile?.name ?? (editingWork ? '已有文件' : '')}
+                      </span>
+                    </div>
+                    {!editingWork && (
+                      <button
+                        type="button"
+                        className="video-admin-preview-clear"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          handleMediaFileChange(null)
+                        }}
+                        aria-label="清除文件"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <Upload size={15} />
+                    <span>上传{isImageType ? '图片' : '视频'}</span>
+                    <small>{isImageType ? 'PNG / JPG / WebP' : 'MP4 / WebM / MOV'}</small>
+                  </>
+                )}
                 <input
                   type="file"
-                  accept="video/*"
+                  accept={isImageType ? 'image/*' : 'video/*'}
                   onChange={(event) =>
-                    setVideoFile(event.currentTarget.files?.[0] ?? null)
+                    handleMediaFileChange(event.currentTarget.files?.[0] ?? null)
                   }
                 />
               </label>
-              <label className="video-admin-file-slot">
-                <Upload size={15} />
-                <span>上传封面</span>
-                <small>{coverFile?.name ?? 'PNG / JPG / WebP'}</small>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(event) =>
-                    setCoverFile(event.currentTarget.files?.[0] ?? null)
-                  }
-                />
-              </label>
+              {!isImageType && (
+                <label className={`video-admin-file-slot ${coverPreviewUrl ? 'has-preview' : ''}`}>
+                  {coverPreviewUrl ? (
+                    <div className="video-admin-preview-wrap">
+                      <img src={coverPreviewUrl} alt="封面预览" />
+                      <div className="video-admin-preview-info">
+                        <span className="video-admin-preview-label">封面</span>
+                        <span className="video-admin-preview-name">
+                          {coverFile?.name ?? (editingWork ? '已有封面' : '')}
+                        </span>
+                      </div>
+                      {!editingWork && (
+                        <button
+                          type="button"
+                          className="video-admin-preview-clear"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            handleCoverFileChange(null)
+                          }}
+                          aria-label="清除封面"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <Upload size={15} />
+                      <span>上传封面</span>
+                      <small>PNG / JPG / WebP</small>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      handleCoverFileChange(event.currentTarget.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+              )}
+              {isImageType && (
+                <div className="video-admin-file-slot video-admin-auto-cover">
+                  <ImageIcon size={15} />
+                  <span>自动封面</span>
+                  <small>图片作品使用自身作为封面</small>
+                </div>
+              )}
             </div>
 
             <div className="video-admin-toggle-row">
@@ -296,7 +505,7 @@ export function VideoAdminModal({
 
             <div className="video-admin-actions">
               <button type="button" className="modal-btn" onClick={resetForm}>
-                新建
+                {editingWork ? '取消编辑' : '重置'}
               </button>
               <button
                 type="button"
@@ -305,52 +514,50 @@ export function VideoAdminModal({
                 disabled={saving}
               >
                 <Save size={14} />
-                {editingId ? '保存修改' : '保存视频'}
+                {editingWork ? '保存修改' : '保存作品'}
               </button>
             </div>
           </section>
 
-          <section className="video-admin-list" aria-label="视频列表">
-            <div className="video-admin-toolbar">
-              <label className="video-admin-search">
-                <Search size={14} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索视频"
-                />
-              </label>
-              <select
-                value={featuredFilter}
-                onChange={(event) => {
-                  setFeaturedFilter(event.target.value as BooleanFilter)
-                  setPage(1)
-                }}
+          <section className="video-admin-list" aria-label="作品列表">
+            <div className="video-admin-tabs">
+              <button
+                type="button"
+                className={activeTab === 'all' ? 'active' : ''}
+                onClick={() => handleTabChange('all')}
               >
-                <option value="all">全部精选</option>
-                <option value="true">仅精选</option>
-                <option value="false">非精选</option>
-              </select>
-              <select
-                value={pinnedFilter}
-                onChange={(event) => {
-                  setPinnedFilter(event.target.value as BooleanFilter)
-                  setPage(1)
-                }}
+                全部
+              </button>
+              <button
+                type="button"
+                className={activeTab === 'featured' ? 'active featured-tab' : ''}
+                onClick={() => handleTabChange('featured')}
               >
-                <option value="all">全部置顶</option>
-                <option value="true">仅置顶</option>
-                <option value="false">非置顶</option>
-              </select>
-              <button type="button" className="modal-btn" onClick={() => void refresh(1)}>
-                查询
+                <Star size={12} fill={activeTab === 'featured' ? 'currentColor' : 'none'} />
+                精选作品
+              </button>
+              <button
+                type="button"
+                className={activeTab === 'video' ? 'active' : ''}
+                onClick={() => handleTabChange('video')}
+              >
+                <Film size={12} />
+                视频
+              </button>
+              <button
+                type="button"
+                className={activeTab === 'image' ? 'active' : ''}
+                onClick={() => handleTabChange('image')}
+              >
+                <ImageIcon size={12} />
+                图片
               </button>
             </div>
 
             {loading && response.items.length === 0 ? (
               <p className="modal-placeholder">加载中...</p>
             ) : response.items.length === 0 ? (
-              <p className="modal-placeholder">暂无视频</p>
+              <p className="modal-placeholder">暂无作品</p>
             ) : (
               <div className="video-admin-table-wrap">
                 <table className="video-admin-table">
@@ -358,34 +565,78 @@ export function VideoAdminModal({
                     <tr>
                       <th>封面</th>
                       <th>标题</th>
+                      <th>类型</th>
                       <th>状态</th>
                       <th>权重</th>
+                      <th>精选</th>
                       <th>操作</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {response.items.map((video) => (
-                      <tr key={video.id}>
+                    {response.items.map((work) => (
+                      <tr
+                        key={work.id}
+                        className={editingWork?.id === work.id ? 'video-admin-row-editing' : ''}
+                      >
                         <td>
-                          <div className="video-admin-thumb">
-                            <img src={video.coverUrl} alt="" />
-                            <video src={video.videoUrl} muted playsInline preload="metadata" />
+                          <div
+                            className={`video-admin-thumb${work.mediaType === 'video' && onPlayVideo ? ' clickable' : ''}`}
+                            onClick={
+                              work.mediaType === 'video' && onPlayVideo
+                                ? () => onPlayVideo(work.mediaUrl, work.title)
+                                : undefined
+                            }
+                          >
+                            <img src={work.coverUrl} alt="" />
+                            {work.mediaType === 'video' && (
+                              <video src={work.mediaUrl} muted playsInline preload="metadata" />
+                            )}
                           </div>
                         </td>
                         <td>
-                          <strong>{video.title}</strong>
-                          <span>{video.description || '无简介'}</span>
+                          <strong>{work.title}</strong>
+                          <span>{work.description || '无简介'}</span>
+                        </td>
+                        <td>
+                          <span className="video-admin-type-badge">
+                            {work.mediaType === 'video' ? (
+                              <><Film size={10} /> 视频</>
+                            ) : (
+                              <><ImageIcon size={10} /> 图片</>
+                            )}
+                          </span>
                         </td>
                         <td>
                           <div className="video-admin-tags">
-                            {video.isFeatured && <span>精选</span>}
-                            {video.isPinned && <span>置顶</span>}
-                            <span>{video.isPublished ? '上架' : '下架'}</span>
+                            {work.isFeatured && <span className="tag-featured">精选</span>}
+                            {work.isPinned && <span>置顶</span>}
+                            <span>{work.isPublished ? '上架' : '下架'}</span>
                           </div>
                         </td>
-                        <td>{video.sortOrder}</td>
+                        <td>{work.sortOrder}</td>
                         <td>
-                          <button type="button" onClick={() => handleEdit(video)}>
+                          <button
+                            type="button"
+                            className={`video-admin-feature-btn${work.isFeatured ? ' is-featured' : ''}`}
+                            onClick={() => void handleToggleFeatured(work)}
+                            disabled={togglingFeatured === work.id}
+                            title={work.isFeatured ? '取消精选' : '设为精选'}
+                          >
+                            {togglingFeatured === work.id ? (
+                              <span className="video-admin-btn-loading">•</span>
+                            ) : work.isFeatured ? (
+                              <Check size={14} />
+                            ) : (
+                              <Star size={14} />
+                            )}
+                          </button>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className={editingWork?.id === work.id ? 'video-admin-btn-active' : ''}
+                            onClick={() => handleEdit(work)}
+                          >
                             <Pencil size={13} />
                             编辑
                           </button>
@@ -409,7 +660,7 @@ export function VideoAdminModal({
                   onClick={() => {
                     const next = Math.max(1, page - 1)
                     setPage(next)
-                    void refresh(next)
+                    void refresh(next, activeTab)
                   }}
                 >
                   上一页
@@ -421,7 +672,7 @@ export function VideoAdminModal({
                   onClick={() => {
                     const next = Math.min(pageCount, page + 1)
                     setPage(next)
-                    void refresh(next)
+                    void refresh(next, activeTab)
                   }}
                 >
                   下一页

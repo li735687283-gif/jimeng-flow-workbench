@@ -1,16 +1,19 @@
-import type { MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
+  ChevronRight,
   Film,
   FolderClock,
-  Home,
   Images,
   Infinity as InfinityIcon,
+  MoreHorizontal,
+  Pencil,
   Plus,
   Settings,
+  Trash2,
 } from 'lucide-react'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowSummary } from '@jimeng-flow/shared/flow'
-import type { ManagedVideo } from '@jimeng-flow/shared/video'
+import type { ManagedWork } from '@jimeng-flow/shared/video'
 import { getAssetFileUrl } from '../api/assets'
 import { HomeParticleField } from './HomeParticleField'
 
@@ -18,8 +21,12 @@ export interface HomePageProps {
   recentFlows: FlowSummary[]
   showcaseAssets: Asset[]
   workAssets: Asset[]
-  featuredVideos?: ManagedVideo[]
+  featuredWorks?: ManagedWork[]
+  galleryWorks?: ManagedWork[]
   heroImageUrl: string
+  mokHeroImageUrl: string
+  mokHeroContainerStyle?: CSSProperties
+  mokHeroImageStyle?: CSSProperties
   logoImageUrl?: string
   loadingFlows?: boolean
   loadingAssets?: boolean
@@ -30,41 +37,246 @@ export interface HomePageProps {
   onOpenVideoAdmin?: () => void
   onOpenSettings: () => void
   onReturnHome: () => void
+  onPlayVideo?: (src: string, title?: string) => void
+  onRenameFlow?: (id: string, name: string) => void
+  onDeleteFlow?: (id: string) => void
 }
 
 function assetLabel(asset: Asset): string {
   return asset.prompt?.trim() || (asset.type === 'video' ? '视频作品' : '图片作品')
 }
 
-function FeaturedVideoCard({ video }: { video: ManagedVideo }) {
+function FeaturedWorkCard({ work, onPlay }: { work: ManagedWork; onPlay?: () => void }) {
+  const isVideo = work.mediaType === 'video'
+
   const handleMouseEnter = (event: MouseEvent<HTMLElement>) => {
+    if (!isVideo) return
     const media = event.currentTarget.querySelector('video')
     void media?.play().catch(() => undefined)
   }
 
   const handleMouseLeave = (event: MouseEvent<HTMLElement>) => {
+    if (!isVideo) return
     const media = event.currentTarget.querySelector('video')
     if (!media) return
     media.pause()
     media.currentTime = 0
   }
 
+  const handleClick = () => {
+    if (isVideo && onPlay) {
+      onPlay()
+    }
+  }
+
   return (
     <article
-      className="home-featured-video-card"
+      className={`home-featured-video-card${isVideo ? '' : ' is-image'}${isVideo && onPlay ? ' clickable' : ''}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onClick={handleClick}
     >
-      <img className="home-featured-video-cover" src={video.coverUrl} alt="" />
-      <video
-        className="home-featured-video-media"
-        src={video.videoUrl}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-      />
+      {isVideo ? (
+        <>
+          <img className="home-featured-video-cover" src={work.coverUrl} alt="" />
+          <video
+            className="home-featured-video-media"
+            src={work.mediaUrl}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+          />
+        </>
+      ) : (
+        <img
+          className="home-featured-video-cover home-featured-video-static"
+          src={work.coverUrl}
+          alt={work.title}
+        />
+      )}
     </article>
+  )
+}
+
+function GalleryWorkCard({
+  work,
+  onPlay,
+}: {
+  work: ManagedWork
+  onPlay?: () => void
+}) {
+  const isVideo = work.mediaType === 'video'
+  return (
+    <article
+      className={`home-work-card${isVideo && onPlay ? ' clickable' : ''}`}
+      onClick={isVideo && onPlay ? onPlay : undefined}
+    >
+      <div className="home-work-media">
+        {isVideo ? (
+          <video src={work.mediaUrl} muted playsInline preload="metadata" />
+        ) : (
+          <img src={work.mediaUrl} alt={work.title} />
+        )}
+        {isVideo && (
+          <span className="home-work-badge">
+            <Film size={10} />
+          </span>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function formatFlowTime(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const pad = (n: number) => n.toString().padStart(2, '0')
+    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    const yesterday = new Date(now)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const isYesterday =
+      d.getFullYear() === yesterday.getFullYear() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getDate() === yesterday.getDate()
+    if (sameDay) return `今天 ${hm}`
+    if (isYesterday) return `昨天 ${hm}`
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+  } catch {
+    return ''
+  }
+}
+
+interface FlowCardMenuProps {
+  flowId: string
+  flowName: string
+  onRename: (id: string, name: string) => void
+  onDelete: (id: string) => void
+}
+
+function FlowCardMenu({ flowId, flowName, onRename, onDelete }: FlowCardMenuProps) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', handleClick as unknown as EventListener)
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('mousedown', handleClick as unknown as EventListener)
+      window.removeEventListener('keydown', handleKey)
+    }
+  }, [open])
+
+  const handleToggle = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setOpen((v) => !v)
+  }
+
+  const handleRename = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setOpen(false)
+    const newName = window.prompt('重命名工作流', flowName)
+    if (newName && newName.trim() && newName.trim() !== flowName) {
+      onRename(flowId, newName.trim())
+    }
+  }
+
+  const handleDelete = (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setOpen(false)
+    if (window.confirm(`确定要删除"${flowName}"吗？此操作不可撤销。`)) {
+      onDelete(flowId)
+    }
+  }
+
+  return (
+    <div className="home-project-menu" ref={menuRef}>
+      <button
+        type="button"
+        className="home-project-menu-btn"
+        onClick={handleToggle}
+        aria-label="更多操作"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+      {open && (
+        <div className="home-project-menu-dropdown" onClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={handleRename}>
+            <Pencil size={15} />
+            <span>重命名</span>
+          </button>
+          <button type="button" className="danger" onClick={handleDelete}>
+            <Trash2 size={15} />
+            <span>删除</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface FlowProjectCardProps {
+  flow: FlowSummary
+  onOpen: (id: string) => void
+  onRename: (id: string, name: string) => void
+  onDelete: (id: string) => void
+}
+
+function FlowProjectCard({ flow, onOpen, onRename, onDelete }: FlowProjectCardProps) {
+  const handleClick = () => onOpen(flow.id)
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`home-project-card${!flow.coverAssetId ? ' no-cover' : ''}`}
+      onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          handleClick()
+        }
+      }}
+    >
+      {flow.coverAssetId ? (
+        <img
+          className="home-project-cover"
+          src={getAssetFileUrl(flow.coverAssetId)}
+          alt=""
+          aria-hidden="true"
+        />
+      ) : (
+        <span className="home-project-cover-empty" aria-hidden="true" />
+      )}
+      <span className="home-project-card-scrim" aria-hidden="true" />
+      <FlowCardMenu
+        flowId={flow.id}
+        flowName={flow.name}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
+      <span className="home-project-title">
+        <strong>{flow.name}</strong>
+        <small>{formatFlowTime(flow.updatedAt)}</small>
+      </span>
+    </div>
   )
 }
 
@@ -72,8 +284,12 @@ export function HomePage({
   recentFlows,
   showcaseAssets,
   workAssets,
-  featuredVideos = [],
+  featuredWorks = [],
+  galleryWorks = [],
   heroImageUrl,
+  mokHeroImageUrl,
+  mokHeroContainerStyle,
+  mokHeroImageStyle,
   logoImageUrl,
   loadingFlows = false,
   loadingAssets = false,
@@ -84,27 +300,28 @@ export function HomePage({
   onOpenVideoAdmin,
   onOpenSettings,
   onReturnHome,
+  onPlayVideo,
+  onRenameFlow,
+  onDeleteFlow,
 }: HomePageProps) {
   const visibleFlows = recentFlows.slice(0, 3)
   const featuredAssets = showcaseAssets.slice(0, 3)
-  const visibleFeaturedVideos = featuredVideos.slice(0, 8)
-  const visibleWorkAssets = workAssets.slice(0, 8)
-  const projectCoverAssets = workAssets.filter((asset) => asset.type === 'image')
-  const getProjectCover = (index: number) =>
-    projectCoverAssets.length > 0
-      ? projectCoverAssets[index % projectCoverAssets.length]
-      : undefined
-  const renderProjectCover = (asset: Asset | undefined) =>
-    asset ? (
-      <img
-        className="home-project-cover"
-        src={getAssetFileUrl(asset.id)}
-        alt=""
-        aria-hidden="true"
-      />
-    ) : (
-      <span className="home-project-cover-placeholder" aria-hidden="true" />
-    )
+  const visibleFeaturedWorks = featuredWorks.slice(0, 3)
+  const visibleGalleryWorks = galleryWorks.length > 0 ? galleryWorks.slice(0, 10) : workAssets.slice(0, 10)
+  const useManagedGallery = galleryWorks.length > 0
+
+  const handleRename = useCallback(
+    (id: string, name: string) => {
+      onRenameFlow?.(id, name)
+    },
+    [onRenameFlow],
+  )
+  const handleDelete = useCallback(
+    (id: string) => {
+      onDeleteFlow?.(id)
+    },
+    [onDeleteFlow],
+  )
 
   return (
     <div className="home-page">
@@ -121,10 +338,6 @@ export function HomePage({
               )}
             </button>
             <div className="home-menu-popover">
-              <button type="button" onClick={onReturnHome}>
-                <Home size={16} />
-                <span>首页</span>
-              </button>
               <button type="button" onClick={onOpenAllFlows}>
                 <FolderClock size={16} />
                 <span>历史项目</span>
@@ -136,7 +349,7 @@ export function HomePage({
               {onOpenVideoAdmin && (
                 <button type="button" onClick={onOpenVideoAdmin}>
                   <Film size={16} />
-                  <span>视频管理</span>
+                  <span>作品管理</span>
                 </button>
               )}
               <button type="button" onClick={onOpenSettings}>
@@ -150,34 +363,23 @@ export function HomePage({
       </header>
 
       <main className="home-content">
-        <section className="home-creative-layer" aria-label="你的创意">
-          <div className="home-greeting-avatar">
-            {logoImageUrl ? (
-              <img src={logoImageUrl} alt="" aria-hidden="true" />
-            ) : (
-              <InfinityIcon size={34} />
-            )}
-          </div>
-          <h1>晚上好，L-zw~</h1>
-          <div
-            className="home-creative-card"
-            style={{ backgroundImage: `url("${heroImageUrl}")` }}
-          >
-            <span>说说你的创意</span>
-          </div>
+        <section className="home-mok-hero" aria-label="MO.K" style={mokHeroContainerStyle}>
+          <img
+            className="home-mok-cat"
+            src={mokHeroImageUrl}
+            alt="MO.K"
+            style={mokHeroImageStyle}
+          />
         </section>
 
         <section
           className="home-section home-project-layer"
           aria-labelledby="home-recent-title"
         >
-          <div className="home-section-head">
-            <div>
-              <span className="home-section-kicker">全部</span>
-              <h2 id="home-recent-title">历史工程</h2>
-            </div>
-            <button type="button" className="home-text-button" onClick={onOpenAllFlows}>
-              打开全部
+          <div className="home-section-head home-section-head-right">
+            <button type="button" className="home-link-button" onClick={onOpenAllFlows}>
+              全部项目
+              <ChevronRight size={16} />
             </button>
           </div>
 
@@ -187,8 +389,6 @@ export function HomePage({
               className="home-project-card home-project-card-new"
               onClick={onCreateFlow}
             >
-              {renderProjectCover(getProjectCover(0))}
-              <span className="home-project-card-scrim" aria-hidden="true" />
               <span className="home-new-icon">
                 <Plus size={23} />
               </span>
@@ -197,19 +397,14 @@ export function HomePage({
               </span>
             </button>
 
-            {visibleFlows.map((flow, index) => (
-              <button
+            {visibleFlows.map((flow) => (
+              <FlowProjectCard
                 key={flow.id}
-                type="button"
-                className="home-project-card"
-                onClick={() => onOpenFlow(flow.id)}
-              >
-                {renderProjectCover(getProjectCover(index + 1))}
-                <span className="home-project-card-scrim" aria-hidden="true" />
-                <span className="home-project-title">
-                  <strong>{flow.name}</strong>
-                </span>
-              </button>
+                flow={flow}
+                onOpen={onOpenFlow}
+                onRename={handleRename}
+                onDelete={handleDelete}
+              />
             ))}
           </div>
 
@@ -218,57 +413,102 @@ export function HomePage({
           )}
         </section>
 
-        {visibleFeaturedVideos.length > 0 ? (
-          <section className="home-section home-featured-layer" aria-label="视频展示">
+        {visibleFeaturedWorks.length > 0 ? (
+          <section className="home-section home-featured-layer" aria-label="精选作品">
             <div className="home-featured-video-track">
-              {visibleFeaturedVideos.map((video) => (
-                <FeaturedVideoCard key={video.id} video={video} />
+              {visibleFeaturedWorks.map((work) => (
+                <FeaturedWorkCard
+                  key={work.id}
+                  work={work}
+                  onPlay={
+                    work.mediaType === 'video' && onPlayVideo
+                      ? () => onPlayVideo(work.mediaUrl, work.title)
+                      : undefined
+                  }
+                />
               ))}
             </div>
           </section>
         ) : featuredAssets.length > 0 ? (
           <section className="home-section home-featured-layer" aria-label="展示内容">
             <div className="home-featured-track">
-              {featuredAssets.map((asset, index) => (
-                <article
-                  key={asset.id}
-                  className={`home-featured-card${index === 1 ? ' primary' : ''}`}
-                >
-                  {asset.type === 'video' ? (
-                    <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
-                  ) : (
-                    <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
-                  )}
-                  <div className="home-featured-caption">
-                    <span>{assetLabel(asset)}</span>
-                  </div>
-                </article>
-              ))}
+              {featuredAssets.map((asset, index) => {
+                const isVideoAsset = asset.type === 'video'
+                const canPlay = isVideoAsset && !!onPlayVideo
+                return (
+                  <article
+                    key={asset.id}
+                    className={`home-featured-card${index === 1 ? ' primary' : ''}${canPlay ? ' clickable' : ''}`}
+                    onClick={
+                      canPlay
+                        ? () => onPlayVideo!(getAssetFileUrl(asset.id), assetLabel(asset))
+                        : undefined
+                    }
+                  >
+                    {isVideoAsset ? (
+                      <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
+                    ) : (
+                      <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
+                    )}
+                    <div className="home-featured-caption">
+                      <span>{assetLabel(asset)}</span>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           </section>
         ) : null}
 
         <section className="home-section home-works-layer" aria-labelledby="home-works-title">
-          <div className="home-section-head">
-            <div>
-              <span className="home-section-kicker">Gallery</span>
-              <h2 id="home-works-title">作品</h2>
-            </div>
-          </div>
-
-          {visibleWorkAssets.length > 0 ? (
+          {useManagedGallery ? (
+            visibleGalleryWorks.length > 0 ? (
+              <div className="home-works-grid five-up">
+                {visibleGalleryWorks.map((work) => (
+                  <GalleryWorkCard
+                    key={work.id}
+                    work={work}
+                    onPlay={
+                      work.mediaType === 'video' && onPlayVideo
+                        ? () => onPlayVideo(work.mediaUrl, work.title)
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="home-empty-text">暂无作品，请在作品管理中添加</p>
+            )
+          ) : visibleGalleryWorks.length > 0 ? (
             <div className="home-works-grid five-up">
-              {visibleWorkAssets.map((asset) => (
-                <article key={asset.id} className="home-work-card">
-                  <div className="home-work-media">
-                    {asset.type === 'video' ? (
-                      <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
-                    ) : (
-                      <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
-                    )}
-                  </div>
-                </article>
-              ))}
+              {visibleGalleryWorks.map((asset) => {
+                const isVideoAsset = asset.type === 'video'
+                const canPlay = isVideoAsset && !!onPlayVideo
+                return (
+                  <article
+                    key={asset.id}
+                    className={`home-work-card${canPlay ? ' clickable' : ''}`}
+                    onClick={
+                      canPlay
+                        ? () => onPlayVideo!(getAssetFileUrl(asset.id), assetLabel(asset))
+                        : undefined
+                    }
+                  >
+                    <div className="home-work-media">
+                      {isVideoAsset ? (
+                        <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
+                      )}
+                      {isVideoAsset && (
+                        <span className="home-work-badge">
+                          <Film size={10} />
+                        </span>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           ) : (
             !loadingAssets && <p className="home-empty-text">暂无作品</p>

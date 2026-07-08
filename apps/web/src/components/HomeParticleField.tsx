@@ -10,12 +10,14 @@ interface Particle {
 
 const SPACING = 42
 const BASE_RADIUS = 1.7
+const SYMBOL_SIZE = 14
 const REPEL_RADIUS = 136
 const REPEL_FORCE = 28
 const LERP = 0.16
 const FALL_SPEED = 0.24
 const BASE_COLOR = [255, 255, 255, 0.13] as const
-const HOT_COLOR = [255, 106, 27, 0.82] as const
+const HOT_COLOR = [255, 215, 0, 0.82] as const
+const SYMBOL_THRESHOLD = 0.25
 
 function mixChannel(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t)
@@ -125,11 +127,27 @@ export function HomeParticleField() {
         particle.pushY += (targetY - particle.pushY) * LERP
 
         const breath = (Math.sin(now * 0.0013 + particle.phase) + 1) * 0.5
-        const radius = BASE_RADIUS + breath * 0.42 + hot * 1.2
-        ctx.fillStyle = particleColor(hot, 0.64 + breath * 0.36)
-        ctx.beginPath()
-        ctx.arc(particle.x + particle.pushX, particle.y + particle.pushY, radius, 0, Math.PI * 2)
-        ctx.fill()
+        const px = particle.x + particle.pushX
+        const py = particle.y + particle.pushY
+        const alpha = 0.64 + breath * 0.36
+
+        if (hot > SYMBOL_THRESHOLD) {
+          const symbolAlpha = Math.min(1, (hot - SYMBOL_THRESHOLD) / (1 - SYMBOL_THRESHOLD)) * alpha
+          ctx.save()
+          ctx.fillStyle = particleColor(hot, symbolAlpha)
+          ctx.font = `bold ${SYMBOL_SIZE}px "Microsoft YaHei", "SimHei", Arial, sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText('¥', px, py)
+          ctx.restore()
+        } else {
+          const radius = BASE_RADIUS + breath * 0.42 + hot * 1.2
+          const dotAlpha = alpha * (1 - Math.max(0, (hot - 0) / SYMBOL_THRESHOLD) * 0.3)
+          ctx.fillStyle = particleColor(hot, dotAlpha)
+          ctx.beginPath()
+          ctx.arc(px, py, radius, 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
 
       if (reducedMotion) return

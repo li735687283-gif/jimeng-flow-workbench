@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ArrowLeft } from 'lucide-react'
@@ -10,12 +10,13 @@ import { FlowsHistoryModal } from './components/FlowsHistoryModal'
 import { HomePage } from './components/HomePage'
 import { SettingsModal } from './components/SettingsModal'
 import { VideoAdminModal } from './components/VideoAdminModal'
+import { VideoPlayerModal } from './components/VideoPlayerModal'
 import { useCanvasStore } from './state/canvasStore'
 import { useFlowStore } from './state/flowStore'
 import { useSettingsStore } from './state/settingsStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import { listAssets } from './api/assets'
-import { listFeaturedVideos } from './api/videos'
+import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import {
   buildAssetInsertPatch,
   buildAssetRestorePatch,
@@ -23,9 +24,10 @@ import {
 } from './utils/assetLibrarySelection'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
-import type { ManagedVideo } from '@jimeng-flow/shared/video'
+import type { ManagedWork } from '@jimeng-flow/shared/video'
 import agentAvatarUrl from '../../../image/agent-avatar-black.png'
 import defaultHeroUrl from './assets/hero.png'
+import defaultMokHeroUrl from './assets/mok-hero.png'
 import './App.css'
 
 type AppView = 'home' | 'canvas'
@@ -35,6 +37,36 @@ function resolveHomeHeroImage(path: string | undefined): string {
   return trimmed || defaultHeroUrl
 }
 
+function resolveHomeMokHeroImage(path: string | undefined): string {
+  const trimmed = path?.trim()
+  return trimmed || defaultMokHeroUrl
+}
+
+function resolveHomeMokHeroStyles(settings: {
+  homeMokHeroScale?: number
+  homeMokHeroOffsetX?: number
+  homeMokHeroOffsetY?: number
+  homeMokHeroMarginTop?: number
+} | undefined): { container: CSSProperties; image: CSSProperties } {
+  const scale = settings?.homeMokHeroScale ?? 1
+  const offsetX = settings?.homeMokHeroOffsetX ?? 0
+  const offsetY = settings?.homeMokHeroOffsetY ?? 0
+  const marginTop = settings?.homeMokHeroMarginTop ?? 0
+  const baseMaxWidth = 460
+  return {
+    container: {
+      marginTop: `${marginTop}px`,
+      position: 'relative',
+      top: '84px',
+    },
+    image: {
+      maxWidth: `${baseMaxWidth * scale}px`,
+      width: `${Math.min(100 * scale, 100)}%`,
+      transform: `translate(${offsetX}px, ${offsetY}px)`,
+    },
+  }
+}
+
 function AppInner() {
   const [view, setView] = useState<AppView>('home')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -42,9 +74,11 @@ function AppInner() {
   const [agentOpen, setAgentOpen] = useState(true)
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
   const [videoAdminOpen, setVideoAdminOpen] = useState(false)
+  const [videoPlayer, setVideoPlayer] = useState<{ src: string; title?: string } | null>(null)
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
   const [showcaseAssets, setShowcaseAssets] = useState<Asset[]>([])
-  const [featuredVideos, setFeaturedVideos] = useState<ManagedVideo[]>([])
+  const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
+  const [galleryWorks, setGalleryWorks] = useState<ManagedWork[]>([])
   const [assetsLoading, setAssetsLoading] = useState(false)
 
   const addNode = useCanvasStore((s) => s.addNode)
@@ -57,6 +91,9 @@ function AppInner() {
   const loadFlowList = useFlowStore((s) => s.loadFlowList)
   const loadFlow = useFlowStore((s) => s.loadFlow)
   const createFlow = useFlowStore((s) => s.createFlow)
+  const renameFlowAction = useFlowStore((s) => s.renameFlow)
+  const duplicateFlowAction = useFlowStore((s) => s.duplicateFlow)
+  const deleteFlowAction = useFlowStore((s) => s.deleteFlow)
   const settings = useSettingsStore((s) => s.settings)
   const loadSettings = useSettingsStore((s) => s.loadSettings)
   const { fitView, screenToFlowPosition } = useReactFlow()
@@ -65,16 +102,25 @@ function AppInner() {
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
   useAutoSave(view === 'canvas')
 
-  const reloadFeaturedVideos = useCallback(async () => {
-    const videos = await listFeaturedVideos()
-    setFeaturedVideos(videos)
+  const reloadWorks = useCallback(async () => {
+    try {
+      const [featured, gallery] = await Promise.all([
+        listFeaturedWorks(),
+        listGalleryWorks(),
+      ])
+      setFeaturedWorks(featured)
+      setGalleryWorks(gallery)
+    } catch (err: unknown) {
+      console.error('[App] 加载首页作品失败:', err)
+    }
   }, [])
 
   useEffect(() => {
     loadSettings().catch((err: unknown) => {
       console.error('[App] 加载设置失败:', err)
     })
-  }, [loadSettings])
+    void reloadWorks()
+  }, [loadSettings, reloadWorks])
 
   useEffect(() => {
     if (view !== 'home') return
@@ -85,24 +131,31 @@ function AppInner() {
     })
 
     setAssetsLoading(true)
-    Promise.allSettled([listAssets(), listFeaturedVideos()])
-      .then(([assetsResult, videosResult]) => {
+    Promise.allSettled([listAssets(), listFeaturedWorks(), listGalleryWorks()])
+      .then(([assetsResult, featuredResult, galleryResult]) => {
         if (cancelled) return
 
         if (assetsResult.status === 'fulfilled') {
           setHomeAssets(assetsResult.value)
           setShowcaseAssets(assetsResult.value.filter((asset) => asset.showcase === true))
         } else {
-          console.error('[App] 加载首页作品失败:', assetsResult.reason)
+          console.error('[App] 加载首页资产失败:', assetsResult.reason)
           setHomeAssets([])
           setShowcaseAssets([])
         }
 
-        if (videosResult.status === 'fulfilled') {
-          setFeaturedVideos(videosResult.value)
+        if (featuredResult.status === 'fulfilled') {
+          setFeaturedWorks(featuredResult.value)
         } else {
-          console.error('[App] 加载首页精选视频失败:', videosResult.reason)
-          setFeaturedVideos([])
+          console.error('[App] 加载首页精选作品失败:', featuredResult.reason)
+          setFeaturedWorks([])
+        }
+
+        if (galleryResult.status === 'fulfilled') {
+          setGalleryWorks(galleryResult.value)
+        } else {
+          console.error('[App] 加载首页作品展示失败:', galleryResult.reason)
+          setGalleryWorks([])
         }
       })
       .finally(() => {
@@ -182,6 +235,43 @@ function AppInner() {
     setView('home')
   }, [])
 
+  const handlePlayVideo = useCallback((src: string, title?: string) => {
+    setVideoPlayer({ src, title })
+  }, [])
+
+  const handleRenameFlow = useCallback(
+    async (id: string, name: string) => {
+      try {
+        await renameFlowAction(id, name)
+      } catch (err: unknown) {
+        console.error('[App] 重命名失败:', err)
+      }
+    },
+    [renameFlowAction],
+  )
+
+  const handleDuplicateFlow = useCallback(
+    async (id: string) => {
+      try {
+        await duplicateFlowAction(id)
+      } catch (err: unknown) {
+        console.error('[App] 复制失败:', err)
+      }
+    },
+    [duplicateFlowAction],
+  )
+
+  const handleDeleteFlow = useCallback(
+    async (id: string) => {
+      try {
+        await deleteFlowAction(id)
+      } catch (err: unknown) {
+        console.error('[App] 删除失败:', err)
+      }
+    },
+    [deleteFlowAction],
+  )
+
   const handleSelectAsset = useCallback(
     (asset: Asset) => {
       const sourceNodeId = resolveAssetSourceNodeId(
@@ -237,8 +327,12 @@ function AppInner() {
           recentFlows={flowList}
           showcaseAssets={showcaseAssets}
           workAssets={homeAssets}
-          featuredVideos={featuredVideos}
+          featuredWorks={featuredWorks}
+          galleryWorks={galleryWorks}
           heroImageUrl={resolveHomeHeroImage(settings?.homeHeroImagePath)}
+          mokHeroImageUrl={resolveHomeMokHeroImage(settings?.homeMokHeroImagePath)}
+          mokHeroContainerStyle={resolveHomeMokHeroStyles(settings).container}
+          mokHeroImageStyle={resolveHomeMokHeroStyles(settings).image}
           logoImageUrl={agentAvatarUrl}
           loadingFlows={flowsLoading}
           loadingAssets={assetsLoading}
@@ -249,6 +343,9 @@ function AppInner() {
           onOpenVideoAdmin={() => setVideoAdminOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
           onReturnHome={handleShowHome}
+          onPlayVideo={handlePlayVideo}
+          onRenameFlow={handleRenameFlow}
+          onDeleteFlow={handleDeleteFlow}
         />
       ) : (
         <main className="canvas-stage">
@@ -301,11 +398,19 @@ function AppInner() {
       <VideoAdminModal
         open={videoAdminOpen}
         onClose={() => setVideoAdminOpen(false)}
-        onVideosChanged={() => {
-          void reloadFeaturedVideos().catch((err: unknown) => {
-            console.error('[App] 刷新首页精选视频失败:', err)
+        onWorksChanged={() => {
+          void reloadWorks().catch((err: unknown) => {
+            console.error('[App] 刷新首页作品失败:', err)
           })
         }}
+        onPlayVideo={handlePlayVideo}
+      />
+
+      <VideoPlayerModal
+        open={!!videoPlayer}
+        src={videoPlayer?.src ?? ''}
+        title={videoPlayer?.title}
+        onClose={() => setVideoPlayer(null)}
       />
 
       <FlowsHistoryModal

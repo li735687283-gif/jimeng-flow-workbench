@@ -1,31 +1,32 @@
-// 首页精选视频管理服务。
-// 视频和封面文件保存在 Asset 系统，这里持久化业务元数据。
+// 首页精选作品管理服务（支持图片和视频）。
+// 媒体文件保存在 Asset 系统，这里持久化业务元数据。
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type {
-  CreateVideoRequest,
-  ManagedVideo,
-  UpdateVideoRequest,
-  VideoListQuery,
-  VideoListResponse,
+  CreateWorkRequest,
+  ManagedWork,
+  UpdateWorkRequest,
+  WorkListQuery,
+  WorkListResponse,
+  WorkMediaType,
 } from '@jimeng-flow/shared/video'
 import { getProjectRoot } from '../config'
 import { getAsset } from './assets'
 
-const VIDEOS_DIR = resolve(getProjectRoot(), 'workspace/config')
-const VIDEOS_FILE = resolve(VIDEOS_DIR, 'videos.json')
-const VIDEO_ID_PATTERN = /^video_[a-z0-9_]+$/
+const WORKS_DIR = resolve(getProjectRoot(), 'workspace/config')
+const WORKS_FILE = resolve(WORKS_DIR, 'videos.json')
+const WORK_ID_PATTERN = /^(video|work)_[a-z0-9_]+$/
 
 function nowIso(): string {
   return new Date().toISOString()
 }
 
-function generateVideoId(): string {
+function generateWorkId(): string {
   const ts = Date.now().toString(36)
   const rand = randomBytes(4).toString('hex')
-  return `video_${ts}_${rand}`
+  return `work_${ts}_${rand}`
 }
 
 function assetUrl(assetId: string): string {
@@ -40,29 +41,46 @@ function normalizeSortOrder(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-function withUrls(video: ManagedVideo): ManagedVideo {
+function normalizeMediaType(value: unknown): WorkMediaType {
+  return value === 'image' ? 'image' : 'video'
+}
+
+function withUrls(work: ManagedWork): ManagedWork {
   return {
-    ...video,
-    videoUrl: assetUrl(video.videoAssetId),
-    coverUrl: assetUrl(video.coverAssetId),
+    ...work,
+    mediaUrl: assetUrl(work.mediaAssetId),
+    coverUrl: assetUrl(work.coverAssetId),
   }
 }
 
-function normalizeVideo(raw: unknown): ManagedVideo | null {
+function normalizeWork(raw: unknown): ManagedWork | null {
   if (!raw || typeof raw !== 'object') return null
   const item = raw as Record<string, unknown>
+
   const id = normalizeText(item.id)
-  const videoAssetId = normalizeText(item.videoAssetId)
-  const coverAssetId = normalizeText(item.coverAssetId)
-  if (!VIDEO_ID_PATTERN.test(id) || !videoAssetId || !coverAssetId) return null
+  let mediaType = normalizeMediaType(item.mediaType)
+  let mediaAssetId = normalizeText(item.mediaAssetId)
+  let coverAssetId = normalizeText(item.coverAssetId)
+
+  // 向后兼容旧数据结构（videoAssetId/coverAssetId/videoUrl）
+  if (!mediaAssetId) {
+    mediaAssetId = normalizeText(item.videoAssetId)
+    mediaType = 'video'
+  }
+  if (!coverAssetId) {
+    coverAssetId = normalizeText(item.coverAssetId) || mediaAssetId
+  }
+
+  if (!WORK_ID_PATTERN.test(id) || !mediaAssetId || !coverAssetId) return null
 
   return withUrls({
     id,
-    title: normalizeText(item.title, '未命名视频') || '未命名视频',
+    mediaType,
+    title: normalizeText(item.title, '未命名作品') || '未命名作品',
     description: normalizeText(item.description),
-    videoAssetId,
+    mediaAssetId,
     coverAssetId,
-    videoUrl: assetUrl(videoAssetId),
+    mediaUrl: assetUrl(mediaAssetId),
     coverUrl: assetUrl(coverAssetId),
     isFeatured: item.isFeatured === true,
     isPinned: item.isPinned === true,
@@ -73,14 +91,14 @@ function normalizeVideo(raw: unknown): ManagedVideo | null {
   })
 }
 
-async function readVideos(): Promise<ManagedVideo[]> {
+async function readWorks(): Promise<ManagedWork[]> {
   try {
-    const content = await readFile(VIDEOS_FILE, 'utf8')
+    const content = await readFile(WORKS_FILE, 'utf8')
     const parsed = JSON.parse(content) as unknown
     if (!Array.isArray(parsed)) return []
     return parsed
-      .map(normalizeVideo)
-      .filter((video): video is ManagedVideo => video !== null)
+      .map(normalizeWork)
+      .filter((work): work is ManagedWork => work !== null)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT' || err instanceof SyntaxError) return []
@@ -88,12 +106,12 @@ async function readVideos(): Promise<ManagedVideo[]> {
   }
 }
 
-async function writeVideos(videos: ManagedVideo[]): Promise<void> {
-  await mkdir(VIDEOS_DIR, { recursive: true })
-  await writeFile(VIDEOS_FILE, JSON.stringify(videos.map(withUrls), null, 2), 'utf8')
+async function writeWorks(works: ManagedWork[]): Promise<void> {
+  await mkdir(WORKS_DIR, { recursive: true })
+  await writeFile(WORKS_FILE, JSON.stringify(works.map(withUrls), null, 2), 'utf8')
 }
 
-function compareForAdminList(a: ManagedVideo, b: ManagedVideo): number {
+function compareForAdminList(a: ManagedWork, b: ManagedWork): number {
   if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
   if (a.sortOrder !== b.sortOrder) return b.sortOrder - a.sortOrder
   return b.updatedAt.localeCompare(a.updatedAt)
@@ -109,9 +127,9 @@ function normalizePageSize(value: number | undefined): number {
   return Math.min(100, Math.max(1, Math.floor(value)))
 }
 
-export function getFeaturedHomeVideos(videos: ManagedVideo[]): ManagedVideo[] {
-  return videos
-    .filter((video) => video.isFeatured && video.isPublished)
+export function getFeaturedHomeWorks(works: ManagedWork[]): ManagedWork[] {
+  return works
+    .filter((work) => work.isFeatured && work.isPublished)
     .sort((a, b) => {
       if (a.sortOrder !== b.sortOrder) return b.sortOrder - a.sortOrder
       return b.updatedAt.localeCompare(a.updatedAt)
@@ -119,25 +137,39 @@ export function getFeaturedHomeVideos(videos: ManagedVideo[]): ManagedVideo[] {
     .map(withUrls)
 }
 
-export function buildVideoListResponse(
-  videos: ManagedVideo[],
-  query: VideoListQuery = {},
-): VideoListResponse {
+export function getGalleryWorks(works: ManagedWork[]): ManagedWork[] {
+  return works
+    .filter((work) => work.isPublished)
+    .sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
+      if (a.sortOrder !== b.sortOrder) return b.sortOrder - a.sortOrder
+      return b.updatedAt.localeCompare(a.updatedAt)
+    })
+    .map(withUrls)
+}
+
+export function buildWorkListResponse(
+  works: ManagedWork[],
+  query: WorkListQuery = {},
+): WorkListResponse {
   const page = normalizePage(query.page)
   const pageSize = normalizePageSize(query.pageSize)
   const keyword = query.q?.trim().toLowerCase() ?? ''
 
-  const filtered = videos.filter((video) => {
-    if (typeof query.isFeatured === 'boolean' && video.isFeatured !== query.isFeatured) {
+  const filtered = works.filter((work) => {
+    if (query.mediaType && work.mediaType !== query.mediaType) {
       return false
     }
-    if (typeof query.isPinned === 'boolean' && video.isPinned !== query.isPinned) {
+    if (typeof query.isFeatured === 'boolean' && work.isFeatured !== query.isFeatured) {
+      return false
+    }
+    if (typeof query.isPinned === 'boolean' && work.isPinned !== query.isPinned) {
       return false
     }
     if (!keyword) return true
     return (
-      video.title.toLowerCase().includes(keyword) ||
-      video.description.toLowerCase().includes(keyword)
+      work.title.toLowerCase().includes(keyword) ||
+      work.description.toLowerCase().includes(keyword)
     )
   })
 
@@ -151,36 +183,50 @@ export function buildVideoListResponse(
   }
 }
 
-async function assertAssetType(assetId: string, expectedType: 'image' | 'video'): Promise<void> {
+async function assertAssetType(assetId: string, expectedType: WorkMediaType): Promise<void> {
   const asset = await getAsset(assetId)
   if (!asset || asset.type !== expectedType) {
-    const error = new Error(expectedType === 'video' ? '视频文件不存在' : '封面图不存在')
-    ;(error as Error & { code: string }).code = 'VIDEO_BAD_ASSET'
+    const error = new Error(expectedType === 'video' ? '视频文件不存在' : '图片文件不存在')
+    ;(error as Error & { code: string }).code = 'WORK_BAD_ASSET'
     throw error
   }
 }
 
-export async function listVideos(query: VideoListQuery = {}): Promise<VideoListResponse> {
-  return buildVideoListResponse(await readVideos(), query)
+export async function listWorks(query: WorkListQuery = {}): Promise<WorkListResponse> {
+  return buildWorkListResponse(await readWorks(), query)
 }
 
-export async function listFeaturedVideos(): Promise<ManagedVideo[]> {
-  return getFeaturedHomeVideos(await readVideos())
+export async function listFeaturedWorks(): Promise<ManagedWork[]> {
+  return getFeaturedHomeWorks(await readWorks())
 }
 
-export async function createVideo(input: CreateVideoRequest): Promise<ManagedVideo> {
-  await assertAssetType(input.videoAssetId, 'video')
-  await assertAssetType(input.coverAssetId, 'image')
+export async function listGalleryWorks(): Promise<ManagedWork[]> {
+  return getGalleryWorks(await readWorks())
+}
+
+export async function createWork(input: CreateWorkRequest): Promise<ManagedWork> {
+  const mediaType = normalizeMediaType(input.mediaType)
+  await assertAssetType(input.mediaAssetId, mediaType)
+
+  let coverAssetId = input.coverAssetId?.trim() || input.mediaAssetId
+  if (coverAssetId !== input.mediaAssetId) {
+    await assertAssetType(coverAssetId, 'image')
+  } else if (mediaType === 'video') {
+    const error = new Error('视频作品需要上传封面图')
+    ;(error as Error & { code: string }).code = 'WORK_BAD_ASSET'
+    throw error
+  }
 
   const now = nowIso()
-  const video: ManagedVideo = withUrls({
-    id: generateVideoId(),
-    title: normalizeText(input.title, '未命名视频') || '未命名视频',
+  const work: ManagedWork = withUrls({
+    id: generateWorkId(),
+    mediaType,
+    title: normalizeText(input.title, '未命名作品') || '未命名作品',
     description: normalizeText(input.description),
-    videoAssetId: input.videoAssetId,
-    coverAssetId: input.coverAssetId,
-    videoUrl: assetUrl(input.videoAssetId),
-    coverUrl: assetUrl(input.coverAssetId),
+    mediaAssetId: input.mediaAssetId,
+    coverAssetId,
+    mediaUrl: assetUrl(input.mediaAssetId),
+    coverUrl: assetUrl(coverAssetId),
     isFeatured: input.isFeatured === true,
     isPinned: input.isPinned === true,
     isPublished: input.isPublished !== false,
@@ -189,43 +235,63 @@ export async function createVideo(input: CreateVideoRequest): Promise<ManagedVid
     updatedAt: now,
   })
 
-  const videos = await readVideos()
-  videos.unshift(video)
-  await writeVideos(videos)
-  return video
+  const works = await readWorks()
+  works.unshift(work)
+  await writeWorks(works)
+  return work
 }
 
-export async function updateVideo(
+export async function updateWork(
   id: string,
-  patch: UpdateVideoRequest,
-): Promise<ManagedVideo> {
-  if (!VIDEO_ID_PATTERN.test(id)) {
-    const error = new Error('视频不存在')
-    ;(error as Error & { code: string }).code = 'VIDEO_NOT_FOUND'
+  patch: UpdateWorkRequest,
+): Promise<ManagedWork> {
+  if (!WORK_ID_PATTERN.test(id)) {
+    const error = new Error('作品不存在')
+    ;(error as Error & { code: string }).code = 'WORK_NOT_FOUND'
     throw error
   }
 
-  if (patch.videoAssetId) await assertAssetType(patch.videoAssetId, 'video')
-  if (patch.coverAssetId) await assertAssetType(patch.coverAssetId, 'image')
+  if (patch.mediaAssetId) {
+    const works = await readWorks()
+    const current = works.find((w) => w.id === id)
+    const mediaType = current?.mediaType ?? 'video'
+    await assertAssetType(patch.mediaAssetId, mediaType)
+  }
+  if (patch.coverAssetId) {
+    await assertAssetType(patch.coverAssetId, 'image')
+  }
 
-  const videos = await readVideos()
-  const index = videos.findIndex((video) => video.id === id)
+  const works = await readWorks()
+  const index = works.findIndex((work) => work.id === id)
   if (index < 0) {
-    const error = new Error('视频不存在')
-    ;(error as Error & { code: string }).code = 'VIDEO_NOT_FOUND'
+    const error = new Error('作品不存在')
+    ;(error as Error & { code: string }).code = 'WORK_NOT_FOUND'
     throw error
   }
 
-  const current = videos[index]
-  const next: ManagedVideo = withUrls({
+  const current = works[index]
+  const nextMediaAssetId = patch.mediaAssetId ?? current.mediaAssetId
+  let nextCoverAssetId = patch.coverAssetId ?? current.coverAssetId
+
+  if (patch.mediaAssetId && current.mediaType === 'video' && !patch.coverAssetId) {
+    const error = new Error('视频作品需要上传封面图')
+    ;(error as Error & { code: string }).code = 'WORK_BAD_ASSET'
+    throw error
+  }
+
+  if (current.mediaType === 'image' && nextCoverAssetId === nextMediaAssetId && !patch.coverAssetId) {
+    nextCoverAssetId = nextMediaAssetId
+  }
+
+  const next: ManagedWork = withUrls({
     ...current,
     title: patch.title === undefined ? current.title : normalizeText(patch.title, current.title),
     description:
       patch.description === undefined
         ? current.description
         : normalizeText(patch.description),
-    videoAssetId: patch.videoAssetId ?? current.videoAssetId,
-    coverAssetId: patch.coverAssetId ?? current.coverAssetId,
+    mediaAssetId: nextMediaAssetId,
+    coverAssetId: nextCoverAssetId,
     isFeatured: patch.isFeatured ?? current.isFeatured,
     isPinned: patch.isPinned ?? current.isPinned,
     isPublished: patch.isPublished ?? current.isPublished,
@@ -234,7 +300,17 @@ export async function updateVideo(
     updatedAt: nowIso(),
   })
 
-  videos[index] = next
-  await writeVideos(videos)
+  works[index] = next
+  await writeWorks(works)
   return next
 }
+
+// Backwards compatibility aliases
+/** @deprecated Use createWork instead */
+export const createVideo = createWork
+/** @deprecated Use updateWork instead */
+export const updateVideo = updateWork
+/** @deprecated Use listWorks instead */
+export const listVideos = listWorks
+/** @deprecated Use listFeaturedWorks instead */
+export const listFeaturedVideos = listFeaturedWorks

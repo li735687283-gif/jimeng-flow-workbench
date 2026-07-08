@@ -8,6 +8,7 @@ import type {
   FlowSummary,
   CreateFlowRequest,
   UpdateFlowRequest,
+  DuplicateFlowRequest,
 } from '@jimeng-flow/shared/flow'
 
 /** 列出所有工作流摘要 */
@@ -71,4 +72,25 @@ export async function deleteFlow(id: string): Promise<void> {
   if (!res.ok) {
     throw new Error(`删除工作流失败：${res.status} ${res.statusText}`)
   }
+}
+
+/** 重命名工作流 */
+export async function renameFlow(id: string, name: string): Promise<Flow> {
+  return updateFlow(id, { name })
+}
+
+/** 复制工作流 */
+export async function duplicateFlow(
+  id: string,
+  body?: DuplicateFlowRequest,
+): Promise<Flow> {
+  const res = await fetch(`/api/flows/${encodeURIComponent(id)}/duplicate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!res.ok) {
+    throw new Error(`复制工作流失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Flow
 }

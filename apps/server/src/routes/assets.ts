@@ -128,6 +128,44 @@ async function saveUpscaleResult(
 }
 
 const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
+  // POST /api/assets/upload/file — multipart 流式上传（适合大文件如视频）
+  app.post('/api/assets/upload/file', async (req, reply) => {
+    const data = await req.file()
+    if (!data) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '缺少上传文件',
+      })
+    }
+
+    const chunks: Buffer[] = []
+    for await (const chunk of data.file) {
+      chunks.push(chunk)
+    }
+    const fileBuffer = Buffer.concat(chunks)
+
+    if (fileBuffer.length === 0) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '文件内容为空',
+      })
+    }
+
+    const fileName = data.filename || 'upload.bin'
+    const effectiveMime =
+      data.mimetype ||
+      (MIME_BY_EXT[extname(fileName).toLowerCase()] ?? 'application/octet-stream')
+
+    const asset = await saveUploadFile({
+      fileBuffer,
+      originalName: fileName,
+      mimeType: effectiveMime,
+    })
+    return reply.code(201).send(asset)
+  })
+
   // POST /api/assets/upload
   // body: UploadBody。单路由放宽 body 上限以容纳 base64（50MB）。
   app.post<{ Body: UploadBody }>(
@@ -352,8 +390,9 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         })
       }
       const absPath = getAssetFilePath(asset)
+      let fileStats
       try {
-        await stat(absPath)
+        fileStats = await stat(absPath)
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code
         if (code === 'ENOENT') {
@@ -367,8 +406,41 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       }
       const fallbackMime = asset.type === 'video' ? 'video/mp4' : 'image/png'
       const mime = mimeForFile(absPath, fallbackMime)
+      const fileSize = fileStats.size
+
+      const rangeHeader = req.headers.range
+      if (rangeHeader && asset.type === 'video') {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader)
+        if (match) {
+          let start = match[1] ? Number.parseInt(match[1], 10) : 0
+          let end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1
+          if (Number.isNaN(start)) start = 0
+          if (Number.isNaN(end)) end = fileSize - 1
+          if (start >= fileSize) {
+            reply.header('Content-Range', `bytes */${fileSize}`)
+            return reply.code(416).send({
+              statusCode: 416,
+              error: 'Range Not Satisfiable',
+              message: '请求范围超出文件大小',
+            })
+          }
+          end = Math.min(end, fileSize - 1)
+          const contentLength = end - start + 1
+          const stream = createReadStream(absPath, { start, end })
+          reply.code(206)
+          reply.header('Content-Type', mime)
+          reply.header('Content-Length', String(contentLength))
+          reply.header('Content-Range', `bytes ${start}-${end}/${fileSize}`)
+          reply.header('Accept-Ranges', 'bytes')
+          reply.header('Cache-Control', 'no-cache')
+          return reply.send(stream)
+        }
+      }
+
       const stream = createReadStream(absPath)
       reply.header('Content-Type', mime)
+      reply.header('Content-Length', String(fileSize))
+      reply.header('Accept-Ranges', 'bytes')
       reply.header('Cache-Control', 'no-cache')
       return reply.send(stream)
     },

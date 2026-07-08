@@ -37,13 +37,22 @@ interface FlowState {
   saveCurrent: () => Promise<void>
   /** 更新当前工作流名称（本地 + 后端） */
   updateFlowName: (name: string) => Promise<void>
+  /** 重命名指定工作流 */
+  renameFlow: (id: string, name: string) => Promise<void>
+  /** 复制指定工作流 */
+  duplicateFlow: (id: string) => Promise<void>
+  /** 删除指定工作流 */
+  deleteFlow: (id: string) => Promise<void>
   /** 清除错误 */
   clearError: () => void
 }
 
+const normalizeFlowName = (name: string): string =>
+  name === '未命名工作流' ? '无限画布' : name
+
 export const useFlowStore = create<FlowState>((set, get) => ({
   currentFlowId: null,
-  currentFlowName: '未命名工作流',
+  currentFlowName: '无限画布',
   loading: false,
   saving: false,
   lastSavedAt: null,
@@ -54,8 +63,9 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const list = await flowsApi.listFlows()
-      set({ flowList: list, loading: false })
-      return list
+      const normalized = list.map((f) => ({ ...f, name: normalizeFlowName(f.name) }))
+      set({ flowList: normalized, loading: false })
+      return normalized
     } catch (err) {
       set({
         loading: false,
@@ -78,7 +88,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       })
       set({
         currentFlowId: flow.id,
-        currentFlowName: flow.name,
+        currentFlowName: normalizeFlowName(flow.name),
         lastSavedAt: Date.now(),
         loading: false,
       })
@@ -104,7 +114,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       })
       set({
         currentFlowId: flow.id,
-        currentFlowName: flow.name,
+        currentFlowName: normalizeFlowName(flow.name),
         lastSavedAt: Date.now(),
         loading: false,
       })
@@ -134,7 +144,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       clearDeletedNodeIds()
       set({
         currentFlowId: updated.id,
-        currentFlowName: updated.name,
+        currentFlowName: normalizeFlowName(updated.name),
         lastSavedAt: Date.now(),
         saving: false,
         loading: false,
@@ -180,17 +190,61 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   updateFlowName: async (name) => {
     const { currentFlowId, currentFlowName: oldName } = get()
     if (!currentFlowId) return
-    // 乐观更新 UI
     set({ currentFlowName: name, error: null })
     try {
       const updated = await flowsApi.updateFlow(currentFlowId, { name })
-      set({ currentFlowName: updated.name, lastSavedAt: Date.now() })
+      set({ currentFlowName: normalizeFlowName(updated.name), lastSavedAt: Date.now() })
+      await get().loadFlowList()
     } catch (err) {
-      // API 失败时回滚名称
       set({
         currentFlowName: oldName,
         error: err instanceof Error ? err.message : String(err),
       })
+      throw err
+    }
+  },
+
+  renameFlow: async (id, name) => {
+    set({ error: null })
+    try {
+      await flowsApi.renameFlow(id, name)
+      if (get().currentFlowId === id) {
+        set({ currentFlowName: normalizeFlowName(name) })
+      }
+      await get().loadFlowList()
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+      throw err
+    }
+  },
+
+  duplicateFlow: async (id) => {
+    set({ error: null })
+    try {
+      await flowsApi.duplicateFlow(id)
+      await get().loadFlowList()
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
+      throw err
+    }
+  },
+
+  deleteFlow: async (id) => {
+    set({ error: null })
+    try {
+      await flowsApi.deleteFlow(id)
+      if (get().currentFlowId === id) {
+        set({ currentFlowId: null, currentFlowName: '无限画布' })
+        useCanvasStore.setState({
+          nodes: [],
+          edges: [],
+          deletedNodeIds: [],
+          selectedNodeId: null,
+        })
+      }
+      await get().loadFlowList()
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) })
       throw err
     }
   },
