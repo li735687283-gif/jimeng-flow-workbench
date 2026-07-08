@@ -18,11 +18,9 @@ test('getCodexStatus fetches OpenAI CLI readiness from the backend', async () =>
         authFound: true,
         codexPath: 'codex',
         authFile: 'C:\\Users\\Lzw\\.codex\\auth.json',
-        helperFound: true,
-        helperPath: 'gpt-image-2-skill',
+        helperFound: false,
         setupCommands: {
           installCodex: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex"',
-          installImageHelper: 'npm install -g gpt-image-2-skill',
           login: 'codex',
         },
         message: 'OpenAI Codex CLI 可用',
@@ -38,7 +36,7 @@ test('getCodexStatus fetches OpenAI CLI readiness from the backend', async () =>
     assert.equal(calls[0].init?.method, 'GET')
     assert.equal(status.available, true)
     assert.equal(status.authFound, true)
-    assert.equal(status.helperFound, true)
+    assert.equal(status.helperFound, false)
     assert.equal(status.setupCommands?.login, 'codex')
   } finally {
     Object.assign(globalThis, { fetch: originalFetch })
@@ -54,7 +52,8 @@ test('SettingsModal includes a compact OpenAI CLI status section', async () => {
 
   assert.equal(html.includes('OpenAI CLI'), true)
   assert.equal(html.includes('检测 Codex'), true)
-  assert.equal(html.includes('gpt-image-2'), true)
+  assert.equal(html.includes('codex:gpt-5.5'), true)
+  assert.equal(html.includes('gpt-image-2'), false)
   assert.equal(html.includes('$imagegen'), false)
   assert.equal(html.includes('OpenAI CLI 模型走 Codex'), true)
 })
@@ -67,14 +66,14 @@ test('SettingsModal exposes Codex CLI setup commands', async () => {
   )
 
   assert.equal(html.includes('安装 Codex CLI'), true)
-  assert.equal(html.includes('安装图片 Helper'), true)
   assert.equal(html.includes('打开登录'), true)
   assert.equal(html.includes('chatgpt.com/codex/install'), true)
-  assert.equal(html.includes('npm install -g gpt-image-2-skill'), true)
+  assert.equal(html.includes(['安装图片', 'Helper'].join(' ')), false)
+  assert.equal(html.includes(['npm install -g', ['gpt-image', '2-skill'].join('-')].join(' ')), false)
   assert.equal(html.includes('codex'), true)
 })
 
-test('SettingsModal offers gpt-image-2 as an explicit OpenAI CLI image model option', async () => {
+test('SettingsModal offers a Codex model as the OpenAI CLI image model option', async () => {
   const { SettingsModal } = await import('../src/components/SettingsModal')
 
   const html = renderToStaticMarkup(
@@ -82,9 +81,22 @@ test('SettingsModal offers gpt-image-2 as an explicit OpenAI CLI image model opt
   )
 
   assert.equal(
-    html.includes('<option value="gpt-image-2">gpt-image-2</option>'),
+    html.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
     true,
   )
+})
+
+test('SettingsModal dropdown controls use the shared canvas menu rhythm', async () => {
+  const { SettingsModal } = await import('../src/components/SettingsModal')
+
+  const html = renderToStaticMarkup(
+    <SettingsModal open={true} onClose={() => undefined} />,
+  )
+
+  assert.match(html, /<select[^>]+class="settings-dropdown-control"/)
+  assert.match(html, /<input[^>]+class="settings-dropdown-control"/)
+  assert.match(html, /--menu-control-font-size:12px/)
+  assert.match(html, /--menu-control-padding:6px 8px/)
 })
 
 test('SettingsModal offers Codex CLI chat models as selectable common LLM options', async () => {

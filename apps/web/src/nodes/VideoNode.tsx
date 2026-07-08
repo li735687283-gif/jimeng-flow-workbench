@@ -12,7 +12,10 @@ import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import type { BaseNodeData } from '../types/nodeTypes'
-import { shouldCloseFloatingEditorOnPointerDown } from '../utils/editorPointer'
+import {
+  shouldCloseFloatingEditorOnPointerDown,
+  shouldCloseFloatingMenuOnPointerDown,
+} from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
 import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
@@ -196,6 +199,25 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }, EDITOR_CLOSE_ANIMATION_MS)
   }, [clearCloseTimer, editorClosing, editorMounted])
 
+  const persistPromptDraft = useCallback(
+    (value: string) => {
+      setPrompt(value)
+      if (sendError) setSendError('')
+      updateNodeData(id, {
+        prompt: value,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [id, sendError, updateNodeData],
+  )
+
+  const handleCloseEditorMenus = useCallback(() => {
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+  }, [])
+
   useEffect(() => {
     if (!editorMounted) return
     const handleDocumentPointerDown = (event: globalThis.PointerEvent) => {
@@ -204,6 +226,16 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       const isInsideEditorOwner =
         !!target.closest(`[data-flow-node-id="${id}"]`) ||
         !!target.closest('.prompt-editor-modal')
+      const isInsideMenuRoot = !!target.closest('.image-editor-menu-anchor')
+      if (
+        shouldCloseFloatingMenuOnPointerDown({
+          button: event.button,
+          isMenuOpen: modelMenuOpen || qualityMenuOpen || countMenuOpen,
+          isInsideMenuRoot,
+        })
+      ) {
+        handleCloseEditorMenus()
+      }
       if (
         shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
@@ -222,7 +254,15 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
       window.removeEventListener('keydown', handleDocumentKeyDown)
     }
-  }, [editorMounted, handleCloseEditor, id])
+  }, [
+    countMenuOpen,
+    editorMounted,
+    handleCloseEditor,
+    handleCloseEditorMenus,
+    id,
+    modelMenuOpen,
+    qualityMenuOpen,
+  ])
 
   const firstAssetId = nodeData.assetIds[0]
   const displayStatus =
@@ -577,10 +617,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             historyItems={generationHistoryItems}
             currentAssetId={firstAssetId}
             videoMode={mode}
-            onPromptChange={(value) => {
-              setPrompt(value)
-              if (sendError) setSendError('')
-            }}
+            onPromptChange={persistPromptDraft}
             onVideoModeChange={handleVideoModeChange}
             onModelToggle={() => {
               setModelMenuOpen((open) => !open)

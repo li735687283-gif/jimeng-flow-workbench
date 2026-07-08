@@ -59,16 +59,23 @@ const labelStyle: React.CSSProperties = {
   color: '#9a9a9a',
 }
 const inputStyle: React.CSSProperties = {
-  background: '#0f0f0f',
-  border: '1px solid #333',
+  background: 'var(--menu-control-bg, #282828)',
+  border: '1px solid var(--menu-control-border, #373737)',
   borderRadius: '6px',
-  padding: '8px 10px',
+  padding: 'var(--menu-control-padding, 6px 8px)',
   color: '#e8e8e8',
-  fontSize: '13px',
+  fontSize: 'var(--menu-control-font-size, 12px)',
+  fontFamily: 'inherit',
   outline: 'none',
   width: '100%',
   boxSizing: 'border-box',
 }
+
+const dropdownControlStyle: React.CSSProperties = {
+  ...inputStyle,
+  '--menu-control-font-size': '12px',
+  '--menu-control-padding': '6px 8px',
+} as React.CSSProperties
 
 const subtleButtonStyle: React.CSSProperties = {
   display: 'inline-flex',
@@ -114,7 +121,6 @@ const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
 
 const FALLBACK_CODEX_SETUP_COMMANDS: NonNullable<CodexStatus['setupCommands']> = {
   installCodex: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex"',
-  installImageHelper: 'npm install -g gpt-image-2-skill',
   login: 'codex',
 }
 
@@ -130,7 +136,10 @@ function uniqueModelIds(models: string[]): string[] {
 
 function normalizeImageModelId(modelId: string): string {
   const id = modelId.trim()
-  return id.toLowerCase() === '$imagegen' ? 'gpt-image-2' : id
+  const normalized = id.toLowerCase()
+  return normalized === '$imagegen' || normalized === 'gpt-image-2'
+    ? 'codex:gpt-5.5'
+    : id
 }
 
 function normalizeModelOptions(
@@ -176,9 +185,9 @@ function normalizeImageModelOptions(
       description: model.description,
     })
   }
-  map.set('gpt-image-2', {
-    id: 'gpt-image-2',
-    label: 'gpt-image-2',
+  map.set('codex:gpt-5.5', {
+    id: 'codex:gpt-5.5',
+    label: 'codex:gpt-5.5',
     description: 'OpenAI CLI 图片模型',
   })
   for (const model of availableModels) {
@@ -194,7 +203,7 @@ function normalizeImageModelOptions(
     map.set(normalizedId, {
       id: normalizedId,
       label: normalizedId,
-      description: normalizedId === 'gpt-image-2'
+      description: normalizedId === 'codex:gpt-5.5'
         ? 'OpenAI CLI 图片模型'
         : '第三方 API 图片模型',
     })
@@ -371,12 +380,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       if (result.setupCommands) {
         setCodexSetupCommands(result.setupCommands)
       }
-      const helperMessage = result.helperFound
-        ? `GPT Image 2 helper 可用：${result.helperPath ?? 'gpt-image-2-skill'}`
-        : '未检测到 GPT Image 2 helper，将使用 Codex CLI 通道'
       setCodexTestResult({
         ok: result.available,
-        message: `${result.message}；${helperMessage}`,
+        message: `${result.message}；图片生成使用 Codex CLI 通道`,
       })
     } catch (err: unknown) {
       setCodexTestResult({
@@ -568,9 +574,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   )
   const codexSetupRows = [
     { label: '安装 Codex CLI', command: codexSetupCommands.installCodex },
-    { label: '安装图片 Helper', command: codexSetupCommands.installImageHelper },
     { label: '打开登录', command: codexSetupCommands.login },
-  ]
+  ].filter((row) => !!row.command)
 
   return (
     <div
@@ -732,7 +737,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             {renderTestResult(codexTestResult)}
             <div style={helperTextStyle}>
-              已登录本机 Codex 后，可在图片模型里添加 gpt-image-2，图片节点会使用 ChatGPT/Codex 账户通道生成。Codex chat 模型走本机 ChatGPT 登录态。
+              已登录本机 Codex 后，可在图片模型里添加 codex:gpt-5.5，图片节点会使用 ChatGPT/Codex 账户通道生成。Codex chat 模型走本机 ChatGPT 登录态。
             </div>
             <div
               style={{
@@ -846,7 +851,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     }}
                   >
                     <input
-                      style={inputStyle}
+                      className="settings-dropdown-control"
+                      style={dropdownControlStyle}
                       list="set-image-model-options"
                       value={modelId}
                       onChange={(e) => updateImageModelRow(index, e.target.value)}
@@ -946,7 +952,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     }}
                   >
                     <input
-                      style={inputStyle}
+                      className="settings-dropdown-control"
+                      style={dropdownControlStyle}
                       list="set-video-model-options"
                       value={modelId}
                       onChange={(e) => updateVideoModelRow(index, e.target.value)}
@@ -1099,7 +1106,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                       }}
                     >
                       <select
-                        style={inputStyle}
+                        className="settings-dropdown-control"
+                        style={dropdownControlStyle}
                         value={modelId}
                         onChange={(e) => updateLlmModelRow(index, e.target.value)}
                       >
@@ -1145,7 +1153,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </label>
                   <select
                     id="set-llm-model"
-                    style={inputStyle}
+                    className="settings-dropdown-control"
+                    style={dropdownControlStyle}
                     value={form.llmModel}
                     onChange={(e) => update('llmModel', e.target.value)}
                   >

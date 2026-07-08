@@ -16,7 +16,16 @@ const IMAGE_MODEL_MENU_MAX_WIDTH = 420
 const IMAGE_MODEL_MENU_CHROME_WIDTH = 104
 const ASCII_LABEL_CHAR_WIDTH = 8.4
 const WIDE_LABEL_CHAR_WIDTH = 14
-const OPENAI_CLI_IMAGE_MODEL_ID = 'gpt-image-2'
+const OPENAI_CLI_IMAGE_MODEL_ID = 'codex:gpt-5.5'
+const OPENAI_CLI_IMAGE_MODEL_LABEL = 'GPT Image（OpenAI CLI）'
+
+function normalizeOpenAiCliImageModelId(modelId: string): string {
+  const id = modelId.trim()
+  const normalized = id.toLowerCase()
+  return normalized === '$imagegen' || normalized === 'gpt-image-2'
+    ? OPENAI_CLI_IMAGE_MODEL_ID
+    : id
+}
 
 function appendOpenAiCliImageModel(
   selected: ImageModelOption[],
@@ -30,8 +39,7 @@ function appendOpenAiCliImageModel(
 }
 
 function toImageModelOption(modelId: string): ImageModelOption | null {
-  const rawId = modelId.trim()
-  const id = rawId.toLowerCase() === '$imagegen' ? OPENAI_CLI_IMAGE_MODEL_ID : rawId
+  const id = normalizeOpenAiCliImageModelId(modelId)
   if (!id) return null
 
   const builtin = IMAGE_MODELS.find((model) => model.id === id)
@@ -39,12 +47,14 @@ function toImageModelOption(modelId: string): ImageModelOption | null {
 
   const normalized = id.toLowerCase()
   if (
-    normalized === 'gpt-image-2' ||
+    normalized === OPENAI_CLI_IMAGE_MODEL_ID ||
     normalized.startsWith('codex:')
   ) {
     return {
       id,
-      label: id,
+      label: normalized === OPENAI_CLI_IMAGE_MODEL_ID
+        ? OPENAI_CLI_IMAGE_MODEL_LABEL
+        : id,
       description: 'OpenAI CLI 图片模型',
     }
   }
@@ -57,20 +67,25 @@ function toImageModelOption(modelId: string): ImageModelOption | null {
 }
 
 function modelConfigToImageOption(model: ModelConfig): ImageModelOption | null {
-  const id = model.id.trim()
+  const id = normalizeOpenAiCliImageModelId(model.id)
   if (!id) return null
+  const legacyOpenAiCliId = id !== model.id.trim()
   const builtin = IMAGE_MODELS.find((item) => item.id === id)
   if (builtin) {
     return {
       ...builtin,
-      label: model.label?.trim() || builtin.label,
+      label: legacyOpenAiCliId
+        ? OPENAI_CLI_IMAGE_MODEL_LABEL
+        : model.label?.trim() || builtin.label,
       description: builtin.description,
     }
   }
 
   return {
     id,
-    label: model.label?.trim() || id,
+    label: legacyOpenAiCliId || id.toLowerCase() === OPENAI_CLI_IMAGE_MODEL_ID
+      ? OPENAI_CLI_IMAGE_MODEL_LABEL
+      : model.label?.trim() || id,
     description: model.provider === 'codex'
       ? 'OpenAI CLI 图片模型'
       : '第三方 API 图片模型',
@@ -111,7 +126,6 @@ export function getConfiguredImageModels(
     selected.push(option)
     seen.add(option.id)
   }
-  if (selected.length > 0) return selected
 
   const inferredImageModels = (commonModelIds ?? []).filter(isLikelyImageModelId)
   for (const modelId of modelIds ?? []) {
@@ -119,6 +133,9 @@ export function getConfiguredImageModels(
     if (!option || seen.has(option.id)) continue
     selected.push(option)
     seen.add(option.id)
+  }
+  if (selected.some((model) => isJimengImageModel(model.id))) {
+    appendOpenAiCliImageModel(selected, seen)
   }
   if (inferredImageModels.length > 0) {
     appendOpenAiCliImageModel(selected, seen)
@@ -133,7 +150,14 @@ export function getConfiguredImageModels(
   if (selected.length > 0) return selected
 
   const defaultImageModel = IMAGE_MODELS.find((model) => model.id === 'jimeng')
-  return defaultImageModel ? [defaultImageModel] : IMAGE_MODELS.slice(0, 1)
+  if (defaultImageModel) {
+    const fallback = [defaultImageModel]
+    appendOpenAiCliImageModel(fallback, new Set(fallback.map((model) => model.id)))
+    return fallback
+  }
+  const fallback = IMAGE_MODELS.slice(0, 1)
+  appendOpenAiCliImageModel(fallback, new Set(fallback.map((model) => model.id)))
+  return fallback
 }
 
 export function getConfiguredDefaultImageModel(

@@ -11,6 +11,8 @@ type UpscaleResolution = '2k' | '4k' | '8k'
 
 interface ImageActionCardProps {
   validationStatus?: ValidationStatus
+  validationLabel?: string
+  validationAriaLabel?: string
   upscaleResolution: UpscaleResolution
   busy?: boolean
   closing?: boolean
@@ -23,6 +25,8 @@ interface ImageActionCardProps {
 
 export function ImageActionCard({
   validationStatus = 'idle',
+  validationLabel = '校验',
+  validationAriaLabel = '校验当前图片模型',
   upscaleResolution,
   busy = false,
   closing = false,
@@ -107,10 +111,10 @@ export function ImageActionCard({
         className={`image-action-button validation-${validationStatus}`}
         onClick={onValidate}
         disabled={busy}
-        aria-label="校验即梦 CLI"
+        aria-label={validationAriaLabel}
       >
         <ShieldCheck size={17} strokeWidth={1.7} />
-        <span>校验</span>
+        <span>{validationLabel}</span>
       </button>
       <span className="image-action-divider" aria-hidden="true" />
       <button

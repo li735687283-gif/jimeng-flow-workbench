@@ -165,6 +165,12 @@ test('SSE 连接错误走 onError 并取消订阅', async () => {
     status: 'queued',
     results: [],
   }
+  const running: GenerationResponse = {
+    id: 'gen5',
+    nodeId: 'node1',
+    status: 'running',
+    results: [],
+  }
   const events: string[] = []
   let sseCbs: any
   let unsubCalled = false
@@ -184,11 +190,64 @@ test('SSE 连接错误走 onError 并取消订阅', async () => {
           unsubCalled = true
         }
       },
+      getGenerationImpl: async () => running,
+      pollIntervalMs: 0,
+      maxPollAttempts: 1,
     },
   )
   await tick()
   sseCbs.onError('sse broken')
   await tick()
-  assert.deepEqual(events, ['queued', 'error:sse broken'])
+  assert.deepEqual(events, ['queued', 'update', 'error:sse broken'])
   assert.equal(unsubCalled, true)
+})
+
+test('SSE 断开时轮询任务状态并在终态回填结果', async () => {
+  const queued: GenerationResponse = {
+    id: 'gen6',
+    nodeId: 'node1',
+    status: 'queued',
+    results: [],
+  }
+  const running: GenerationResponse = {
+    id: 'gen6',
+    nodeId: 'node1',
+    status: 'running',
+    results: [],
+  }
+  const final: GenerationResponse = {
+    id: 'gen6',
+    nodeId: 'node1',
+    status: 'success',
+    results: [{ assetId: 'asset_done' }],
+  }
+  const events: string[] = []
+  let sseCbs: any
+  let pollCount = 0
+  startImageGenerationFlow(
+    makeRequest(),
+    {
+      onQueued: () => events.push('queued'),
+      onComplete: (data) => events.push(`complete:${data.results?.[0]?.assetId}`),
+      onError: (m) => events.push(`error:${m}`),
+    },
+    {
+      createGenerationImpl: async () => queued,
+      subscribeGenerationImpl: (_id, cbs) => {
+        sseCbs = cbs
+        return () => {}
+      },
+      getGenerationImpl: async () => {
+        pollCount += 1
+        return pollCount === 1 ? running : final
+      },
+      pollIntervalMs: 0,
+      maxPollAttempts: 2,
+    } as any,
+  )
+  await tick()
+  sseCbs.onError('sse broken')
+  await tick()
+  await tick()
+  assert.deepEqual(events, ['queued', 'complete:asset_done'])
 })

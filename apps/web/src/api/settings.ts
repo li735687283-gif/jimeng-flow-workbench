@@ -21,7 +21,7 @@ export interface CodexStatus {
   helperPath?: string
   setupCommands?: {
     installCodex: string
-    installImageHelper: string
+    installImageHelper?: string
     login: string
   }
   message: string

@@ -7,7 +7,7 @@
 // - data 字段：title, status, assetId?, assetPath?, asReference?
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, PointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { NodeProps } from '@xyflow/react'
 import {
@@ -33,16 +33,20 @@ import {
   upscaleImageAsset,
 } from '../api/assets'
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
-import { testJimengConnection } from '../api/settings'
+import { getCodexStatus, testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
 import { ImageFullscreenViewer } from '../components/ImageFullscreenViewer'
 import { PromptEditor } from '../components/PromptEditor'
+import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
 import { useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
-import { shouldCloseFloatingEditorOnPointerDown } from '../utils/editorPointer'
+import {
+  shouldCloseFloatingEditorOnPointerDown,
+  shouldCloseFloatingMenuOnPointerDown,
+} from '../utils/editorPointer'
 import {
   buildImageGenerationRunFromResponse,
   getEditorStateFromImageGenerationRun,
@@ -57,6 +61,7 @@ import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
 import {
   getConfiguredImageModels,
   getImageModelMenuWidth,
+  shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
@@ -155,8 +160,14 @@ const MODEL_MENU_MAX_HEIGHT = 440
 const QUALITY_MENU_ESTIMATED_HEIGHT = 468
 const COUNT_MENU_VERTICAL_PADDING = 14
 const COUNT_MENU_ITEM_HEIGHT = 36
+const PROMPT_LIBRARY_ESTIMATED_HEIGHT = 520
+const PROMPT_LIBRARY_WIDTH = 720
 
-type ImageEditorMenuKind = 'model' | 'quality' | 'count'
+type ImageEditorMenuKind = 'model' | 'quality' | 'count' | 'prompt'
+
+function isCodexImageModel(modelId: string): boolean {
+  return modelId.trim().toLowerCase().startsWith('codex:')
+}
 
 interface ImageGenerationSubmitOptions {
   prompt?: string
@@ -226,12 +237,53 @@ function getDisplayFrameStyle(size: { width: number; height: number }): CSSPrope
   }
 }
 
+function PromptLibraryIcon() {
+  return (
+    <svg
+      className="prompt-library-icon"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      aria-hidden="true"
+    >
+      <path
+        d="M4.2 5.8h2.4v8.1H4.2a1 1 0 0 1-1-1V6.8a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.6 5.1h2.5v8.8H6.6V5.1Z"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.1 5.8h2.4a1 1 0 0 1 1 1v6.1a1 1 0 0 1-1 1H9.1V5.8Z"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.1 4.5 12.9 2.7l.6 2.5-7.8 1.8-.6-2.5Z"
+        fill="#2a2a2a"
+        stroke="currentColor"
+        strokeWidth="1.45"
+        strokeLinejoin="round"
+      />
+      <path d="M4.6 8.1h1.1M7.2 8.1H8M9.7 8.1h1.1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 export function ImageNode({ id, data, selected }: NodeProps) {
   const nodeData = data as ImageNodeData
   const settings = useSettingsStore((state) => state.settings)
   const isJimengConfigured = useSettingsStore((state) => state.isJimengConfigured)
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
   )
@@ -239,6 +291,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const qualityMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const countMenuButtonRef = useRef<HTMLButtonElement | null>(null)
+  const promptMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
   const rememberedDefaultsRef = useRef(useGenerationDefaultsStore.getState().image)
 
@@ -277,6 +330,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [countMenuOpen, setCountMenuOpen] = useState(false)
+  const [promptMenuOpen, setPromptMenuOpen] = useState(false)
+  const [promptMenuStyle, setPromptMenuStyle] = useState<CSSProperties>({})
   const [actionBusy, setActionBusy] = useState(false)
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
@@ -298,6 +353,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     model: 'down',
     quality: 'down',
     count: 'down',
+    prompt: 'down',
   })
   const generationRuns = useMemo(
     () => getImageGenerationHistoryItems(nodeData.generationRuns),
@@ -395,6 +451,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       if (kind === 'count') {
         return COUNT_MENU_VERTICAL_PADDING + COUNT_OPTIONS.length * COUNT_MENU_ITEM_HEIGHT
       }
+      if (kind === 'prompt') {
+        return PROMPT_LIBRARY_ESTIMATED_HEIGHT
+      }
       return QUALITY_MENU_ESTIMATED_HEIGHT
     },
     [modelOptions.length],
@@ -402,6 +461,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const getMenuButton = useCallback((kind: ImageEditorMenuKind) => {
     if (kind === 'model') return modelMenuButtonRef.current
     if (kind === 'quality') return qualityMenuButtonRef.current
+    if (kind === 'prompt') return promptMenuButtonRef.current
     return countMenuButtonRef.current
   }, [])
   const updateMenuDirection = useCallback(
@@ -422,11 +482,51 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     },
     [getMenuButton, getMenuEstimatedHeight],
   )
+  const updatePromptMenuPlacement = useCallback(() => {
+    const button = promptMenuButtonRef.current
+    if (!button) return
+    const rect = button.getBoundingClientRect()
+      const direction = chooseFloatingMenuDirection({
+        triggerTop: rect.top,
+        triggerBottom: rect.bottom,
+        viewportHeight: window.innerHeight,
+        menuHeight: PROMPT_LIBRARY_ESTIMATED_HEIGHT,
+        gap: IMAGE_MENU_GAP,
+      })
+    const left = Math.min(
+      Math.max(8, rect.left),
+      Math.max(8, window.innerWidth - PROMPT_LIBRARY_WIDTH - 8),
+    )
+    const top =
+      direction === 'up'
+        ? Math.max(8, rect.top - PROMPT_LIBRARY_ESTIMATED_HEIGHT - IMAGE_MENU_GAP)
+        : Math.min(
+            window.innerHeight - PROMPT_LIBRARY_ESTIMATED_HEIGHT - 8,
+            rect.bottom + IMAGE_MENU_GAP,
+          )
+    setPromptMenuStyle({
+      position: 'fixed',
+      left,
+      top,
+      width: PROMPT_LIBRARY_WIDTH,
+    })
+    setMenuDirections((current) =>
+      current.prompt === direction ? current : { ...current, prompt: direction },
+    )
+  }, [])
   const updateOpenMenuDirections = useCallback(() => {
     if (modelMenuOpen) updateMenuDirection('model')
     if (qualityMenuOpen) updateMenuDirection('quality')
     if (countMenuOpen) updateMenuDirection('count')
-  }, [countMenuOpen, modelMenuOpen, qualityMenuOpen, updateMenuDirection])
+    if (promptMenuOpen) updatePromptMenuPlacement()
+  }, [
+    countMenuOpen,
+    modelMenuOpen,
+    promptMenuOpen,
+    qualityMenuOpen,
+    updateMenuDirection,
+    updatePromptMenuPlacement,
+  ])
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0]
@@ -467,6 +567,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setModelMenuOpen(false)
     setQualityMenuOpen(false)
     setCountMenuOpen(false)
+    setPromptMenuOpen(false)
     setFullSizeOpen(false)
     setEditorClosing(true)
     clearCloseTimer()
@@ -477,24 +578,76 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     }, EDITOR_CLOSE_ANIMATION_MS)
   }, [clearCloseTimer, editorClosing, editorMounted])
 
+  const handleCloseEditorMenus = useCallback(() => {
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+    setPromptMenuOpen(false)
+  }, [])
+
   const handleOpenEditor = useCallback(() => {
     clearCloseTimer()
     setEditorMounted(true)
     setEditorClosing(false)
   }, [clearCloseTimer])
 
-  const handleValidateJimeng = useCallback(async () => {
+  const persistPromptDraft = useCallback(
+    (value: string) => {
+      setPrompt(value)
+      if (sendError) setSendError('')
+      updateNodeData(id, {
+        prompt: value,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [id, sendError, updateNodeData],
+  )
+
+  const persistSelectedImageModel = useCallback(
+    (modelId: string) => {
+      const nextDefaults = {
+        ...(rememberedDefaultsRef.current ?? {}),
+        model: modelId,
+        quality,
+        ratio,
+        resolution,
+        count,
+      }
+      rememberedDefaultsRef.current = nextDefaults
+      useGenerationDefaultsStore.getState().rememberImageDefaults(nextDefaults)
+      updateNodeData(id, {
+        model: modelId,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    },
+    [count, id, quality, ratio, resolution, updateNodeData],
+  )
+
+  const handleValidateImageProvider = useCallback(async () => {
     setActionBusy(true)
     setValidationStatus('checking')
     try {
-      const result = await testJimengConnection(settings ?? {})
-      setValidationStatus(result.ok ? 'success' : 'error')
+      if (shouldRequireJimengCliForImageModel(selectedModel.id)) {
+        const result = await testJimengConnection(settings ?? {})
+        setValidationStatus(result.ok ? 'success' : 'error')
+        return
+      }
+
+      if (isCodexImageModel(selectedModel.id)) {
+        const result = await getCodexStatus()
+        setValidationStatus(result.available ? 'success' : 'error')
+        return
+      }
+
+      setValidationStatus('success')
     } catch {
       setValidationStatus('error')
     } finally {
       setActionBusy(false)
     }
-  }, [settings])
+  }, [selectedModel.id, settings])
 
   const handleDownloadImage = useCallback(async () => {
     if (!nodeData.assetId) {
@@ -632,8 +785,23 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       if (!(target instanceof Element)) return
       const isInsideEditorOwner =
         !!target.closest(`[data-flow-node-id="${id}"]`) ||
+        !!target.closest('.image-editor-panel') ||
+        !!target.closest('.prompt-template-library') ||
         !!target.closest('.image-fullscreen-viewer') ||
         !!target.closest('.prompt-editor-modal')
+      const isInsideMenuRoot =
+        !!target.closest('.image-editor-menu-anchor') ||
+        !!target.closest('.prompt-template-library')
+      if (
+        shouldCloseFloatingMenuOnPointerDown({
+          button: event.button,
+          isMenuOpen:
+            modelMenuOpen || qualityMenuOpen || countMenuOpen || promptMenuOpen,
+          isInsideMenuRoot,
+        })
+      ) {
+        handleCloseEditorMenus()
+      }
       if (
         !shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
@@ -655,13 +823,23 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       document.removeEventListener('pointerdown', handleDocumentPointerDown, true)
       window.removeEventListener('keydown', handleDocumentKeyDown)
     }
-  }, [editorMounted, handleCloseEditor, id])
+  }, [
+    countMenuOpen,
+    editorMounted,
+    handleCloseEditor,
+    handleCloseEditorMenus,
+    id,
+    modelMenuOpen,
+    promptMenuOpen,
+    qualityMenuOpen,
+  ])
 
   const handleModelToggle = () => {
     if (!modelMenuOpen) updateMenuDirection('model')
     setModelMenuOpen((open) => !open)
     setQualityMenuOpen(false)
     setCountMenuOpen(false)
+    setPromptMenuOpen(false)
   }
 
   const handleQualityToggle = () => {
@@ -669,6 +847,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setQualityMenuOpen((open) => !open)
     setModelMenuOpen(false)
     setCountMenuOpen(false)
+    setPromptMenuOpen(false)
   }
 
   const handleCountToggle = () => {
@@ -676,10 +855,33 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setCountMenuOpen((open) => !open)
     setModelMenuOpen(false)
     setQualityMenuOpen(false)
+    setPromptMenuOpen(false)
   }
 
+  const handlePromptMenuToggle = () => {
+    if (!promptMenuOpen) updatePromptMenuPlacement()
+    setPromptMenuOpen((open) => !open)
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+  }
+
+  const handlePromptMenuPointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handlePromptMenuToggle()
+  }
+
+  const handleApplyPromptTemplate = useCallback(
+    (templatePrompt: string) => {
+      persistPromptDraft(templatePrompt)
+      setPromptMenuOpen(false)
+    },
+    [persistPromptDraft],
+  )
+
   useEffect(() => {
-    if (!modelMenuOpen && !qualityMenuOpen && !countMenuOpen) return
+    if (!modelMenuOpen && !qualityMenuOpen && !countMenuOpen && !promptMenuOpen) return
 
     updateOpenMenuDirections()
     window.addEventListener('resize', updateOpenMenuDirections)
@@ -688,9 +890,16 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       window.removeEventListener('resize', updateOpenMenuDirections)
       window.removeEventListener('scroll', updateOpenMenuDirections, true)
     }
-  }, [countMenuOpen, modelMenuOpen, qualityMenuOpen, updateOpenMenuDirections])
+  }, [
+    countMenuOpen,
+    modelMenuOpen,
+    promptMenuOpen,
+    qualityMenuOpen,
+    updateOpenMenuDirections,
+  ])
 
   const handleSend = async (options: ImageGenerationSubmitOptions = {}) => {
+    if (isGenerating) return
     const effectivePrompt = options.prompt ?? prompt
     const trimmedPrompt = effectivePrompt.trim()
     const effectiveModel =
@@ -709,7 +918,15 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       return
     }
 
-    const startedFlowId = useFlowStore.getState().currentFlowId
+    let startedFlowId = ''
+    try {
+      startedFlowId = await useFlowStore.getState().ensureCurrentFlow()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSendError(`工作流准备失败：${message}`)
+      return
+    }
+    setIsGenerating(true)
     const store = useCanvasStore.getState()
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
     const inputImageAssetIds =
@@ -774,12 +991,12 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           error: message,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
+        setIsGenerating(false)
         setSendError(`生成前保存节点失败：${message}`)
         return
       }
     }
 
-    setIsGenerating(true)
     setSendError('')
 
     const applyFinal = async (resp: GenerationResponse) => {
@@ -893,6 +1110,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         error: message,
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
+      setIsGenerating(false)
       setSendError(message)
     }
 
@@ -918,14 +1136,15 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           handleGenerationError(
             applyErr instanceof Error ? applyErr.message : String(applyErr),
           )
+          return
         }
+        setIsGenerating(false)
       },
       onError: (error) => {
         handleGenerationError(error)
       },
     })
     generationUnsubscribeRef.current = flow.cancel
-    setIsGenerating(false)
   }
 
   const applyEditorStateFromRun = (run: ImageGenerationRun) => {
@@ -1028,10 +1247,20 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             busy={actionBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
+            validationLabel={
+              isCodexImageModel(selectedModel.id) ? '校验 OpenAI' : '校验'
+            }
+            validationAriaLabel={
+              isCodexImageModel(selectedModel.id)
+                ? '校验 OpenAI CLI'
+                : shouldRequireJimengCliForImageModel(selectedModel.id)
+                  ? '校验即梦 CLI'
+                  : '校验当前图片模型'
+            }
             upscaleResolution={upscaleResolution}
             onUpscale={(resolution) => void handleUpscaleImage(resolution)}
             onUpscaleResolutionChange={setUpscaleResolution}
-            onValidate={() => void handleValidateJimeng()}
+            onValidate={() => void handleValidateImageProvider()}
             onDownload={handleDownloadImage}
             onOpenFullSize={handleOpenFullSize}
           />
@@ -1126,10 +1355,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
 
             <PromptEditor
               value={prompt}
-              onChange={(value) => {
-                setPrompt(value)
-                if (sendError) setSendError('')
-              }}
+              onChange={persistPromptDraft}
               placeholder="可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜"
             />
 
@@ -1161,6 +1387,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         onClick={() => {
                           setModelTouched(true)
                           setSelectedModelId(model.id)
+                          persistSelectedImageModel(model.id)
                           setModelMenuOpen(false)
                         }}
                       >
@@ -1278,6 +1505,36 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   </div>
                 )}
               </div>
+              <div
+                className={`image-editor-menu-anchor ${
+                  menuDirections.prompt === 'up' ? 'drop-up' : 'drop-down'
+                }`}
+              >
+                <button
+                  ref={promptMenuButtonRef}
+                  type="button"
+                  className={`image-editor-pill image-editor-prompt-action-button${
+                    promptMenuOpen ? ' active' : ''
+                  }`}
+                  onPointerDown={handlePromptMenuPointerDown}
+                  title="提示词操作"
+                  aria-label="提示词操作"
+                  aria-expanded={promptMenuOpen}
+                >
+                  <PromptLibraryIcon />
+                </button>
+              </div>
+              {promptMenuOpen && typeof document !== 'undefined'
+                ? createPortal(
+                    <PromptTemplateLibrary
+                      currentPrompt={prompt}
+                      style={promptMenuStyle}
+                      onApply={handleApplyPromptTemplate}
+                      onClose={() => setPromptMenuOpen(false)}
+                    />,
+                    document.body,
+                  )
+                : null}
               <button
                 type="button"
                 className="image-editor-send"

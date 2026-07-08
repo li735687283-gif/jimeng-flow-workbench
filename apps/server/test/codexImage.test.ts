@@ -15,6 +15,7 @@ test('isCodexImageModel only claims explicit Codex image models', () => {
   assert.equal(isCodexImageModel('$imagegen'), true)
   assert.equal(isCodexImageModel('gpt-image-2'), true)
   assert.equal(isCodexImageModel('codex:gpt-image-2'), true)
+  assert.equal(isCodexImageModel('codex:gpt-5.5'), true)
 
   assert.equal(isCodexImageModel('gpt-image-2-official'), false)
   assert.equal(isCodexImageModel('gemini-3-pro-image-preview'), false)
@@ -26,11 +27,9 @@ test('getCodexImageProviderStatus reports available when CLI and auth file exist
     env: {
       CODEX_BIN: 'C:\\tools\\codex.cmd',
       CODEX_AUTH_FILE: 'C:\\Users\\Lzw\\.codex\\auth.json',
-      GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
     },
     commandExists: async (command) =>
-      command === 'C:\\tools\\codex.cmd' ||
-      command === 'C:\\tools\\gpt-image-2-skill.cmd',
+      command === 'C:\\tools\\codex.cmd',
     fileExists: async (path) => path.endsWith('.codex\\auth.json'),
     runCommand: async () => ({ stdout: 'codex 1.0.0', stderr: '' }),
   })
@@ -39,10 +38,10 @@ test('getCodexImageProviderStatus reports available when CLI and auth file exist
   assert.equal(status.cliFound, true)
   assert.equal(status.authFound, true)
   assert.equal(status.codexPath, 'C:\\tools\\codex.cmd')
-  assert.equal(status.helperFound, true)
-  assert.equal(status.helperPath, 'C:\\tools\\gpt-image-2-skill.cmd')
+  assert.equal(status.helperFound, false)
+  assert.equal(status.helperPath, undefined)
   assert.match(status.setupCommands.installCodex, /chatgpt\.com\/codex\/install/)
-  assert.equal(status.setupCommands.installImageHelper, 'npm install -g gpt-image-2-skill')
+  assert.equal(status.setupCommands.installImageHelper, undefined)
   assert.equal(status.setupCommands.login, 'codex')
 })
 
@@ -50,11 +49,9 @@ test('getCodexImageProviderStatus does not block on a missing auth file', async 
   const status = await getCodexImageProviderStatus({
     env: {
       CODEX_BIN: 'C:\\tools\\codex.cmd',
-      GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
     },
     commandExists: async (command) =>
-      command === 'C:\\tools\\codex.cmd' ||
-      command === 'C:\\tools\\gpt-image-2-skill.cmd',
+      command === 'C:\\tools\\codex.cmd',
     fileExists: async () => false,
     runCommand: async () => ({ stdout: 'codex 1.0.0', stderr: '' }),
   })
@@ -62,7 +59,7 @@ test('getCodexImageProviderStatus does not block on a missing auth file', async 
   assert.equal(status.available, true)
   assert.equal(status.cliFound, true)
   assert.equal(status.authFound, false)
-  assert.equal(status.helperFound, true)
+  assert.equal(status.helperFound, false)
   assert.match(status.message, /首次执行/)
 })
 
@@ -78,33 +75,26 @@ test('getCodexImageProviderStatus uses platform-safe default command names', asy
   })
 
   const expectedCodex = process.platform === 'win32' ? 'codex.cmd' : 'codex'
-  const expectedHelper = process.platform === 'win32'
-    ? 'gpt-image-2-skill.cmd'
-    : 'gpt-image-2-skill'
   assert.equal(status.codexPath, expectedCodex)
-  assert.equal(status.helperPath, expectedHelper)
-  assert.deepEqual(seen.slice(0, 2), [expectedCodex, expectedHelper])
+  assert.equal(status.helperPath, undefined)
+  assert.deepEqual(seen.slice(0, 1), [expectedCodex])
 })
 
-test('getCodexImageProviderStatus can use npx when the image helper is not installed globally', async () => {
+test('getCodexImageProviderStatus does not require the legacy image helper', async () => {
   const seen: string[] = []
   const status = await getCodexImageProviderStatus({
     env: {},
     commandExists: async (command) => {
       seen.push(command)
-      return command === (process.platform === 'win32' ? 'codex.cmd' : 'codex') ||
-        command === (process.platform === 'win32' ? 'npx.cmd' : 'npx')
+      return command === (process.platform === 'win32' ? 'codex.cmd' : 'codex')
     },
     fileExists: async () => false,
   })
 
-  const expectedHelper = process.platform === 'win32'
-    ? 'npx.cmd -y gpt-image-2-skill'
-    : 'npx -y gpt-image-2-skill'
-  assert.equal(status.helperFound, true)
-  assert.equal(status.helperPath, expectedHelper)
-  assert.ok(seen.includes(process.platform === 'win32' ? 'gpt-image-2-skill.cmd' : 'gpt-image-2-skill'))
-  assert.ok(seen.includes(process.platform === 'win32' ? 'npx.cmd' : 'npx'))
+  assert.equal(status.available, true)
+  assert.equal(status.helperFound, false)
+  assert.equal(status.helperPath, undefined)
+  assert.deepEqual(seen, [process.platform === 'win32' ? 'codex.cmd' : 'codex'])
 })
 
 test('generateCodexCliImage runs codex exec and returns newly created image files', async () => {
@@ -334,7 +324,7 @@ test('generateCodexCliText resolves Windows .cmd commands from PATH before launc
   }
 })
 
-test('generateCodexCliImage prefers gpt-image-2-skill when the helper is available', async () => {
+test('generateCodexCliImage uses codex exec for legacy gpt-image-2 requests', async () => {
   const calls: {
     command: string
     args: string[]
@@ -357,12 +347,10 @@ test('generateCodexCliImage prefers gpt-image-2-skill when the helper is availab
       cwd: 'F:\\repo',
       outputDir: 'F:\\repo\\workspace\\outputs',
       env: {
-        GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
         CODEX_AUTH_FILE: 'C:\\Users\\Lzw\\.codex\\auth.json',
       },
       now: () => 1_000,
-      commandExists: async (command) =>
-        command === 'C:\\tools\\gpt-image-2-skill.cmd',
+      commandExists: async () => false,
       fileExists: async (path) => path.endsWith('.codex\\auth.json'),
       runCommand: async (command, args, options) => {
         calls.push({
@@ -371,11 +359,11 @@ test('generateCodexCliImage prefers gpt-image-2-skill when the helper is availab
           input: options.input,
           cwd: options.cwd,
         })
-        return { stdout: '{"path":"F:\\\\repo\\\\workspace\\\\outputs\\\\helper.png"}', stderr: '' }
+        return { stdout: 'saved image', stderr: '' }
       },
       listImageFiles: async () => [
         {
-          path: 'F:\\repo\\workspace\\outputs\\helper.png',
+          path: 'F:\\repo\\workspace\\outputs\\codex-image.png',
           mtimeMs: 1_200,
           size: 10,
         },
@@ -384,30 +372,17 @@ test('generateCodexCliImage prefers gpt-image-2-skill when the helper is availab
   )
 
   assert.deepEqual(results, [
-    { localPath: 'F:\\repo\\workspace\\outputs\\helper.png' },
+    { localPath: 'F:\\repo\\workspace\\outputs\\codex-image.png' },
   ])
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].command, 'C:\\tools\\gpt-image-2-skill.cmd')
-  assert.equal(calls[0].input, undefined)
-  assert.deepEqual(calls[0].args.slice(0, 7), [
-    '--json',
-    '--json-events',
-    '--provider',
-    'codex',
-    '--auth-file',
-    'C:\\Users\\Lzw\\.codex\\auth.json',
-    'images',
-  ])
-  assert.ok(calls[0].args.includes('generate'))
-  assert.ok(calls[0].args.includes('--prompt'))
-  assert.ok(calls[0].args.some((arg) => arg.includes('crystal robot portrait')))
-  assert.ok(calls[0].args.includes('--size'))
-  assert.ok(calls[0].args.includes('1024x1024'))
-  assert.ok(calls[0].args.includes('--quality'))
-  assert.ok(calls[0].args.includes('high'))
+  assert.equal(calls[0].command, process.platform === 'win32' ? 'codex.cmd' : 'codex')
+  assert.deepEqual(calls[0].args.slice(0, 2), ['exec', '--cd'])
+  assert.equal(calls[0].args.includes('--model'), false)
+  assert.match(calls[0].input ?? '', /\$imagegen/)
+  assert.match(calls[0].input ?? '', /crystal robot portrait/)
 })
 
-test('generateCodexCliImage falls back to npx gpt-image-2-skill when the helper binary is absent', async () => {
+test('generateCodexCliImage passes the selected Codex model to codex exec', async () => {
   const calls: {
     command: string
     args: string[]
@@ -415,17 +390,13 @@ test('generateCodexCliImage falls back to npx gpt-image-2-skill when the helper 
     cwd?: string
   }[] = []
 
-  const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-  const helperCommand = process.platform === 'win32'
-    ? 'gpt-image-2-skill.cmd'
-    : 'gpt-image-2-skill'
   const results = await generateCodexCliImage(
     {
       flowId: 'local',
       nodeId: 'image-1',
       mediaType: 'image',
       prompt: 'quiet monochrome gallery',
-      model: 'gpt-image-2',
+      model: 'codex:gpt-5.5',
       width: 1536,
       height: 864,
       count: 1,
@@ -437,7 +408,7 @@ test('generateCodexCliImage falls back to npx gpt-image-2-skill when the helper 
         CODEX_AUTH_FILE: 'C:\\Users\\Lzw\\.codex\\auth.json',
       },
       now: () => 1_000,
-      commandExists: async (command) => command === npxCommand,
+      commandExists: async () => false,
       fileExists: async (path) => path.endsWith('.codex\\auth.json'),
       runCommand: async (command, args, options) => {
         calls.push({
@@ -446,11 +417,11 @@ test('generateCodexCliImage falls back to npx gpt-image-2-skill when the helper 
           input: options.input,
           cwd: options.cwd,
         })
-        return { stdout: '{"path":"F:\\\\repo\\\\workspace\\\\outputs\\\\npx-helper.png"}', stderr: '' }
+        return { stdout: 'saved image', stderr: '' }
       },
       listImageFiles: async () => [
         {
-          path: 'F:\\repo\\workspace\\outputs\\npx-helper.png',
+          path: 'F:\\repo\\workspace\\outputs\\codex-model.png',
           mtimeMs: 1_200,
           size: 10,
         },
@@ -459,29 +430,25 @@ test('generateCodexCliImage falls back to npx gpt-image-2-skill when the helper 
   )
 
   assert.deepEqual(results, [
-    { localPath: 'F:\\repo\\workspace\\outputs\\npx-helper.png' },
+    { localPath: 'F:\\repo\\workspace\\outputs\\codex-model.png' },
   ])
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].command, npxCommand)
-  assert.deepEqual(calls[0].args.slice(0, 2), ['-y', 'gpt-image-2-skill'])
-  assert.ok(calls[0].args.includes('--provider'))
-  assert.ok(calls[0].args.includes('codex'))
-  assert.ok(calls[0].args.includes('--auth-file'))
-  assert.ok(calls[0].args.includes('C:\\Users\\Lzw\\.codex\\auth.json'))
-  assert.ok(calls[0].args.includes('images'))
-  assert.ok(calls[0].args.includes('generate'))
-  assert.ok(calls[0].args.some((arg) => arg.includes('quiet monochrome gallery')))
-  assert.notEqual(calls[0].command, helperCommand)
+  assert.equal(calls[0].command, process.platform === 'win32' ? 'codex.cmd' : 'codex')
+  assert.equal(calls[0].args.includes('--model'), true)
+  assert.equal(calls[0].args[calls[0].args.indexOf('--model') + 1], 'gpt-5.5')
+  assert.match(calls[0].input ?? '', /quiet monochrome gallery/)
 })
 
-test('generateCodexCliImage accepts gpt-image-2-skill json image urls', async () => {
-  const results = await generateCodexCliImage(
+test('generateCodexCliImage avoids Windows workspace sandbox setup during image generation', async () => {
+  const calls: { args: string[] }[] = []
+
+  await generateCodexCliImage(
     {
       flowId: 'local',
       nodeId: 'image-1',
       mediaType: 'image',
-      prompt: 'glass city poster',
-      model: 'gpt-image-2',
+      prompt: 'silent moon poster',
+      model: 'codex:gpt-5.5',
       width: 1536,
       height: 864,
       count: 1,
@@ -489,12 +456,45 @@ test('generateCodexCliImage accepts gpt-image-2-skill json image urls', async ()
     {
       cwd: 'F:\\repo',
       outputDir: 'F:\\repo\\workspace\\outputs',
-      env: {
-        GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
-      },
       now: () => 1_000,
-      commandExists: async (command) =>
-        command === 'C:\\tools\\gpt-image-2-skill.cmd',
+      runCommand: async (_command, args) => {
+        calls.push({ args })
+        return { stdout: 'saved image', stderr: '' }
+      },
+      listImageFiles: async () => [
+        {
+          path: 'F:\\repo\\workspace\\outputs\\moon.png',
+          mtimeMs: 1_200,
+          size: 10,
+        },
+      ],
+    },
+  )
+
+  const sandboxIndex = calls[0].args.indexOf('--sandbox')
+  assert.notEqual(sandboxIndex, -1)
+  assert.equal(calls[0].args[sandboxIndex + 1], 'danger-full-access')
+  assert.equal(calls[0].args.includes('workspace-write'), false)
+})
+
+test('generateCodexCliImage accepts codex exec reported image urls', async () => {
+  const results = await generateCodexCliImage(
+    {
+      flowId: 'local',
+      nodeId: 'image-1',
+      mediaType: 'image',
+      prompt: 'glass city poster',
+      model: 'codex:gpt-5.5',
+      width: 1536,
+      height: 864,
+      count: 1,
+    },
+    {
+      cwd: 'F:\\repo',
+      outputDir: 'F:\\repo\\workspace\\outputs',
+      env: {},
+      now: () => 1_000,
+      commandExists: async () => false,
       fileExists: async () => false,
       runCommand: async () => ({
         stdout: '{"images":[{"url":"https://cdn.example.com/generated.png"}]}',
@@ -509,7 +509,7 @@ test('generateCodexCliImage accepts gpt-image-2-skill json image urls', async ()
   ])
 })
 
-test('generateCodexCliImage sends reference images to gpt-image-2-skill edit mode', async () => {
+test('generateCodexCliImage sends reference images to codex exec', async () => {
   const calls: { command: string; args: string[] }[] = []
   const referencePath = 'F:\\repo\\workspace\\outputs\\reference.png'
 
@@ -520,7 +520,7 @@ test('generateCodexCliImage sends reference images to gpt-image-2-skill edit mod
       mediaType: 'image',
       prompt: 'turn the reference into a rainy night scene',
       inputImages: [referencePath],
-      model: 'gpt-image-2',
+      model: 'codex:gpt-5.5',
       width: 1536,
       height: 864,
       count: 1,
@@ -529,12 +529,10 @@ test('generateCodexCliImage sends reference images to gpt-image-2-skill edit mod
       cwd: 'F:\\repo',
       outputDir: 'F:\\repo\\workspace\\outputs',
       env: {
-        GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
         CODEX_AUTH_FILE: 'C:\\Users\\Lzw\\.codex\\auth.json',
       },
       now: () => 1_000,
-      commandExists: async (command) =>
-        command === 'C:\\tools\\gpt-image-2-skill.cmd',
+      commandExists: async () => false,
       fileExists: async (path) => path.endsWith('.codex\\auth.json'),
       runCommand: async (command, args) => {
         calls.push({ command, args })
@@ -554,11 +552,9 @@ test('generateCodexCliImage sends reference images to gpt-image-2-skill edit mod
     { localPath: 'F:\\repo\\workspace\\outputs\\edited.png' },
   ])
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].command, 'C:\\tools\\gpt-image-2-skill.cmd')
-  assert.ok(calls[0].args.includes('edit'))
-  assert.ok(calls[0].args.includes('--ref-image'))
+  assert.equal(calls[0].command, process.platform === 'win32' ? 'codex.cmd' : 'codex')
+  assert.ok(calls[0].args.includes('--image'))
   assert.ok(calls[0].args.includes(referencePath))
-  assert.equal(calls[0].args.includes('generate'), false)
 })
 
 test('generateCodexCliImage resolves local asset file urls before edit mode', async () => {
@@ -579,7 +575,7 @@ test('generateCodexCliImage resolves local asset file urls before edit mode', as
         mediaType: 'image',
         prompt: 'edit the canvas reference',
         inputImages: [`/api/assets/${asset.id}/file`],
-        model: 'gpt-image-2',
+        model: 'codex:gpt-5.5',
         width: 1024,
         height: 1024,
         count: 1,
@@ -588,11 +584,9 @@ test('generateCodexCliImage resolves local asset file urls before edit mode', as
         cwd: 'F:\\repo',
         outputDir: 'F:\\repo\\workspace\\outputs',
         env: {
-          GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
         },
         now: () => 1_000,
-        commandExists: async (command) =>
-          command === 'C:\\tools\\gpt-image-2-skill.cmd',
+        commandExists: async () => false,
         fileExists: async () => false,
         runCommand: async (command, args) => {
           calls.push({ command, args })
@@ -612,8 +606,7 @@ test('generateCodexCliImage resolves local asset file urls before edit mode', as
       { localPath: 'F:\\repo\\workspace\\outputs\\edited-from-url.png' },
     ])
     assert.equal(calls.length, 1)
-    assert.ok(calls[0].args.includes('edit'))
-    assert.ok(calls[0].args.includes('--ref-image'))
+    assert.ok(calls[0].args.includes('--image'))
     assert.ok(calls[0].args.includes(assetPath))
     assert.equal(calls[0].args.includes(`/api/assets/${asset.id}/file`), false)
   } finally {
@@ -649,7 +642,7 @@ test('generateCodexCliImage fails clearly when no output image appears', async (
   )
 })
 
-test('generateCodexCliImage explains missing Codex login for gpt-image-2 helper', async () => {
+test('generateCodexCliImage explains missing Codex login for legacy gpt-image-2 requests', async () => {
   await assert.rejects(
     () => generateCodexCliImage(
       {
@@ -666,10 +659,8 @@ test('generateCodexCliImage explains missing Codex login for gpt-image-2 helper'
         cwd: 'F:\\repo',
         outputDir: 'F:\\repo\\workspace\\outputs',
         env: {
-          GPT_IMAGE_2_SKILL_BIN: 'C:\\tools\\gpt-image-2-skill.cmd',
         },
-        commandExists: async (command) =>
-          command === 'C:\\tools\\gpt-image-2-skill.cmd',
+        commandExists: async () => false,
         fileExists: async () => false,
         runCommand: async () => {
           throw new Error('No auth file found. Please run codex to sign in.')

@@ -31,6 +31,8 @@ interface FlowState {
   loadFlow: (id: string) => Promise<void>
   /** 新建空白工作流并清空画布 */
   createFlow: () => Promise<void>
+  /** 确保当前画布绑定到一个工作流，不清空已有节点 */
+  ensureCurrentFlow: () => Promise<string>
   /** 保存当前画布到后端（PUT） */
   saveCurrent: () => Promise<void>
   /** 更新当前工作流名称（本地 + 后端） */
@@ -108,6 +110,39 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       })
     } catch (err) {
       set({
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      throw err
+    }
+  },
+
+  ensureCurrentFlow: async () => {
+    const existingFlowId = get().currentFlowId
+    if (existingFlowId) return existingFlowId
+
+    set({ saving: true, error: null })
+    try {
+      const { nodes, edges, clearDeletedNodeIds } = useCanvasStore.getState()
+      const flow = await flowsApi.createFlow({
+        name: get().currentFlowName,
+      })
+      const updated = await flowsApi.updateFlow(flow.id, {
+        nodes,
+        edges,
+      })
+      clearDeletedNodeIds()
+      set({
+        currentFlowId: updated.id,
+        currentFlowName: updated.name,
+        lastSavedAt: Date.now(),
+        saving: false,
+        loading: false,
+      })
+      return updated.id
+    } catch (err) {
+      set({
+        saving: false,
         loading: false,
         error: err instanceof Error ? err.message : String(err),
       })

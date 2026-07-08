@@ -85,7 +85,7 @@ export interface CodexImageStatus {
   helperPath?: string
   setupCommands: {
     installCodex: string
-    installImageHelper: string
+    installImageHelper?: string
     login: string
   }
   message: string
@@ -122,71 +122,6 @@ function getCodexPath(
   return deps.codexPath?.trim() ||
     env.CODEX_BIN?.trim() ||
     (process.platform === 'win32' ? 'codex.cmd' : 'codex')
-}
-
-function getGptImage2SkillPath(
-  deps: Pick<CodexImageDeps, 'env'> = {},
-): string {
-  const env = deps.env ?? process.env
-  return env.GPT_IMAGE_2_SKILL_BIN?.trim() ||
-    (process.platform === 'win32' ? 'gpt-image-2-skill.cmd' : 'gpt-image-2-skill')
-}
-
-function getNpxPath(
-  deps: Pick<CodexImageDeps, 'env'> = {},
-): string {
-  const env = deps.env ?? process.env
-  return env.NPX_BIN?.trim() ||
-    (process.platform === 'win32' ? 'npx.cmd' : 'npx')
-}
-
-interface GptImage2SkillCommand {
-  found: boolean
-  command: string
-  argsPrefix: string[]
-  displayPath: string
-}
-
-async function resolveGptImage2SkillCommand(
-  deps: Pick<CodexImageDeps, 'env'>,
-  commandExists: (command: string) => Promise<boolean>,
-): Promise<GptImage2SkillCommand> {
-  const env = deps.env ?? process.env
-  const helperPath = getGptImage2SkillPath(deps)
-  if (await commandExists(helperPath)) {
-    return {
-      found: true,
-      command: helperPath,
-      argsPrefix: [],
-      displayPath: helperPath,
-    }
-  }
-
-  if (env.GPT_IMAGE_2_SKILL_BIN?.trim()) {
-    return {
-      found: false,
-      command: helperPath,
-      argsPrefix: [],
-      displayPath: helperPath,
-    }
-  }
-
-  const npxPath = getNpxPath(deps)
-  if (await commandExists(npxPath)) {
-    return {
-      found: true,
-      command: npxPath,
-      argsPrefix: ['-y', 'gpt-image-2-skill'],
-      displayPath: `${npxPath} -y gpt-image-2-skill`,
-    }
-  }
-
-  return {
-    found: false,
-    command: helperPath,
-    argsPrefix: [],
-    displayPath: helperPath,
-  }
 }
 
 function getCodexExecModel(modelId: string): string {
@@ -226,7 +161,6 @@ function getCodexSetupCommands(): CodexImageStatus['setupCommands'] {
     installCodex: process.platform === 'win32'
       ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex"'
       : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
-    installImageHelper: 'npm install -g gpt-image-2-skill',
     login: 'codex',
   }
 }
@@ -395,8 +329,6 @@ export async function getCodexImageProviderStatus(
   const commandExists = deps.commandExists ?? defaultCommandExists
   const fileExists = deps.fileExists ?? defaultFileExists
   const cliFound = await commandExists(codexPath)
-  const helperCommand = await resolveGptImage2SkillCommand(deps, commandExists)
-  const helperFound = helperCommand.found
 
   const authFile = await findCodexAuthFile(env, fileExists)
   const authFound = !!authFile
@@ -412,10 +344,9 @@ export async function getCodexImageProviderStatus(
     available: cliFound,
     cliFound,
     authFound,
-    helperFound,
+    helperFound: false,
     codexPath,
     authFile,
-    helperPath: helperCommand.displayPath,
     setupCommands: getCodexSetupCommands(),
     message: cliFound
       ? authFound
@@ -684,143 +615,6 @@ function buildCodexImagePrompt(
   ].filter(Boolean).join('\n')
 }
 
-function getGptImage2SkillModel(modelId: string): string {
-  const raw = modelId.trim()
-  const execModel = getCodexExecModel(raw)
-  const value = execModel || raw
-  const normalized = normalizeModelId(value)
-  if (
-    !value ||
-    normalized === '$imagegen' ||
-    normalized === 'gpt-image-2' ||
-    normalized.startsWith('gpt-image')
-  ) {
-    return 'gpt-5.4'
-  }
-  return value
-}
-
-function getGptImage2SkillSize(req: GenerationRequest): string {
-  const width = Math.max(0, Math.round(Number(req.width) || 0))
-  const height = Math.max(0, Math.round(Number(req.height) || 0))
-  if (width > 0 && height > 0) return `${width}x${height}`
-  return 'auto'
-}
-
-function buildGptImage2SkillPrompt(req: GenerationRequest): string {
-  const width = Number(req.width) || 0
-  const height = Number(req.height) || 0
-  if (!width || !height) return req.prompt
-
-  const divisor = gcd(width, height)
-  const ratio = `${Math.round(width / divisor)}:${Math.round(height / divisor)}`
-  const orientation = width > height ? '横版/宽幅' : height > width ? '竖版/长幅' : '正方形'
-  return [
-    req.prompt,
-    `画幅要求：生成 ${orientation} 图片，宽高比 ${ratio}，不要交换宽高。`,
-    `画质要求：目标输出 ${getGptImage2SkillSize(req)} 高分辨率图片。`,
-  ].join(' ')
-}
-
-function gcd(a: number, b: number): number {
-  let x = Math.abs(Math.round(a))
-  let y = Math.abs(Math.round(b))
-  while (y) {
-    const next = x % y
-    x = y
-    y = next
-  }
-  return x || 1
-}
-
-async function generateWithGptImage2Skill(
-  req: GenerationRequest,
-  referencePaths: string[],
-  outputDir: string,
-  deps: CodexImageDeps,
-  cwd: string,
-  timeoutMs: number,
-  sinceMs: number,
-): Promise<GenerationResult[] | null> {
-  const commandExists = deps.commandExists ?? defaultCommandExists
-  const helperCommand = await resolveGptImage2SkillCommand(deps, commandExists)
-  if (!helperCommand.found) return null
-
-  const env = deps.env ?? process.env
-  const fileExists = deps.fileExists ?? defaultFileExists
-  const authFile = await findCodexAuthFile(env, fileExists)
-  const runCommand = deps.runCommand ?? defaultRunCommand
-  const listImageFiles = deps.listImageFiles ?? defaultListImageFiles
-  const count = Math.max(1, Math.floor(req.count ?? 1))
-  const collectedOutput = []
-
-  for (let index = 0; index < count; index++) {
-    const outputPath = join(
-      outputDir,
-      `gpt-image-2-${Date.now()}-${randomBytes(4).toString('hex')}.png`,
-    )
-    const args = [
-      '--json',
-      '--json-events',
-      '--provider',
-      'codex',
-    ]
-    args.unshift(...helperCommand.argsPrefix)
-    if (authFile) args.push('--auth-file', authFile)
-    args.push(
-      'images',
-      referencePaths.length > 0 ? 'edit' : 'generate',
-      '--prompt',
-      buildGptImage2SkillPrompt(req),
-      '--out',
-      outputPath,
-      '--model',
-      getGptImage2SkillModel(req.model),
-      '--format',
-      'png',
-      '--size',
-      getGptImage2SkillSize(req),
-      '--quality',
-      'high',
-    )
-    for (const path of referencePaths) {
-      args.push('--ref-image', path)
-    }
-
-    let result: CodexCommandResult
-    try {
-      result = await runCommand(helperCommand.command, args, {
-        cwd,
-        timeoutMs,
-      })
-    } catch (err) {
-      throw wrapCodexCommandError('GPT Image 2 helper', err)
-    }
-    collectedOutput.push(result.stdout, result.stderr)
-  }
-
-  let newFiles = getNewImageFiles(
-    await listImageFiles(outputDir),
-    sinceMs,
-    count,
-  )
-  if (newFiles.length === 0) {
-    const text = collectedOutput.filter(Boolean).join('\n')
-    const reportedResults = extractImageResultsFromText(text)
-    if (reportedResults.length > 0) {
-      return reportedResults.slice(0, count)
-    }
-  }
-
-  if (newFiles.length === 0) {
-    throw new Error(
-      `GPT Image 2 helper 已返回，但没有在输出目录发现图片：${summarizeOutput(collectedOutput.join('\n'), '')}`,
-    )
-  }
-
-  return newFiles.map((file) => ({ localPath: file.path }))
-}
-
 async function cleanupTempPaths(paths: string[]): Promise<void> {
   const dirs = new Set(paths.map((path) => resolve(path, '..')))
   await Promise.all(Array.from(dirs).map((dir) => rm(dir, {
@@ -923,17 +717,6 @@ export async function generateCodexCliImage(
       deps,
       tempPaths,
     )
-    const helperResults = await generateWithGptImage2Skill(
-      req,
-      referencePaths,
-      outputDir,
-      deps,
-      cwd,
-      timeoutMs,
-      sinceMs,
-    )
-    if (helperResults) return helperResults
-
     const lastMessagePath = join(
       outputDir,
       `codex-last-${Date.now()}-${randomBytes(4).toString('hex')}.txt`,
@@ -943,7 +726,7 @@ export async function generateCodexCliImage(
       '--cd',
       cwd,
       '--sandbox',
-      'workspace-write',
+      'danger-full-access',
       '--skip-git-repo-check',
       '--output-last-message',
       lastMessagePath,

@@ -27,6 +27,7 @@ const MODEL_CAPABILITY_SET = new Set<ModelCapability>([
   "image",
   "video",
 ]);
+const CODEX_IMAGE_MODEL_ID = "codex:gpt-5.5";
 
 function normalizeCapabilities(value: unknown): ModelCapability[] {
   const raw = Array.isArray(value) ? value : [value];
@@ -45,8 +46,10 @@ export function normalizeModelConfigs(value: unknown): ModelConfig[] {
   for (const item of value) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
     const raw = item as Record<string, unknown>;
-    const id = typeof raw.id === "string" ? raw.id.trim() : "";
+    const rawId = typeof raw.id === "string" ? raw.id.trim() : "";
+    const id = normalizeLegacyModelId(rawId);
     if (!id) continue;
+    const legacyOpenAiCliId = !!rawId && id !== rawId;
 
     const capabilities = normalizeCapabilities(raw.capabilities);
     if (capabilities.length === 0) continue;
@@ -62,7 +65,9 @@ export function normalizeModelConfigs(value: unknown): ModelConfig[] {
 
     const label = typeof raw.label === "string" ? raw.label.trim() : "";
     const provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
-    if (label || previous?.label) next.label = label || previous?.label;
+    if (!legacyOpenAiCliId && (label || previous?.label)) {
+      next.label = label || previous?.label;
+    }
     if (provider || previous?.provider) next.provider = provider || previous?.provider;
     if (raw.enabled === false || previous?.enabled === false) next.enabled = false;
 
@@ -85,7 +90,10 @@ export function getModelConfigsByCapability(
 
 function normalizeLegacyModelId(modelId: string): string {
   const id = modelId.trim();
-  return id.toLowerCase() === "$imagegen" ? "gpt-image-2" : id;
+  const normalized = id.toLowerCase();
+  return normalized === "$imagegen" || normalized === "gpt-image-2"
+    ? CODEX_IMAGE_MODEL_ID
+    : id;
 }
 
 function uniqueLegacyModelIds(models: Array<string | undefined>): string[] {

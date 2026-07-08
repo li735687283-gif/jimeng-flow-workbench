@@ -30,9 +30,8 @@ test('buildModelConfigsFromSettings converts legacy model lists into capability 
     [
       ['banana-pro', 'openai-compatible', 'image', 'Banana Pro'],
       ['gpt-4o-mini', 'openai-compatible', 'chat', ''],
-      ['codex:gpt-5.5', 'codex', 'chat', ''],
+      ['codex:gpt-5.5', 'codex', 'chat,image', ''],
       ['claude-opus-4-8', 'openai-compatible', 'chat', ''],
-      ['gpt-image-2', 'codex', 'image', ''],
       ['seedance-2.0', 'dreamina', 'video', ''],
       ['veo3-fast', 'openai-compatible', 'video', ''],
     ],

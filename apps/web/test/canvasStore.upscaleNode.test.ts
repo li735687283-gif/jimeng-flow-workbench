@@ -53,3 +53,57 @@ test('createUpscaleImageNode creates a running image node to the right and conne
   assert.equal(edges[0].target, targetId)
   assert.equal(edges[0].type, 'cut')
 })
+
+test('createUpscaleImageNode creates a new visible node for every repeated upscale', () => {
+  const sourceNode: Node = {
+    id: 'image-source',
+    type: 'image',
+    position: { x: 100, y: 220 },
+    measured: { width: 360, height: 240 },
+    data: {
+      title: '原图',
+      status: 'success',
+      assetId: 'asset-source',
+      width: 1536,
+      height: 864,
+      ratio: '16:9',
+    },
+  }
+
+  useCanvasStore.setState({
+    nodes: [sourceNode],
+    edges: [],
+    selectedNodeId: null,
+  })
+
+  const createUpscaleImageNode = (
+    useCanvasStore.getState() as unknown as {
+      createUpscaleImageNode?: (sourceId: string, resolution: '2k' | '4k' | '8k') => string
+    }
+  ).createUpscaleImageNode
+
+  assert.equal(typeof createUpscaleImageNode, 'function')
+
+  const firstTargetId = createUpscaleImageNode('image-source', '4k')
+  const secondTargetId = createUpscaleImageNode('image-source', '4k')
+  const { nodes, edges, selectedNodeId } = useCanvasStore.getState()
+  const firstTarget = nodes.find((node) => node.id === firstTargetId)
+  const secondTarget = nodes.find((node) => node.id === secondTargetId)
+
+  assert.ok(firstTarget)
+  assert.ok(secondTarget)
+  assert.notEqual(firstTargetId, secondTargetId)
+  assert.equal(firstTarget.position.x, secondTarget.position.x)
+  assert.notEqual(firstTarget.position.y, secondTarget.position.y)
+  assert.equal(firstTarget.data.upscaleSourceNodeId, 'image-source')
+  assert.equal(secondTarget.data.upscaleSourceNodeId, 'image-source')
+  assert.equal(edges.length, 2)
+  assert.deepEqual(
+    edges.map((edge) => [edge.source, edge.target]),
+    [
+      ['image-source', firstTargetId],
+      ['image-source', secondTargetId],
+    ],
+  )
+  assert.equal(selectedNodeId, secondTargetId)
+})

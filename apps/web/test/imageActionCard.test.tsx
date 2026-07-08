@@ -50,12 +50,33 @@ test('image action card keeps zoom action icon-only and exposes core actions', a
 
   for (const ariaLabel of [
     '图片高清',
-    '校验即梦 CLI',
+    '校验当前图片模型',
     '下载图片到本地',
     '放大查看图片',
   ]) {
     assert.equal(html.includes(`aria-label="${ariaLabel}"`), true)
   }
+})
+
+test('image action card can label provider-specific validation', async () => {
+  const { ImageActionCard } = await import('../src/components/ImageActionCard')
+
+  const html = renderToStaticMarkup(
+    <ImageActionCard
+      validationLabel="校验 OpenAI"
+      validationAriaLabel="校验 OpenAI CLI"
+      upscaleResolution="2k"
+      onUpscale={() => undefined}
+      onUpscaleResolutionChange={() => undefined}
+      onValidate={() => undefined}
+      onDownload={() => undefined}
+      onOpenFullSize={() => undefined}
+    />,
+  )
+
+  assert.equal(html.includes('校验 OpenAI'), true)
+  assert.equal(html.includes('aria-label="校验 OpenAI CLI"'), true)
+  assert.equal(html.includes('aria-label="校验即梦 CLI"'), false)
 })
 
 test('image action card uses the two-arrow maximize icon for enlargement', async () => {

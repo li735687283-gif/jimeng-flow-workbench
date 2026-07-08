@@ -12,9 +12,24 @@ import type { ModelConfig } from '@jimeng-flow/shared/settings'
 test('configured image models keep third-party API model ids', () => {
   const models = getConfiguredImageModels(['jimeng', 'gpt-image-1'])
 
-  assert.deepEqual(models.map((model) => model.id), ['jimeng', 'gpt-image-1'])
+  assert.deepEqual(models.map((model) => model.id), [
+    'jimeng',
+    'gpt-image-1',
+    'codex:gpt-5.5',
+  ])
   assert.equal(models[0].label, '即梦（默认）')
   assert.equal(models[1].label, 'gpt-image-1')
+})
+
+test('configured image models keep the OpenAI CLI option beside selected jimeng models', () => {
+  const models = getConfiguredImageModels(['jimeng-5.0'])
+
+  assert.deepEqual(models.map((model) => model.id), [
+    'jimeng-5.0',
+    'codex:gpt-5.5',
+  ])
+  assert.equal(models[1].label, 'GPT Image（OpenAI CLI）')
+  assert.equal(models[1].description, 'OpenAI CLI 图片模型')
 })
 
 test('default image model can be a configured third-party API model', () => {
@@ -41,12 +56,49 @@ test('configured image models include image-capable models from common llm model
     models.map((model) => model.id),
     [
       'jimeng-5.0',
-      'gpt-image-2',
+      'codex:gpt-5.5',
       'gpt-image-2-official',
       'gemini-3-pro-image-preview',
       'banana-pro',
     ],
   )
+})
+
+test('structured image model configs do not hide image-capable common models', () => {
+  const models = getConfiguredImageModels(
+    ['jimeng-5.0'],
+    [
+      'gpt-image-2-official',
+      'claude-opus-4-8',
+      'gemini-3-pro-image-preview',
+    ],
+    [
+      {
+        id: 'jimeng-5.0',
+        provider: 'dreamina',
+        capabilities: ['image'],
+      },
+    ],
+  )
+
+  assert.deepEqual(
+    models.map((model) => model.id),
+    [
+      'jimeng-5.0',
+      'codex:gpt-5.5',
+      'gpt-image-2-official',
+      'gemini-3-pro-image-preview',
+    ],
+  )
+})
+
+test('image model fallback keeps OpenAI CLI visible while settings load', () => {
+  const models = getConfiguredImageModels(undefined, undefined, undefined)
+
+  assert.deepEqual(models.map((model) => model.id), [
+    'jimeng',
+    'codex:gpt-5.5',
+  ])
 })
 
 test('configured image models keep OpenAI CLI image generation available', () => {
@@ -63,13 +115,13 @@ test('configured image models keep OpenAI CLI image generation available', () =>
     models.map((model) => model.id),
     [
       'jimeng-5.0',
-      'gpt-image-2',
+      'codex:gpt-5.5',
       'gpt-image-2-official',
       'gemini-3-pro-image-preview',
     ],
   )
   assert.equal(
-    models.find((model) => model.id === 'gpt-image-2')?.description,
+    models.find((model) => model.id === 'codex:gpt-5.5')?.description,
     'OpenAI CLI 图片模型',
   )
 })
@@ -82,10 +134,10 @@ test('isLikelyImageModelId detects common image model ids without admitting text
   assert.equal(isLikelyImageModelId('claude-opus-4-8'), false)
 })
 
-test('configured image models migrate legacy imagegen to gpt image 2', () => {
+test('configured image models migrate legacy imagegen to the Codex image model', () => {
   const models = getConfiguredImageModels(['$imagegen', 'gpt-image-2'])
 
-  assert.deepEqual(models.map((model) => model.id), ['gpt-image-2'])
+  assert.deepEqual(models.map((model) => model.id), ['codex:gpt-5.5'])
   assert.equal(models[0].description, 'OpenAI CLI 图片模型')
 })
 
@@ -140,6 +192,6 @@ test('configured image models use only image-capable structured model configs', 
   const models = getConfiguredImageModels([], [], modelConfigs)
 
   assert.deepEqual(models.map((model) => [model.id, model.label]), [
-    ['gpt-image-2', 'GPT Image 2'],
+    ['codex:gpt-5.5', 'GPT Image（OpenAI CLI）'],
   ])
 })

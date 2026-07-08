@@ -8,6 +8,7 @@
 
 import {
   createGeneration,
+  getGeneration,
   subscribeGeneration,
 } from '../api/generations'
 import type {
@@ -33,8 +34,14 @@ export interface ImageGenerationFlowHandle {
 
 export interface ImageGenerationFlowDeps {
   createGenerationImpl?: typeof createGeneration
+  getGenerationImpl?: typeof getGeneration
   subscribeGenerationImpl?: typeof subscribeGeneration
+  pollIntervalMs?: number
+  maxPollAttempts?: number
 }
+
+const DEFAULT_POLL_INTERVAL_MS = 2000
+const DEFAULT_MAX_POLL_ATTEMPTS = 90
 
 /**
  * 启动一次图片生成并订阅其状态。
@@ -48,21 +55,68 @@ export function startImageGenerationFlow(
   deps: ImageGenerationFlowDeps = {},
 ): ImageGenerationFlowHandle {
   const createGen = deps.createGenerationImpl ?? createGeneration
+  const getGen = deps.getGenerationImpl ?? getGeneration
   const subscribe = deps.subscribeGenerationImpl ?? subscribeGeneration
+  const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  const maxPollAttempts = deps.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS
   let unsubscribe: (() => void) | null = null
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
+  let settled = false
 
   const finish = () => {
     if (unsubscribe) {
       unsubscribe()
       unsubscribe = null
     }
+    if (pollTimer) {
+      clearTimeout(pollTimer)
+      pollTimer = null
+    }
+  }
+
+  const complete = (response: GenerationResponse) => {
+    if (settled) return
+    settled = true
+    finish()
+    callbacks.onComplete?.(response)
+  }
+
+  const fail = (message: string) => {
+    if (settled) return
+    settled = true
+    finish()
+    callbacks.onError?.(message)
+  }
+
+  const pollUntilTerminal = (id: string, fallbackError: string, attempt = 1) => {
+    void (async () => {
+      try {
+        const response = await getGen(id)
+        if (response.status === 'success' || response.status === 'error') {
+          complete(response)
+          return
+        }
+        callbacks.onUpdate?.(response)
+      } catch {
+        // Keep the original SSE error message; polling is best-effort recovery.
+      }
+
+      if (attempt >= maxPollAttempts) {
+        fail(fallbackError)
+        return
+      }
+
+      pollTimer = setTimeout(() => {
+        pollUntilTerminal(id, fallbackError, attempt + 1)
+      }, pollIntervalMs)
+    })()
   }
 
   void (async () => {
     try {
       const response = await createGen(request)
       if (response.status === 'success' || response.status === 'error') {
-        callbacks.onComplete?.(response)
+        complete(response)
         return
       }
       callbacks.onQueued?.(response)
@@ -73,19 +127,23 @@ export function startImageGenerationFlow(
           }
         },
         onComplete: (data) => {
-          finish()
-          callbacks.onComplete?.(data)
+          complete(data)
         },
         onError: (error) => {
           finish()
-          callbacks.onError?.(error)
+          pollUntilTerminal(response.id, error)
         },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      callbacks.onError?.(message)
+      fail(message)
     }
   })()
 
-  return { cancel: finish }
+  return {
+    cancel: () => {
+      settled = true
+      finish()
+    },
+  }
 }

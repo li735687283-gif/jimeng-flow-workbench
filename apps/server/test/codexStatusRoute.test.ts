@@ -9,18 +9,14 @@ import codexRoutes from '../src/routes/codex'
 test('GET /api/codex/status reports local CLI and auth availability', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'codex-status-route-'))
   const codexBin = join(dir, 'codex.cmd')
-  const helperBin = join(dir, 'gpt-image-2-skill.cmd')
   const authFile = join(dir, 'auth.json')
   await writeFile(codexBin, '@echo off\r\n')
-  await writeFile(helperBin, '@echo off\r\n')
   await writeFile(authFile, '{}')
 
   const previousBin = process.env.CODEX_BIN
   const previousAuth = process.env.CODEX_AUTH_FILE
-  const previousHelperBin = process.env.GPT_IMAGE_2_SKILL_BIN
   process.env.CODEX_BIN = codexBin
   process.env.CODEX_AUTH_FILE = authFile
-  process.env.GPT_IMAGE_2_SKILL_BIN = helperBin
 
   const app = Fastify()
   try {
@@ -37,14 +33,12 @@ test('GET /api/codex/status reports local CLI and auth availability', async () =
       authFound: true,
       codexPath: codexBin,
       authFile,
-      helperFound: true,
-      helperPath: helperBin,
+      helperFound: false,
       message: 'OpenAI Codex CLI 可用',
       setupCommands: {
         installCodex: process.platform === 'win32'
           ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex"'
           : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
-        installImageHelper: 'npm install -g gpt-image-2-skill',
         login: 'codex',
       },
     })
@@ -58,11 +52,6 @@ test('GET /api/codex/status reports local CLI and auth availability', async () =
       delete process.env.CODEX_AUTH_FILE
     } else {
       process.env.CODEX_AUTH_FILE = previousAuth
-    }
-    if (previousHelperBin === undefined) {
-      delete process.env.GPT_IMAGE_2_SKILL_BIN
-    } else {
-      process.env.GPT_IMAGE_2_SKILL_BIN = previousHelperBin
     }
     await app.close()
     await rm(dir, { recursive: true, force: true })

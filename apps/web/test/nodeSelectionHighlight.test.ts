@@ -18,6 +18,11 @@ test('text image and video nodes share a selected highlight ring', () => {
   assert.match(css, /box-sizing:\s*border-box;/)
   assert.match(css, /border-radius:\s*inherit;/)
   assert.match(css, /pointer-events:\s*none;/)
+  assert.match(
+    css,
+    /\.node-wrapper:has\(\.image-editor-panel\)\s+\.node-card::after\s*\{[\s\S]*z-index:\s*0;/,
+  )
+  assert.match(css, /\.video-generation-panel/)
   assert.equal(css.includes('inset: -5px;'), false)
   assert.equal(css.includes('border-radius: calc(15px + 5px);'), false)
   assert.equal(

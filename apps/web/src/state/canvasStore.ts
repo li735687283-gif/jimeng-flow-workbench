@@ -18,9 +18,11 @@ import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNo
 import type { VideoMode } from '@jimeng-flow/shared/videoNode'
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
+import { useGenerationDefaultsStore } from './generationDefaultsStore'
 
 const ARRANGE_GAP = 40
 const UPSCALE_NODE_GAP = 120
+const UPSCALE_NODE_STACK_GAP = 40
 const CONNECTABLE_IMAGE_TARGETS = new Set<FlowNodeType>([
   'image',
   'generate',
@@ -40,6 +42,30 @@ type UpscaleResolution = '2k' | '4k' | '8k'
 function getAssetId(node: Node | undefined): string | null {
   const assetId = (node?.data as BaseNodeData | undefined)?.assetId
   return typeof assetId === 'string' && assetId ? assetId : null
+}
+
+function getNodeModel(node: Node | undefined): string {
+  const model = (node?.data as BaseNodeData | undefined)?.model
+  return typeof model === 'string' && model.trim() ? model.trim() : ''
+}
+
+function getRememberedModel(type: FlowNodeType): string {
+  const state = useGenerationDefaultsStore.getState()
+  if (type === 'image') return state.image?.model?.trim() ?? ''
+  if (type === 'video') return state.video?.model?.trim() ?? ''
+  return ''
+}
+
+function applyRememberedNodeDefaults(node: Node, type: FlowNodeType): Node {
+  const model = getRememberedModel(type)
+  if (!model) return node
+  return {
+    ...node,
+    data: {
+      ...node.data,
+      model,
+    },
+  }
 }
 
 function getNodeSize(node: Node): { width: number; height: number } {
@@ -172,7 +198,11 @@ function syncConnectedImageReference(
   const source = nodesById.get(sourceId)
   const target = nodesById.get(targetId)
   const assetId = getAssetId(source)
-  if (!assetId || !target || !CONNECTABLE_IMAGE_TARGETS.has(target.type as FlowNodeType)) {
+  const sourceModel = getNodeModel(source)
+  if (!target || !CONNECTABLE_IMAGE_TARGETS.has(target.type as FlowNodeType)) {
+    return nodes
+  }
+  if (!assetId && !(target.type === 'image' && sourceModel)) {
     return nodes
   }
 
@@ -181,7 +211,7 @@ function syncConnectedImageReference(
 
     const data = node.data as BaseNodeData
     const inputImageAssetIds = stringArray(data.inputImageAssetIds)
-    const nextInputImageAssetIds = inputImageAssetIds.includes(assetId)
+    const nextInputImageAssetIds = !assetId || inputImageAssetIds.includes(assetId)
       ? inputImageAssetIds
       : [...inputImageAssetIds, assetId]
     const inputChanged =
@@ -189,15 +219,14 @@ function syncConnectedImageReference(
       !Array.isArray(data.inputImageAssetIds)
 
     if (node.type !== 'video') {
-      return inputChanged
-        ? {
-            ...node,
-            data: {
-              ...node.data,
-              inputImageAssetIds: nextInputImageAssetIds,
-            },
-          }
-        : node
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          ...(inputChanged ? { inputImageAssetIds: nextInputImageAssetIds } : {}),
+          ...(node.type === 'image' && sourceModel ? { model: sourceModel } : {}),
+        },
+      }
     }
 
     const mode = syncVideoModeForConnectedImages(data.mode, nextInputImageAssetIds)
@@ -304,7 +333,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
     const nodes = get().nodes
     const sameTypeCount = nodes.filter((n) => n.type === type).length + 1
-    const node = def.create(position, sameTypeCount)
+    const node = applyRememberedNodeDefaults(
+      def.create(position, sameTypeCount),
+      type,
+    )
     set({
       nodes: [...nodes, node],
       selectedNodeId: node.id,
@@ -321,11 +353,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const sourceSize = getNodeSize(source)
     const sourceData = source.data as BaseNodeData
     const assetId = getAssetId(source)
+    const existingUpscaleCount = nodes.filter((node) => {
+      const data = node.data as BaseNodeData
+      return node.type === 'image' && data.upscaleSourceNodeId === sourceId
+    }).length
     const sameTypeCount = nodes.filter((node) => node.type === 'image').length + 1
     const node = def.create(
       {
         x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
-        y: source.position.y,
+        y:
+          source.position.y +
+          existingUpscaleCount * (sourceSize.height + UPSCALE_NODE_STACK_GAP),
       },
       sameTypeCount,
     )
