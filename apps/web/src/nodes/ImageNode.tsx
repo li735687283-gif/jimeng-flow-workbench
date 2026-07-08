@@ -66,6 +66,7 @@ import {
 } from '../utils/imageModels'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
+import { resumeGenerationSubscription } from '../utils/generationResume'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   chooseFloatingMenuDirection,
@@ -261,6 +262,21 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       generationUnsubscribeRef.current?.()
     }
   }, [])
+
+  // 刷新页面后恢复正在进行的生成任务订阅
+  useEffect(() => {
+    if (!nodeData.generationId) return
+    if (nodeData.status !== 'running' && nodeData.status !== 'queued') return
+    if (generationUnsubscribeRef.current) return
+    generationUnsubscribeRef.current = resumeGenerationSubscription({
+      nodeId: id,
+      generationId: nodeData.generationId,
+    })
+    return () => {
+      generationUnsubscribeRef.current?.()
+      generationUnsubscribeRef.current = null
+    }
+  }, [nodeData.generationId, nodeData.status, id])
   const [imgError, setImgError] = useState(false)
   const [editorMounted, setEditorMounted] = useState(false)
   const [editorClosing, setEditorClosing] = useState(false)
@@ -321,9 +337,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     [nodeData.generationRuns],
   )
   const referenceAssetIds = useMemo(() => {
+    const selfAssetId = nodeData.assetId
     const references = new Set<string>()
     for (const assetId of nodeData.inputImageAssetIds ?? []) {
-      if (assetId) references.add(assetId)
+      if (assetId && assetId !== selfAssetId) references.add(assetId)
     }
     for (const assetId of getImageGenerationInputImages({
       assetId: undefined,
@@ -332,7 +349,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       nodes,
       edges,
     })) {
-      references.add(assetId)
+      if (assetId && assetId !== selfAssetId) references.add(assetId)
     }
     return Array.from(references)
   }, [
@@ -890,21 +907,27 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setIsGenerating(true)
     const store = useCanvasStore.getState()
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
-    const inputImageAssetIds =
+    const upstreamInputImages =
       options.inputImageAssetIds ??
       getImageGenerationInputImages({
-        assetId: nodeData.assetId,
+        assetId: undefined,
         modelId: effectiveModel.id,
         nodeId: id,
         nodes,
         edges,
       })
+    const selfAssetId =
+      typeof nodeData.assetId === 'string' ? nodeData.assetId.trim() : ''
+    const requestInputImages = selfAssetId
+      ? [selfAssetId, ...upstreamInputImages.filter((a) => a !== selfAssetId)]
+      : upstreamInputImages
+    const inputImageAssetIds = upstreamInputImages
     const request: GenerationRequest = {
       flowId: startedFlowId ?? 'local',
       nodeId: id,
       mediaType: 'image',
       prompt: trimmedPrompt,
-      inputImages: inputImageAssetIds,
+      inputImages: requestInputImages,
       model: effectiveModel.id,
       width: size.width,
       height: size.height,
@@ -969,6 +992,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         quality: effectiveQuality,
         ratio: effectiveRatio,
         resolution: effectiveResolution,
+        inputImageAssetIds,
       })
       const failedMessage =
         resp.status === 'error'
@@ -1157,7 +1181,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       quality: state.quality,
       ratio: state.ratio,
       resolution: state.resolution,
-      inputImageAssetIds: state.inputImageAssetIds,
+      inputImageAssetIds: state.inputImageAssetIds.filter(
+        (assetId) => assetId !== state.assetId,
+      ),
       updatedAt: new Date().toISOString(),
     } as unknown as Partial<BaseNodeData>)
     setImgError(false)

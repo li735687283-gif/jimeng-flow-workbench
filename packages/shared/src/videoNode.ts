@@ -214,7 +214,7 @@ const VIDEO_DEFAULTS = {
   assetIds: [] as string[],
   generationRuns: [] as VideoGenerationRun[],
   mode: 'text_to_video' as VideoMode,
-  model: 'seedance-2.0',
+  model: 'seedance-2.0-vip',
   aspectRatio: '16:9' as VideoAspectRatio,
   resolution: '720P' as VideoResolution,
   quality: 'standard' as VideoQuality,

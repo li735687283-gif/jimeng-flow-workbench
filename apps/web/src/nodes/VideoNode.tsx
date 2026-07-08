@@ -20,11 +20,11 @@ import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
 import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
+import { resumeGenerationSubscription } from '../utils/generationResume'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
-  getVideoSubmitLabel,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
 } from '../utils/videoGenerationState'
@@ -270,7 +270,43 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       ? callState.status
       : (data as BaseNodeData).status ?? nodeData.status
   const running = displayStatus === 'queued' || displayStatus === 'running'
-  const submitLabel = getVideoSubmitLabel(running, nodeData.assetIds.length > 0)
+  const videoGenerationProgress = running
+  const videoGenerationProgressOverlay = videoGenerationProgress ? (
+    <div className="image-generation-progress-overlay" aria-live="polite">
+      <div className="image-generation-progress-content">
+        <div className="image-generation-progress-label">
+          <span className="image-generation-progress-dot" />
+          <span>视频生成中</span>
+        </div>
+        <div
+          className="image-generation-progress-track"
+          role="progressbar"
+          aria-label="视频生成中"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuetext="生成中"
+        >
+          <span className="image-generation-progress-fill" />
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  // 刷新页面后恢复正在进行的生成任务订阅
+  useEffect(() => {
+    if (!nodeData.generationId) return
+    if (displayStatus !== 'running' && displayStatus !== 'queued') return
+    if (generationUnsubscribeRef.current) return
+    generationUnsubscribeRef.current = resumeGenerationSubscription({
+      nodeId: id,
+      generationId: nodeData.generationId,
+    })
+    return () => {
+      generationUnsubscribeRef.current?.()
+      generationUnsubscribeRef.current = null
+    }
+  }, [nodeData.generationId, displayStatus, id])
+
   const upstreamImageAssetIds = useMemo(
     () =>
       getImageGenerationInputImages({
@@ -288,6 +324,14 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         preferUpstream: true,
       }),
     [nodeData.inputImageAssetIds, upstreamImageAssetIds],
+  )
+  const mentionImages = useMemo(
+    () =>
+      referenceAssetIds.map((assetId, index) => ({
+        assetId,
+        label: `图片${index + 1}`,
+      })),
+    [referenceAssetIds],
   )
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
@@ -580,6 +624,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
                 <Volume2 size={19} strokeWidth={1.9} />
               )}
             </button>
+            {videoGenerationProgressOverlay}
           </div>
         ) : (
           <div
@@ -594,6 +639,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
                 className="node-placeholder-icon video-placeholder-icon"
               />
             </div>
+            {videoGenerationProgressOverlay}
           </div>
         )}
 
@@ -602,6 +648,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             closing={editorClosing}
             prompt={prompt}
             referenceAssetIds={referenceAssetIds}
+            mentionImages={mentionImages}
             modelOptions={videoModelOptions}
             selectedModelId={selectedModel?.id ?? ''}
             modelMenuOpen={modelMenuOpen}
@@ -612,7 +659,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             durationSeconds={durationSeconds}
             count={count}
             running={running}
-            submitLabel={submitLabel}
             sendError={sendError || callState.error}
             historyItems={generationHistoryItems}
             currentAssetId={firstAssetId}

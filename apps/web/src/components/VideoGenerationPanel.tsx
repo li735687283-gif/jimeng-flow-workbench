@@ -18,7 +18,7 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import type { VideoModelOption } from '../utils/videoModels'
 import type { VideoGenerationHistoryItem } from '../utils/videoGenerationHistory'
-import { PromptEditor } from './PromptEditor'
+import { MentionablePromptEditor, type MentionImage } from './MentionablePromptEditor'
 import { ReferenceAssetStrip } from './ReferenceAssetStrip'
 import { VideoGenerationHistoryStrip } from './VideoGenerationHistoryStrip'
 
@@ -26,6 +26,7 @@ interface VideoGenerationPanelProps {
   closing?: boolean
   prompt: string
   referenceAssetIds: string[]
+  mentionImages?: MentionImage[]
   modelOptions: VideoModelOption[]
   selectedModelId: string
   modelMenuOpen: boolean
@@ -36,7 +37,6 @@ interface VideoGenerationPanelProps {
   durationSeconds: number
   count: VideoNodeData['count']
   running: boolean
-  submitLabel: string
   sendError?: string
   historyItems?: VideoGenerationHistoryItem[]
   currentAssetId?: string
@@ -67,6 +67,7 @@ export function VideoGenerationPanel({
   closing = false,
   prompt,
   referenceAssetIds,
+  mentionImages = [],
   modelOptions,
   selectedModelId,
   modelMenuOpen,
@@ -77,7 +78,6 @@ export function VideoGenerationPanel({
   durationSeconds,
   count,
   running,
-  submitLabel,
   sendError = '',
   historyItems = [],
   currentAssetId,
@@ -135,11 +135,12 @@ export function VideoGenerationPanel({
         onRemove={onRemoveReference}
       />
 
-      <PromptEditor
+      <MentionablePromptEditor
         value={prompt}
         onChange={onPromptChange}
-        placeholder="描述视频画面，连接图片后可按图生视频、首尾帧或多图参考生成"
+        placeholder="描述视频画面，输入 @ 可引用上游图片"
         disabled={running}
+        mentionImages={mentionImages}
       />
 
       <div className="image-editor-bottom">
@@ -310,9 +311,6 @@ export function VideoGenerationPanel({
 
       {sendError ? (
         <div className="image-editor-status error">{sendError}</div>
-      ) : null}
-      {running ? (
-        <div className="image-editor-status">{submitLabel}</div>
       ) : null}
       {onSelectHistory ? (
         <VideoGenerationHistoryStrip

@@ -35,6 +35,7 @@ export interface VideoDefaultsNodeData {
 }
 
 const IMAGE_FALLBACKS = {
+  model: 'codex:gpt-5.5',
   quality: '标准画质',
   ratio: '16:9',
   resolution: '2K',
@@ -42,6 +43,7 @@ const IMAGE_FALLBACKS = {
 }
 
 const VIDEO_FALLBACKS = {
+  model: 'seedance-2.0-vip',
   aspectRatio: '16:9' as VideoAspectRatio,
   resolution: '720P' as VideoResolution,
   durationSeconds: 5,
@@ -81,9 +83,9 @@ export function resolveImageGenerationDefaults({
 } {
   const nodeModel = modelInOptions(stringValue(nodeData.model), modelOptions)
   const rememberedModel = modelInOptions(remembered?.model ?? '', modelOptions)
-
+  const fallbackModel = modelInOptions(IMAGE_FALLBACKS.model, modelOptions)
   return {
-    modelId: nodeModel || rememberedModel || modelOptions[0]?.id || '',
+    modelId: nodeModel || rememberedModel || fallbackModel || modelOptions[0]?.id || '',
     quality:
       stringValue(nodeData.quality) ||
       stringValue(remembered?.quality) ||
@@ -120,9 +122,10 @@ export function resolveVideoGenerationDefaults({
 } {
   const nodeModel = modelInOptions(stringValue(nodeData.model), modelOptions)
   const rememberedModel = modelInOptions(remembered?.model ?? '', modelOptions)
+  const fallbackModel = modelInOptions(VIDEO_FALLBACKS.model, modelOptions)
 
   return {
-    modelId: nodeModel || rememberedModel || modelOptions[0]?.id || '',
+    modelId: nodeModel || rememberedModel || fallbackModel || modelOptions[0]?.id || '',
     aspectRatio:
       (stringValue(nodeData.aspectRatio) as VideoAspectRatio) ||
       remembered?.aspectRatio ||

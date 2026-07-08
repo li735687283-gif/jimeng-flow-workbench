@@ -438,7 +438,7 @@ export async function generateVideo(
   }))
   const args = buildJimengVideoArgs(params, resolvedInputs)
 
-  return submitAndCollect(args, 'video', params.timeoutMs ?? 600_000)
+  return submitAndCollect(args, 'video', params.timeoutMs ?? 900_000)
 }
 
 export function buildJimengVideoArgs(

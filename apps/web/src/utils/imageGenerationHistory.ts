@@ -9,6 +9,7 @@ export interface ImageGenerationRunOptions {
   quality?: string
   ratio?: string
   resolution?: string
+  inputImageAssetIds?: string[]
 }
 
 export interface ImageGenerationEditorState {
@@ -52,7 +53,7 @@ export function buildImageGenerationRunFromResponse(
     height: request.height,
     count: request.count,
     seed: request.seed ?? null,
-    inputImageAssetIds: request.inputImages ?? [],
+    inputImageAssetIds: options.inputImageAssetIds ?? request.inputImages ?? [],
     createdAt: response.createdAt,
     finishedAt: response.finishedAt,
   }

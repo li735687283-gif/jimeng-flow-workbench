@@ -32,31 +32,20 @@ function collectUpstreamImageAssetIds({
   if (!currentNodeId || nodes.length === 0 || edges.length === 0) return []
 
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const incomingByTarget = new Map<string, ImageGenerationInputEdge[]>()
-  for (const edge of edges) {
-    const targetId = typeof edge.target === 'string' ? edge.target : ''
-    if (!targetId) continue
-    const incoming = incomingByTarget.get(targetId) ?? []
-    incoming.push(edge)
-    incomingByTarget.set(targetId, incoming)
-  }
-
   const assetIds: string[] = []
-  const visited = new Set([currentNodeId])
-  const walk = (targetId: string) => {
-    for (const edge of incomingByTarget.get(targetId) ?? []) {
-      const sourceId = typeof edge.source === 'string' ? edge.source : ''
-      if (!sourceId || visited.has(sourceId)) continue
-      visited.add(sourceId)
-      walk(sourceId)
+  const seen = new Set<string>()
 
-      const sourceNode = nodeById.get(sourceId)
-      if (sourceNode?.type !== 'image') continue
-      const sourceAssetId = getTrimmedAssetId(sourceNode.data?.assetId)
-      if (sourceAssetId) assetIds.push(sourceAssetId)
-    }
+  // 只收集直接上游一层，不递归遍历前方的前方
+  for (const edge of edges) {
+    if (edge.target !== currentNodeId) continue
+    const sourceId = typeof edge.source === 'string' ? edge.source : ''
+    if (!sourceId || seen.has(sourceId)) continue
+    seen.add(sourceId)
+    const sourceNode = nodeById.get(sourceId)
+    if (sourceNode?.type !== 'image') continue
+    const sourceAssetId = getTrimmedAssetId(sourceNode.data?.assetId)
+    if (sourceAssetId) assetIds.push(sourceAssetId)
   }
-  walk(currentNodeId)
   return assetIds
 }
 

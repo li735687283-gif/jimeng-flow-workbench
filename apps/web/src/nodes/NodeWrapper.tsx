@@ -168,7 +168,9 @@ export function NodeWrapper({
     >
       {!hideTitle && (
         <div className="node-title">
-          <Icon size={12} strokeWidth={1.8} />
+          {!(nodeType === 'video' && (status === 'running' || status === 'queued')) && (
+            <Icon size={12} strokeWidth={1.8} />
+          )}
           <span>{title}</span>
           {!mediaDisplay && status === 'running' && (
             <span className="node-status-spinner" />
