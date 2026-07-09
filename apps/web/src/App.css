@@ -934,6 +934,15 @@
   cursor: url('/cursor.png') 0 0, auto;
 }
 
+.canvas-container .react-flow__pane,
+.canvas-container .react-flow__renderer,
+.canvas-container .react-flow__selectionpane,
+.canvas-container .react-flow__nodes,
+.canvas-container .react-flow__edges,
+.canvas-container .react-flow__background {
+  cursor: url('/cursor.png') 0 0, auto !important;
+}
+
 .canvas-container.file-drag-active::after {
   content: '';
   position: absolute;
