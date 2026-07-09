@@ -1,9 +1,13 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Film, Video, Volume2, VolumeX } from 'lucide-react'
 import { createGeneration, subscribeGeneration } from '../api/generations'
-import { getAssetFileUrl } from '../api/assets'
+import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
+import { testJimengConnection } from '../api/settings'
+import { VideoActionCard } from '../components/VideoActionCard'
+import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
 import { NodeWrapper } from './NodeWrapper'
 import { useAgentStore } from '../state/agentStore'
@@ -115,6 +119,11 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [countMenuOpen, setCountMenuOpen] = useState(false)
   const [sendError, setSendError] = useState('')
   const [videoMuted, setVideoMuted] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [validationStatus, setValidationStatus] = useState<
+    'idle' | 'checking' | 'success' | 'error'
+  >('idle')
+  const [fullSizeOpen, setFullSizeOpen] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -190,6 +199,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     setModelMenuOpen(false)
     setQualityMenuOpen(false)
     setCountMenuOpen(false)
+    setFullSizeOpen(false)
     setEditorClosing(true)
     clearCloseTimer()
     closeTimerRef.current = window.setTimeout(() => {
@@ -198,6 +208,46 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       setEditorClosing(false)
     }, EDITOR_CLOSE_ANIMATION_MS)
   }, [clearCloseTimer, editorClosing, editorMounted])
+
+  const handleValidateVideoProvider = useCallback(async () => {
+    setActionBusy(true)
+    setValidationStatus('checking')
+    try {
+      if (videoModelNeedsJimeng(selectedModelId)) {
+        const result = await testJimengConnection(settings ?? {})
+        setValidationStatus(result.ok ? 'success' : 'error')
+        return
+      }
+      setValidationStatus('success')
+    } catch {
+      setValidationStatus('error')
+    } finally {
+      setActionBusy(false)
+    }
+  }, [selectedModelId, settings])
+
+  const handleDownloadVideo = useCallback(async () => {
+    const assetId = nodeData.assetIds[0]
+    if (!assetId) {
+      return
+    }
+    setActionBusy(true)
+    try {
+      downloadAssetFile(assetId)
+    } catch {
+      // 下载失败时保留当前界面
+    } finally {
+      setActionBusy(false)
+    }
+  }, [nodeData.assetIds])
+
+  const handleOpenFullSize = useCallback(() => {
+    const assetId = nodeData.assetIds[0]
+    if (!assetId) {
+      return
+    }
+    setFullSizeOpen(true)
+  }, [nodeData.assetIds])
 
   const persistPromptDraft = useCallback(
     (value: string) => {
@@ -225,8 +275,13 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       if (!(target instanceof Element)) return
       const isInsideEditorOwner =
         !!target.closest(`[data-flow-node-id="${id}"]`) ||
+        !!target.closest('.image-editor-panel') ||
+        !!target.closest('.video-generation-panel') ||
+        !!target.closest('.video-player-overlay') ||
         !!target.closest('.prompt-editor-modal')
-      const isInsideMenuRoot = !!target.closest('.image-editor-menu-anchor')
+      const isInsideMenuRoot =
+        !!target.closest('.image-editor-menu-anchor') ||
+        !!target.closest('.prompt-template-library')
       if (
         shouldCloseFloatingMenuOnPointerDown({
           button: event.button,
@@ -237,13 +292,14 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         handleCloseEditorMenus()
       }
       if (
-        shouldCloseFloatingEditorOnPointerDown({
+        !shouldCloseFloatingEditorOnPointerDown({
           button: event.button,
           isInsideEditorOwner,
         })
       ) {
-        handleCloseEditor()
+        return
       }
+      handleCloseEditor()
     }
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') handleCloseEditor()
@@ -575,6 +631,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   }, [])
 
   return (
+    <>
     <NodeWrapper
       icon={Film}
       title={nodeData.title}
@@ -585,18 +642,37 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       mediaDisplay={!!firstAssetId}
     >
       <>
+        {editorMounted && (
+          <VideoActionCard
+            busy={actionBusy}
+            closing={editorClosing}
+            validationStatus={validationStatus}
+            validationLabel={'校验'}
+            validationAriaLabel={
+              videoModelNeedsJimeng(selectedModelId)
+                ? '校验即梦 CLI'
+                : '校验当前视频模型'
+            }
+            onValidate={() => void handleValidateVideoProvider()}
+            onDownload={handleDownloadVideo}
+            onOpenFullSize={handleOpenFullSize}
+          />
+        )}
+
         {firstAssetId ? (
           <div
-            className="media-display-node video-media-display"
+            className="media-display-node video-media-display nodrag nopan"
             style={VIDEO_DISPLAY_STYLE}
             onClick={handleOpenEditor}
           >
             <video
               ref={videoRef}
               src={getAssetFileUrl(firstAssetId)}
+              className="nodrag nopan"
               controls
               playsInline
               muted={videoMuted}
+              draggable={false}
               onLoadedMetadata={(event) => {
                 event.currentTarget.muted = videoMuted
                 if (!videoMuted) event.currentTarget.volume = 1
@@ -610,7 +686,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             />
             <button
               type="button"
-              className={`video-sound-toggle${videoMuted ? ' muted' : ''}`}
+              className={`video-sound-toggle nodrag nopan${videoMuted ? ' muted' : ''}`}
               onClick={(event) => {
                 event.stopPropagation()
                 handleToggleVideoMute()
@@ -628,7 +704,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           </div>
         ) : (
           <div
-            className="image-node-container video-node-container"
+            className="image-node-container video-node-container nodrag nopan"
             onClick={handleOpenEditor}
             style={EMPTY_VIDEO_FRAME_STYLE}
           >
@@ -699,6 +775,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         ) : null}
       </>
     </NodeWrapper>
+    {fullSizeOpen && firstAssetId && typeof document !== 'undefined'
+      ? createPortal(
+          <VideoPlayerModal
+            open={fullSizeOpen}
+            src={getAssetFileUrl(firstAssetId)}
+            title={nodeData.title}
+            onClose={() => setFullSizeOpen(false)}
+          />,
+          document.body,
+        )
+      : null}
+    </>
   )
 }
 

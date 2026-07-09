@@ -25,7 +25,6 @@ const UPSCALE_NODE_GAP = 120
 const UPSCALE_NODE_STACK_GAP = 40
 const CONNECTABLE_IMAGE_TARGETS = new Set<FlowNodeType>([
   'image',
-  'generate',
   'video',
 ])
 const VIDEO_MODES = new Set<VideoMode>([

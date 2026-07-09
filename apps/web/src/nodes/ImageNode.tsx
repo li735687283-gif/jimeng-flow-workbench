@@ -1234,15 +1234,11 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             busy={actionBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
-            validationLabel={
-              isCodexImageModel(selectedModel.id) ? '校验 OpenAI' : '校验'
-            }
+            validationLabel={'校验'}
             validationAriaLabel={
-              isCodexImageModel(selectedModel.id)
-                ? '校验 OpenAI CLI'
-                : shouldRequireJimengCliForImageModel(selectedModel.id)
-                  ? '校验即梦 CLI'
-                  : '校验当前图片模型'
+              shouldRequireJimengCliForImageModel(selectedModel.id)
+                ? '校验即梦 CLI'
+                : '校验当前图片模型'
             }
             upscaleResolution={upscaleResolution}
             onUpscale={(resolution) => void handleUpscaleImage(resolution)}

@@ -1,13 +1,12 @@
 // 本地节点类型定义（不修改 packages/shared）
 import type { Node } from '@xyflow/react'
 
-export type NodeStatus = 'idle' | 'running' | 'success' | 'error'
+export type NodeStatus = 'idle' | 'queued' | 'running' | 'success' | 'error'
 
 export type FlowNodeType =
   | 'text'
   | 'image'
   | 'video'
-  | 'generate'
   | 'agentPrompt'
   | 'note'
 

@@ -51,7 +51,6 @@ import {
   shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
 import {
-  createAgentImageNodeRecords,
   shouldBlockAgentImageEditGeneration,
 } from '../utils/agentImageNodes'
 import {
@@ -497,32 +496,38 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     })
   }
 
-  const createImageNodesForResults = (
-    generateNodeId: string,
+  const createAdditionalImageNodes = (
+    sourceNodeId: string,
     results: GenerationResult[],
+    startIndex: number = 1,
   ) => {
     const current = useCanvasStore
       .getState()
-      .nodes.find((node) => node.id === generateNodeId)
+      .nodes.find((node) => node.id === sourceNodeId)
     const baseX = (current?.position?.x ?? 0) + 300
     const baseY = current?.position?.y ?? 0
-    return createAgentImageNodeRecords(results, (assetId, index) => {
+    const nodeIds: string[] = []
+    const assetIds: string[] = []
+    results.slice(startIndex).forEach((result, index) => {
+      if (!result.assetId) return
+      assetIds.push(result.assetId)
       const imageNodeId = addNode('image', {
         x: baseX + index * 260,
         y: baseY,
       })
-      if (!imageNodeId) return null
+      if (!imageNodeId) return
       updateNodeData(imageNodeId, {
-        assetId,
+        assetId: result.assetId,
       } as unknown as Partial<BaseNodeData>)
       onConnect({
-        source: generateNodeId,
+        source: sourceNodeId,
         target: imageNodeId,
         sourceHandle: null,
         targetHandle: null,
       })
-      return imageNodeId
+      nodeIds.push(imageNodeId)
     })
+    return { assetIds, nodeIds }
   }
 
   const startAgentImageGeneration = async () => {
@@ -554,13 +559,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         : ''
     const prompt = `${pendingImageRequest.prompt}${skillHint}`
 
-    const generateNodeId = addNode('generate', getCanvasDropPosition())
-    if (!generateNodeId) return
+    const imageNodeId = addNode('image', getCanvasDropPosition())
+    if (!imageNodeId) return
 
     imageContextNodes.forEach((node) => {
       onConnect({
         source: node.id,
-        target: generateNodeId,
+        target: imageNodeId,
         sourceHandle: null,
         targetHandle: null,
       })
@@ -568,7 +573,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const request: GenerationRequest = {
       flowId: resolveGenerationFlowId(getCurrentFlowId()),
-      nodeId: generateNodeId,
+      nodeId: imageNodeId,
       mediaType: 'image',
       prompt,
       inputImages: inputImageAssetIds,
@@ -580,10 +585,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
 
     const generateStore = useGenerateStore.getState()
-    generateStore.setLastRequest(generateNodeId, request)
-    generateStore.setStatus(generateNodeId, 'queued')
-    generateStore.setError(generateNodeId, undefined)
-    updateNodeData(generateNodeId, {
+    generateStore.setLastRequest(imageNodeId, request)
+    generateStore.setStatus(imageNodeId, 'queued')
+    generateStore.setError(imageNodeId, undefined)
+    updateNodeData(imageNodeId, {
       prompt,
       model: imageGenerationParams.model,
       width: size.width,
@@ -591,23 +596,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       count: imageGenerationParams.count,
       seed: null,
       inputImageAssetIds,
-      status: 'queued',
+      status: 'running',
       error: undefined,
       updatedAt: new Date().toISOString(),
     } as unknown as Partial<BaseNodeData>)
 
-    setImageGenerationStatus('已在画布创建生成节点，正在生成...')
+    setImageGenerationStatus('已在画布创建图片节点，正在生成...')
 
     try {
       const response = await createGeneration(request)
-      generateStore.setGenerationId(generateNodeId, response.id)
+      generateStore.setGenerationId(imageNodeId, response.id)
 
       // 订阅 SSE 实时获取状态更新
       const unsubscribe = subscribeGeneration(response.id, {
         onUpdate: (data) => {
-          generateStore.setStatus(generateNodeId, data.status)
-          if (data.error) generateStore.setError(generateNodeId, data.error)
-          updateNodeData(generateNodeId, {
+          generateStore.setStatus(imageNodeId, data.status)
+          if (data.error) generateStore.setError(imageNodeId, data.error)
+          updateNodeData(imageNodeId, {
             status: data.status,
             error: data.error,
             updatedAt: new Date().toISOString(),
@@ -621,19 +626,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         },
         onComplete: (data) => {
           const results = data.results ?? []
-          const createdImages = createImageNodesForResults(generateNodeId, results)
-          const outputAssetIds =
-            createdImages.assetIds.length > 0
-              ? createdImages.assetIds
-              : results
-                  .map((result) => result.assetId)
-                  .filter((assetId): assetId is string => !!assetId)
+          const firstAssetId = results[0]?.assetId
+          const outputAssetIds = results.map(r => r.assetId).filter((id): id is string => !!id)
+          const additionalNodes = createAdditionalImageNodes(imageNodeId, results)
+          const allNodeIds = [imageNodeId, ...additionalNodes.nodeIds]
 
-          generateStore.setStatus(generateNodeId, data.status)
-          if (data.error) generateStore.setError(generateNodeId, data.error)
-          updateNodeData(generateNodeId, {
+          generateStore.setStatus(imageNodeId, data.status)
+          if (data.error) generateStore.setError(imageNodeId, data.error)
+          updateNodeData(imageNodeId, {
             status: data.status,
             error: data.error,
+            assetId: firstAssetId,
             outputAssetIds,
             generationId: data.id,
             updatedAt: new Date().toISOString(),
@@ -660,7 +663,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 id: `video_auto_${Date.now()}`,
                 prompt: pendingImageRequest.prompt,
                 contextNodeIds: pendingImageRequest.contextNodeIds,
-                sourceImageNodeIds: createdImages.nodeIds,
+                sourceImageNodeIds: allNodeIds,
               })
               setVideoGenerationStatus('')
               setSkillStep('video')
@@ -669,8 +672,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           unsubscribe()
         },
         onError: (error) => {
-          generateStore.setError(generateNodeId, error)
-          updateNodeData(generateNodeId, {
+          generateStore.setError(imageNodeId, error)
+          updateNodeData(imageNodeId, {
             status: 'error',
             error,
             updatedAt: new Date().toISOString(),
@@ -681,8 +684,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      generateStore.setError(generateNodeId, message)
-      updateNodeData(generateNodeId, {
+      generateStore.setError(imageNodeId, message)
+      updateNodeData(imageNodeId, {
         status: 'error',
         error: message,
         updatedAt: new Date().toISOString(),
@@ -888,13 +891,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const inputImageAssetId = inputImageAssetIds[0]
 
-    const generateNodeId = addNode('generate', getCanvasDropPosition())
-    if (!generateNodeId) return
+    const imageNodeId = addNode('image', getCanvasDropPosition())
+    if (!imageNodeId) return
 
     imageContextNodes.forEach((node) => {
       onConnect({
         source: node.id,
-        target: generateNodeId,
+        target: imageNodeId,
         sourceHandle: null,
         targetHandle: null,
       })
@@ -905,21 +908,22 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       IMAGE_SIZES[0]
 
     const generateStore = useGenerateStore.getState()
-    generateStore.setStatus(generateNodeId, 'queued')
-    generateStore.setError(generateNodeId, undefined)
-    updateNodeData(generateNodeId, {
+    generateStore.setStatus(imageNodeId, 'queued')
+    generateStore.setError(imageNodeId, undefined)
+    updateNodeData(imageNodeId, {
       prompt: pendingEditRequest.prompt,
       model: imageGenerationParams.model,
       width: size.width,
       height: size.height,
       count: 1,
       seed: null,
+      inputImageAssetIds,
       status: 'queued',
       error: undefined,
       updatedAt: new Date().toISOString(),
     } as unknown as Partial<BaseNodeData>)
 
-    setEditGenerationStatus('已在画布创建编辑节点，正在生成...')
+    setEditGenerationStatus('已在画布创建图片节点，正在生成...')
 
     try {
       const response = await createEditGeneration({
@@ -930,21 +934,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         width: size.width,
         height: size.height,
       })
-      generateStore.setGenerationId(generateNodeId, response.id)
+      generateStore.setGenerationId(imageNodeId, response.id)
       const results = response.results ?? []
-      const createdImages = createImageNodesForResults(generateNodeId, results)
-      const outputAssetIds =
-        createdImages.assetIds.length > 0
-          ? createdImages.assetIds
-          : results
-              .map((result) => result.assetId)
-              .filter((assetId): assetId is string => !!assetId)
+      const firstAssetId = results[0]?.assetId
+      const outputAssetIds = results.map(r => r.assetId).filter((id): id is string => !!id)
+      createAdditionalImageNodes(imageNodeId, results)
 
-      generateStore.setStatus(generateNodeId, response.status)
-      if (response.error) generateStore.setError(generateNodeId, response.error)
-      updateNodeData(generateNodeId, {
+      generateStore.setStatus(imageNodeId, response.status)
+      if (response.error) generateStore.setError(imageNodeId, response.error)
+      updateNodeData(imageNodeId, {
         status: response.status,
         error: response.error,
+        assetId: firstAssetId,
         outputAssetIds,
         generationId: response.id,
         updatedAt: new Date().toISOString(),
@@ -952,6 +953,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       setPendingEditRequest(null)
       setEditGenerationStatus('已生成并写入画布')
       setSkillStep('done')
+
+      // 添加结果到画廊
+      outputAssetIds.forEach((assetId) => {
+        addGenerationResult({ assetId, type: 'image', prompt: pendingEditRequest.prompt })
+      })
 
       // 自动将第一张图设为参考图（风格一致性锁定）
       if (outputAssetIds.length > 0) {
@@ -962,8 +968,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      generateStore.setError(generateNodeId, message)
-      updateNodeData(generateNodeId, {
+      generateStore.setError(imageNodeId, message)
+      updateNodeData(imageNodeId, {
         status: 'error',
         error: message,
         updatedAt: new Date().toISOString(),
@@ -982,16 +988,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
       IMAGE_SIZES[0]
     const basePos = getCanvasDropPosition()
-    const generateNodeIds: string[] = []
+    const imageNodeIds: string[] = []
 
-    // 1. 为每个镜头创建 generate 节点
+    // 1. 为每个镜头创建 image 节点
     storyboard.items.forEach((item, index) => {
-      const nodeId = addNode('generate', {
+      const nodeId = addNode('image', {
         x: basePos.x + index * 260,
         y: basePos.y,
       })
       if (nodeId) {
-        generateNodeIds.push(nodeId)
+        imageNodeIds.push(nodeId)
         updateNodeData(nodeId, {
           prompt: item.prompt,
           model: imageGenerationParams.model,
@@ -1007,7 +1013,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const generateStore = useGenerateStore.getState()
     const newImageAssetIds: string[] = []
-    const newImageNodeIds: string[] = []
 
     // 辅助函数：等待 SSE 完成
     const waitForGeneration = (id: string): Promise<GenerationResponse> => {
@@ -1022,18 +1027,20 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     // 2. 串行生成每个镜头
     for (let i = 0; i < storyboard.items.length; i++) {
       const item = storyboard.items[i]
-      const generateNodeId = generateNodeIds[i]
-      if (!generateNodeId) continue
+      const currentImageNodeId = imageNodeIds[i]
+      if (!currentImageNodeId) continue
+
+      const inputImages = (() => {
+        const refId = useAgentStore.getState().conversationContext.referenceAssetId
+        return refId ? [refId] : []
+      })()
 
       const request: GenerationRequest = {
-      flowId: resolveGenerationFlowId(getCurrentFlowId()),
-        nodeId: generateNodeId,
+        flowId: resolveGenerationFlowId(getCurrentFlowId()),
+        nodeId: currentImageNodeId,
         mediaType: 'image',
         prompt: item.prompt,
-        inputImages: (() => {
-          const refId = useAgentStore.getState().conversationContext.referenceAssetId
-          return refId ? [refId] : []
-        })(),
+        inputImages,
         model: imageGenerationParams.model,
         width: size.width,
         height: size.height,
@@ -1041,58 +1048,63 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         seed: null,
       }
 
-      generateStore.setLastRequest(generateNodeId, request)
-      generateStore.setStatus(generateNodeId, 'queued')
-      generateStore.setError(generateNodeId, undefined)
+      generateStore.setLastRequest(currentImageNodeId, request)
+      generateStore.setStatus(currentImageNodeId, 'queued')
+      generateStore.setError(currentImageNodeId, undefined)
+      updateNodeData(currentImageNodeId, {
+        prompt: item.prompt,
+        model: imageGenerationParams.model,
+        width: size.width,
+        height: size.height,
+        count: 1,
+        seed: null,
+        inputImageAssetIds: inputImages,
+        status: 'running',
+        error: undefined,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
 
       try {
         const response = await createGeneration(request)
-        generateStore.setGenerationId(generateNodeId, response.id)
+        generateStore.setGenerationId(currentImageNodeId, response.id)
 
         // 等待 SSE 完成
         const finalResponse = await waitForGeneration(response.id)
         const results = finalResponse.results ?? []
+        const firstAssetId = results[0]?.assetId
         const assetIds = results
           .map((result) => result.assetId)
           .filter((assetId): assetId is string => !!assetId)
 
-        generateStore.setStatus(generateNodeId, finalResponse.status)
-        if (finalResponse.error) generateStore.setError(generateNodeId, finalResponse.error)
+        generateStore.setStatus(currentImageNodeId, finalResponse.status)
+        if (finalResponse.error) generateStore.setError(currentImageNodeId, finalResponse.error)
 
-        // 创建 image 节点并连线
-        if (assetIds.length > 0) {
-          const imageNodeId = addNode('image', {
-            x: basePos.x + i * 260 + 300,
-            y: basePos.y,
-          })
-          if (imageNodeId) {
-            updateNodeData(imageNodeId, {
-              assetId: assetIds[0],
-            } as unknown as Partial<BaseNodeData>)
-            onConnect({
-              source: generateNodeId,
-              target: imageNodeId,
-              sourceHandle: null,
-              targetHandle: null,
-            })
-            newImageAssetIds[i] = assetIds[0]
-            newImageNodeIds[i] = imageNodeId
-            // 添加结果到画廊
-            addGenerationResult({ assetId: assetIds[0], type: 'image', prompt: item.prompt })
-          }
+        // 直接设置 assetId 到当前 image 节点
+        if (firstAssetId) {
+          updateNodeData(currentImageNodeId, {
+            status: finalResponse.status,
+            error: finalResponse.error,
+            assetId: firstAssetId,
+            outputAssetIds: assetIds,
+            generationId: finalResponse.id,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          newImageAssetIds[i] = firstAssetId
+          // 添加结果到画廊
+          addGenerationResult({ assetId: firstAssetId, type: 'image', prompt: item.prompt })
+        } else {
+          updateNodeData(currentImageNodeId, {
+            status: finalResponse.status,
+            error: finalResponse.error,
+            outputAssetIds: assetIds,
+            generationId: finalResponse.id,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
         }
-
-        updateNodeData(generateNodeId, {
-          status: finalResponse.status,
-          error: finalResponse.error,
-          outputAssetIds: assetIds,
-          generationId: finalResponse.id,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        generateStore.setError(generateNodeId, message)
-        updateNodeData(generateNodeId, {
+        generateStore.setError(currentImageNodeId, message)
+        updateNodeData(currentImageNodeId, {
           status: 'error',
           error: message,
           updatedAt: new Date().toISOString(),
@@ -1107,7 +1119,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         const updatedItems = lastMsg.storyboard.items.map((item, index) => ({
           ...item,
           imageAssetId: newImageAssetIds[index] ?? item.imageAssetId,
-          imageNodeId: newImageNodeIds[index] ?? item.imageNodeId,
+          imageNodeId: imageNodeIds[index] ?? item.imageNodeId,
         }))
         useAgentStore.setState((state) => ({
           messages: state.messages.map((msg) =>
@@ -1932,7 +1944,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               <span>生成图片前确认一下参数</span>
             </div>
             <p className="agent-card-desc">
-              我会把这个需求变成画布上的即梦生成节点，并按下面参数开始生成。
+              我会把这个需求变成画布上的图片节点，并按下面参数开始生成。
             </p>
 
             <div className="agent-image-fields">

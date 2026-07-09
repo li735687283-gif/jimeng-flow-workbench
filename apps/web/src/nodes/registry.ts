@@ -1,12 +1,11 @@
 import type { ComponentType } from 'react'
 import type { Node, NodeProps } from '@xyflow/react'
 import type { LucideIcon } from 'lucide-react'
-import { FileText, Image as ImageIcon, Video, Sparkles, Bot, StickyNote } from 'lucide-react'
+import { FileText, Image as ImageIcon, Video, Bot, StickyNote } from 'lucide-react'
 import type { FlowNodeType, NodeStatus, BaseNodeData } from '../types/nodeTypes'
 import { TextNode } from './TextNode'
 import { ImageNode } from './ImageNode'
 import { VideoNode } from './VideoNode'
-import { GenerateNode } from './GenerateNode'
 import { AgentPromptNode } from './AgentPromptNode'
 import { NoteNode } from './NoteNode'
 
@@ -58,14 +57,6 @@ export const nodeRegistry: Record<FlowNodeType, NodeDefinition> = {
     icon: Video,
     create: makeCreate('video', '视频节点'),
     Component: VideoNode,
-  },
-  generate: {
-    type: 'generate',
-    label: '即梦生成',
-    defaultTitle: '即梦生成',
-    icon: Sparkles,
-    create: makeCreate('generate', '即梦生成'),
-    Component: GenerateNode,
   },
   agentPrompt: {
     type: 'agentPrompt',
