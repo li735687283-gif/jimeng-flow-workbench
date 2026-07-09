@@ -42,7 +42,7 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
 import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
-import { listLlmModels, transcribeAudio } from '../api/llm'
+import { transcribeAudio } from '../api/llm'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore } from '../state/generateStore'
@@ -116,14 +116,6 @@ type SpeechWindow = Window & {
   SpeechRecognition?: SpeechRecognitionConstructor
   webkitSpeechRecognition?: SpeechRecognitionConstructor
 }
-
-const FALLBACK_MODELS = [
-  'gpt-4o-mini',
-  'gpt-4o',
-  'claude-3.5-sonnet',
-  'deepseek-chat',
-  'doubao-seed-1.6',
-]
 
 const MIN_PANEL_WIDTH = 360
 
@@ -282,7 +274,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
-  const [models, setModels] = useState<string[]>(FALLBACK_MODELS)
+  const [models, setModels] = useState<string[]>([])
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
   const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
@@ -335,7 +327,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const audioChunksRef = useRef<Blob[]>([])
   const discardRecordingRef = useRef(false)
 
-  const currentModel = settings?.llmModel || FALLBACK_MODELS[0]
+  const currentModel = settings?.llmModel || ''
   const preferredModels = useMemo(() => {
     const configured = getConfiguredChatModels(
       settings?.llmModels,
@@ -345,15 +337,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     if (configured.length === 0) return []
     return uniqueModels(configured)
   }, [currentModel, settings?.llmModels, settings?.modelConfigs])
-  const hasStructuredChatModels = useMemo(
-    () =>
-      (settings?.modelConfigs ?? []).some(
-        (model) =>
-          model.enabled !== false &&
-          model.capabilities.includes('chat'),
-      ),
-    [settings?.modelConfigs],
-  )
   const mentionQuery = getMentionQuery(draft)
   const maxPanelWidth =
     typeof window === 'undefined'
@@ -361,37 +344,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth / 3))
 
   useEffect(() => {
-    let cancelled = false
-    const immediateModels = uniqueModels([
-      ...preferredModels,
-      currentModel,
-      ...FALLBACK_MODELS,
-    ])
-    setModels(immediateModels)
-
-    listLlmModels()
-      .then((items) => {
-        if (cancelled) return
-        const names = items
-          .map((item) => item.id || item.label)
-          .filter((name): name is string => !!name)
-        setModels(
-          uniqueModels([
-            ...preferredModels,
-            currentModel,
-            ...(hasStructuredChatModels ? [] : names),
-            ...FALLBACK_MODELS,
-          ]),
-        )
-      })
-      .catch(() => {
-        if (!cancelled) setModels(immediateModels)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [currentModel, preferredModels, hasStructuredChatModels])
+    setModels(uniqueModels([...preferredModels, currentModel]))
+  }, [currentModel, preferredModels])
 
   useEffect(() => {
     setPanelWidth((value) => clamp(value, MIN_PANEL_WIDTH, maxPanelWidth))
@@ -2671,11 +2625,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               type="button"
               className="agent-model-btn"
               onClick={() => setModelOpen((open) => !open)}
+              disabled={models.length === 0}
+              title={models.length === 0 ? '请先在设置中添加大语言模型' : '切换模型'}
             >
-              {currentModel}
+              {currentModel || '未配置模型'}
               <ChevronDown size={13} />
             </button>
-            {modelOpen && (
+            {modelOpen && models.length > 0 && (
               <div className="agent-model-menu">
                 {models.map((model) => (
                   <button
@@ -2850,8 +2806,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             type="button"
             className="agent-send-btn"
             onClick={() => void submit()}
-            disabled={!draft.trim() || loading}
-            title="发送"
+            disabled={!draft.trim() || loading || !currentModel}
+            title={currentModel ? '发送' : '请先在设置中添加大语言模型'}
           >
             <ArrowUp size={15} />
           </button>
