@@ -127,6 +127,7 @@ function AppInner() {
   const loadSettings = useSettingsStore((s) => s.loadSettings)
   const { fitView, screenToFlowPosition } = useReactFlow()
   const centeredFlowIdRef = useRef<string | null>(null)
+  const lastSavedFlowIdRef = useRef<string | null>(currentFlowId)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
   // 恢复上次画布期间先禁用，避免与恢复逻辑冲突。
@@ -157,6 +158,9 @@ function AppInner() {
   }, [view])
 
   useEffect(() => {
+    // 跳过初始挂载时的 null 值，避免在恢复逻辑读取前清空 lastFlowId
+    if (lastSavedFlowIdRef.current === currentFlowId) return
+    lastSavedFlowIdRef.current = currentFlowId
     setLastFlowId(currentFlowId)
   }, [currentFlowId])
 
@@ -168,12 +172,11 @@ function AppInner() {
     if (!lastFlowId) return
 
     setRestoringView(true)
+    centeredFlowIdRef.current = lastFlowId
     loadFlow(lastFlowId)
-      .then(() => {
-        centeredFlowIdRef.current = null
-      })
       .catch((err: unknown) => {
         console.error('[App] 恢复上次画布失败:', err)
+        centeredFlowIdRef.current = null
         setView('home')
       })
       .finally(() => {
@@ -228,10 +231,7 @@ function AppInner() {
 
   useEffect(() => {
     if (view !== 'canvas') return
-    if (!currentFlowId) {
-      centeredFlowIdRef.current = null
-      return
-    }
+    if (!currentFlowId) return
     if (centeredFlowIdRef.current === currentFlowId) return
 
     centeredFlowIdRef.current = currentFlowId

@@ -22,10 +22,12 @@ import type {
   Connection,
   OnConnectEnd,
   OnConnectStart,
+  Viewport,
 } from '@xyflow/react'
 import { Plus } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 import { useAssetStore } from '../../state/assetStore'
+import { useFlowStore } from '../../state/flowStore'
 import { uploadAsset } from '../../api/assets'
 import { nodeTypes } from '../../nodes/registry'
 import type { BaseNodeData, FlowNodeType } from '../../types/nodeTypes'
@@ -48,6 +50,46 @@ const INTERACTION_HANDLE_OFFSET = 8
 const UPLOAD_STAGGER = 34
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'])
+const VIEWPORT_STORAGE_PREFIX = 'jimeng-flow:viewport:'
+
+function getViewportStorageKey(flowId: string | null): string | null {
+  if (!flowId) return null
+  return `${VIEWPORT_STORAGE_PREFIX}${flowId}`
+}
+
+function getSavedViewport(flowId: string | null): Viewport | null {
+  if (typeof window === 'undefined') return null
+  const key = getViewportStorageKey(flowId)
+  if (!key) return null
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as unknown
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Viewport).x === 'number' &&
+      typeof (parsed as Viewport).y === 'number' &&
+      typeof (parsed as Viewport).zoom === 'number'
+    ) {
+      return parsed as Viewport
+    }
+  } catch {
+    // ignore malformed storage
+  }
+  return null
+}
+
+function saveViewport(flowId: string | null, viewport: Viewport) {
+  if (typeof window === 'undefined') return
+  const key = getViewportStorageKey(flowId)
+  if (!key) return
+  try {
+    window.localStorage.setItem(key, JSON.stringify(viewport))
+  } catch {
+    // ignore storage errors
+  }
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -210,14 +252,16 @@ export function CanvasView() {
   const setAsset = useAssetStore((s) => s.setAsset)
   const zoom = useStore((s) => s.transform[2])
   const connectionRadius = Math.round(clamp(28 * zoom, 16, 56))
+  const currentFlowId = useFlowStore((s) => s.currentFlowId)
 
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setViewport, getViewport } = useReactFlow()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [addMenu, setAddMenu] = useState<AddNodeMenuState | null>(null)
   const [referenceMenu, setReferenceMenu] =
     useState<ReferenceNodeMenuState | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [fileDragActive, setFileDragActive] = useState(false)
+  const lastRestoredFlowIdRef = useRef<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const connectionStartRef = useRef<{
@@ -244,6 +288,13 @@ export function CanvasView() {
     setAddMenu(null)
     setReferenceMenu(null)
   }, [setSelectedNode])
+
+  const handleMoveEnd = useCallback(() => {
+    if (!currentFlowId) return
+    // 仅在当前 flow 的视口恢复完成后才保存，避免初始化/恢复期间的默认视口覆盖已保存数据
+    if (lastRestoredFlowIdRef.current !== currentFlowId) return
+    saveViewport(currentFlowId, getViewport())
+  }, [currentFlowId, getViewport])
 
   const handleSelectionChange = useCallback(
     ({ nodes }: { nodes: Node[] }) => {
@@ -472,6 +523,33 @@ export function CanvasView() {
     [createUploadedNodes, screenToFlowPosition],
   )
 
+  // 画布视口恢复：当前 flow 加载完成后恢复上次保存的 x/y/zoom
+  useEffect(() => {
+    if (!currentFlowId) return
+    if (lastRestoredFlowIdRef.current === currentFlowId) return
+
+    const saved = getSavedViewport(currentFlowId)
+    if (!saved) {
+      lastRestoredFlowIdRef.current = currentFlowId
+      return
+    }
+
+    let timeoutId: number | null = null
+    const frame = window.requestAnimationFrame(() => {
+      setViewport(saved, { duration: 0 })
+      // 延迟标记恢复完成，避免 setViewport 触发的 onMoveEnd 等事件覆盖已保存视口
+      timeoutId = window.setTimeout(() => {
+        lastRestoredFlowIdRef.current = currentFlowId
+      }, 80)
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+    }
+  }, [currentFlowId, setViewport])
+
   // 在容器捕获阶段监听双击，只在画布 pane 上触发添加节点菜单
   useEffect(() => {
     const el = containerRef.current
@@ -526,6 +604,7 @@ export function CanvasView() {
         onPaneClick={handlePaneClick}
         onPaneContextMenu={handlePaneContextMenu}
         onSelectionChange={handleSelectionChange}
+        onMoveEnd={handleMoveEnd}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         selectionOnDrag
