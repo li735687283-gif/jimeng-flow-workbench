@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import {
   ArrowUp,
@@ -10,8 +10,6 @@ import {
   Image as ImageIcon,
   LocateFixed,
   Loader2,
-  Mic,
-  MicOff,
   Plus,
   RefreshCw,
   Sparkles,
@@ -42,7 +40,6 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
 import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
-import { transcribeAudio } from '../api/llm'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore } from '../state/generateStore'
@@ -83,39 +80,6 @@ import {
 import { getCurrentFlowId } from '../state/flowStore'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getConfiguredChatModels } from '../utils/chatModels'
-
-type SpeechRecognitionResultLike = {
-  readonly length: number
-  item(index: number): { transcript: string }
-  [index: number]: { transcript: string }
-}
-
-type SpeechRecognitionEventLike = {
-  readonly resultIndex: number
-  readonly results: {
-    readonly length: number
-    item(index: number): SpeechRecognitionResultLike
-    [index: number]: SpeechRecognitionResultLike
-  }
-}
-
-type SpeechRecognitionLike = {
-  lang: string
-  interimResults: boolean
-  continuous: boolean
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null
-  onerror: (() => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike
-
-type SpeechWindow = Window & {
-  SpeechRecognition?: SpeechRecognitionConstructor
-  webkitSpeechRecognition?: SpeechRecognitionConstructor
-}
 
 const MIN_PANEL_WIDTH = 360
 
@@ -193,18 +157,6 @@ function uniqueModels(models: string[]): string[] {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
-}
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('读取录音失败'))
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : ''
-      resolve(result.includes(',') ? result.split(',')[1] : result)
-    }
-    reader.readAsDataURL(blob)
-  })
 }
 
 function nodeTitle(node: { id: string; type?: string; data: unknown }): string {
@@ -316,16 +268,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [editGenerationStatus, setEditGenerationStatus] = useState('')
   const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'edit' | 'done'>('idle')
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
-  const [listening, setListening] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
-  const [voiceAutoSend, setVoiceAutoSend] = useState(() => {
-    return typeof window !== 'undefined' && localStorage.getItem('agentVoiceAutoSend') === 'true'
-  })
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const discardRecordingRef = useRef(false)
 
   const currentModel = settings?.llmModel || ''
   const preferredModels = useMemo(() => {
@@ -369,17 +312,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         : defaultVideoModelId,
     }))
   }, [defaultVideoModelId, videoModelOptions])
-
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.stop()
-      discardRecordingRef.current = true
-      if (mediaRecorderRef.current?.state === 'recording') {
-        mediaRecorderRef.current.stop()
-      }
-      mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
-    }
-  }, [])
 
   // 点击外部关闭角色选择器
   useEffect(() => {
@@ -1406,144 +1338,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     })
   }
 
-  const appendVoiceText = (text: string) => {
-    const trimmed = text.trim()
-    if (!trimmed) return
-    setDraft((value) => `${value}${value.trim() ? ' ' : ''}${trimmed}`)
-  }
-
-  const startRecorderVoice = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setVoiceStatus('当前浏览器不支持语音输入')
-      return
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      mediaStreamRef.current = stream
-      mediaRecorderRef.current = recorder
-      audioChunksRef.current = []
-      discardRecordingRef.current = false
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data)
-      }
-      recorder.onerror = () => {
-        setListening(false)
-        setVoiceStatus('录音失败，请重试')
-        stream.getTracks().forEach((track) => track.stop())
-      }
-      recorder.onstop = () => {
-        const discardRecording = discardRecordingRef.current
-        discardRecordingRef.current = false
-        const chunks = audioChunksRef.current
-        stream.getTracks().forEach((track) => track.stop())
-        mediaStreamRef.current = null
-        mediaRecorderRef.current = null
-        setListening(false)
-
-        if (discardRecording) {
-          audioChunksRef.current = []
-          return
-        }
-
-        if (chunks.length === 0) {
-          setVoiceStatus('没有录到声音')
-          return
-        }
-
-        setVoiceStatus('正在转文字...')
-        void (async () => {
-          try {
-            const mimeType = recorder.mimeType || 'audio/webm'
-            const audioBlob = new Blob(chunks, { type: mimeType })
-            const audioBase64 = await blobToBase64(audioBlob)
-            const result = await transcribeAudio({
-              audioBase64,
-              mimeType,
-              filename: 'voice.webm',
-            })
-            const text = result.text.trim()
-            if (text) {
-              const newDraft = draft.trim() ? `${draft} ${text}` : text
-              setDraft(newDraft)
-              if (voiceAutoSend) {
-                setTimeout(() => submit(newDraft), 120)
-              }
-            }
-            setVoiceStatus('')
-          } catch (err) {
-            setVoiceStatus(err instanceof Error ? err.message : '语音转文字失败')
-          } finally {
-            audioChunksRef.current = []
-          }
-        })()
-      }
-
-      setVoiceStatus('正在听...')
-      setListening(true)
-      recorder.start()
-    } catch (err) {
-      setListening(false)
-      setVoiceStatus(
-        err instanceof DOMException && err.name === 'NotAllowedError'
-          ? '麦克风权限未授权'
-          : '无法启动麦克风',
-      )
-    }
-  }
-
-  const toggleVoice = async () => {
-    if (listening) {
-      recognitionRef.current?.stop()
-      if (mediaRecorderRef.current?.state === 'recording') {
-        mediaRecorderRef.current.stop()
-      }
-      setListening(false)
-      return
-    }
-
-    const SpeechRecognitionCtor =
-      (window as SpeechWindow).SpeechRecognition ??
-      (window as SpeechWindow).webkitSpeechRecognition
-
-    if (!SpeechRecognitionCtor) {
-      await startRecorderVoice()
-      return
-    }
-
-    const recognition = new SpeechRecognitionCtor()
-    recognition.lang = 'zh-CN'
-    recognition.interimResults = false
-    recognition.continuous = false
-    recognition.onresult = (event) => {
-      let text = ''
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results.item(i)
-        text += result.item(0).transcript
-      }
-      appendVoiceText(text)
-    }
-    recognition.onerror = () => {
-      setVoiceStatus('语音识别失败，请重试')
-      setListening(false)
-    }
-    recognition.onend = () => {
-      setListening(false)
-      setVoiceStatus((status) => (status === '正在听...' ? '' : status))
-    }
-    recognitionRef.current = recognition
-    setVoiceStatus('正在听...')
-    setListening(true)
-    try {
-      recognition.start()
-    } catch {
-      setListening(false)
-      setVoiceStatus('语音输入启动失败')
-    }
-  }
-
   const retryLastRequest = async (modelOverride?: string) => {
     const lastReq = useAgentStore.getState().lastRequest
     if (!lastReq) return
@@ -1844,19 +1638,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       </header>
 
       <div className="agent-chat-scroll">
-        <div className="agent-bubble assistant">
-          <div className="agent-pill">你可以干什么</div>
-          <p>
-            我是你的创作搭档，专注帮你把想法变成画布上能看见的内容。可以从剧本、故事、企划案、文案切入，也可以围绕图片、视频和节点继续扩展。
-          </p>
-          <strong>脚本与故事</strong>
-          <p>从零写剧本、拆分镜脚本、诊断已有剧本问题并给出改法。</p>
-          <strong>视觉设计</strong>
-          <p>生成图片提示词、统一画面风格、设计角色卡、场景卡和镜头语言。</p>
-          <strong>视频与音乐</strong>
-          <p>生成视频片段、写歌词、生成配音或 BGM 方向。</p>
-        </div>
-
         {messages.map((message) => (
           <div
             key={message.id}
@@ -2543,7 +2324,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
               event.preventDefault()
               void submit()
             }
@@ -2651,27 +2432,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <span className="voice-status">{voiceStatus}</span>
           <button
             type="button"
-            className={`agent-round-btn ${voiceAutoSend ? 'active' : ''}`}
-            onClick={() => {
-              const next = !voiceAutoSend
-              setVoiceAutoSend(next)
-              localStorage.setItem('agentVoiceAutoSend', String(next))
-            }}
-            title={voiceAutoSend ? '关闭语音自动发送' : '开启语音自动发送'}
-            style={{ opacity: voiceAutoSend ? 1 : 0.5 }}
-          >
-            <Sparkles size={13} />
-          </button>
-          <button
-            type="button"
-            className={`agent-round-btn ${listening ? 'active' : ''}`}
-            onClick={() => void toggleVoice()}
-            title={listening ? '停止语音输入' : '语音输入'}
-          >
-            {listening ? <MicOff size={15} /> : <Mic size={15} />}
-          </button>
-          <button
-            type="button"
             className={`agent-round-btn ${templatePickerOpen ? 'active' : ''}`}
             onClick={() => setTemplatePickerOpen((open) => !open)}
             title="创作模板"
@@ -2734,73 +2494,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               ))}
             </div>
           )}
-
-          <div style={{ position: 'relative' }}>
-            <button
-              type="button"
-              className={`agent-round-btn agent-template-btn ${templatePickerOpen ? 'active' : ''}`}
-              onClick={() => setTemplatePickerOpen((open) => !open)}
-              title="创作模板"
-            >
-              <Wand2 size={14} />
-            </button>
-            {templatePickerOpen && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 'calc(100% + 8px)',
-                  right: 0,
-                  zIndex: 50,
-                  width: 260,
-                  background: '#202020',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  borderRadius: 10,
-                  padding: 8,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                }}
-              >
-                <div style={{ fontSize: 11, color: '#a3a3a3', padding: '4px 8px 8px', fontWeight: 600 }}>
-                  创作模板
-                </div>
-                {AGENT_TEMPLATES.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => {
-                      setTemplatePickerOpen(false)
-                      if (t.defaultRole) {
-                        setRole(t.defaultRole)
-                      }
-                      setDraft(t.prompt)
-                      setTimeout(() => submit(t.prompt), 80)
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: 10,
-                      width: '100%',
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: 'transparent',
-                      color: '#e6e6e6',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
-                      <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
 
           <button
             type="button"

@@ -46,7 +46,7 @@ test('configured image models include image-capable models from common llm model
     ['jimeng-5.0'],
     [
       'gpt-image-2-official',
-      'claude-opus-4-8',
+      'gpt-4o',
       'gemini-3-pro-image-preview',
       'banana-pro',
     ],
@@ -69,7 +69,7 @@ test('structured image model configs do not hide image-capable common models', (
     ['jimeng-5.0'],
     [
       'gpt-image-2-official',
-      'claude-opus-4-8',
+      'gpt-4o',
       'gemini-3-pro-image-preview',
     ],
     [
@@ -106,7 +106,7 @@ test('configured image models keep OpenAI CLI image generation available', () =>
     ['jimeng-5.0'],
     [
       'gpt-image-2-official',
-      'claude-opus-4-8',
+      'gpt-4o',
       'gemini-3-pro-image-preview',
     ],
   )
@@ -131,7 +131,7 @@ test('isLikelyImageModelId detects common image model ids without admitting text
   assert.equal(isLikelyImageModelId('gpt-image-2-official'), true)
   assert.equal(isLikelyImageModelId('gemini-3-pro-image-preview'), true)
   assert.equal(isLikelyImageModelId('banana-pro'), true)
-  assert.equal(isLikelyImageModelId('claude-opus-4-8'), false)
+  assert.equal(isLikelyImageModelId('gpt-4o'), false)
 })
 
 test('configured image models migrate legacy imagegen to the Codex image model', () => {
