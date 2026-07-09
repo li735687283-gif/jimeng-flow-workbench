@@ -236,7 +236,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
       await saveSettings(nextForm)
-      onClose()
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
