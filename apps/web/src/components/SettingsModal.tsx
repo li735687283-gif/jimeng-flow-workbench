@@ -11,10 +11,9 @@ import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import {
   DEFAULT_SETTINGS,
   buildModelConfigsFromSettings,
-  getModelConfigsByCapability,
 } from '@jimeng-flow/shared'
-import { IMAGE_MODELS } from '@jimeng-flow/shared/generateNode'
-import { VIDEO_MODELS } from '@jimeng-flow/shared/videoNode'
+import { IMAGE_MODELS, isJimengImageModel } from '@jimeng-flow/shared/generateNode'
+import { VIDEO_MODELS, isJimengVideoModel } from '@jimeng-flow/shared/videoNode'
 import { useSettingsStore } from '../state/settingsStore'
 import {
   type CodexStatus,
@@ -23,8 +22,6 @@ import {
   testJimengConnection,
   testLlmConnection,
 } from '../api/settings'
-import { getAssetFileUrl, uploadAsset } from '../api/assets'
-import defaultMokHeroUrl from '../assets/mok-hero.png'
 
 export interface SettingsModalProps {
   open: boolean
@@ -61,7 +58,7 @@ const labelStyle: React.CSSProperties = {
   color: '#9a9a9a',
 }
 const inputStyle: React.CSSProperties = {
-  background: 'var(--menu-control-bg, #282828)',
+  backgroundColor: 'var(--menu-control-bg, #282828)',
   border: '1px solid var(--menu-control-border, #373737)',
   borderRadius: '6px',
   padding: 'var(--menu-control-padding, 6px 8px)',
@@ -113,94 +110,7 @@ const helperTextStyle: React.CSSProperties = {
   fontSize: 11,
 }
 
-const homeVisualGridStyle: React.CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '1fr',
-  gap: '12px',
-}
-
-const sliderControlStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-}
-
-const sliderLabelStyle: React.CSSProperties = {
-  ...labelStyle,
-  minWidth: '70px',
-  flexShrink: 0,
-}
-
-const sliderInputStyle: React.CSSProperties = {
-  flex: 1,
-  accentColor: '#888',
-  cursor: 'pointer',
-}
-
-const sliderValueStyle: React.CSSProperties = {
-  ...labelStyle,
-  minWidth: '48px',
-  textAlign: 'right',
-  fontVariantNumeric: 'tabular-nums',
-}
-
-const mokPreviewContainerStyle: React.CSSProperties = {
-  position: 'relative',
-  width: '100%',
-  height: '220px',
-  background: '#111111',
-  borderRadius: '8px',
-  overflow: 'hidden',
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'center',
-  border: '1px solid #2a2a2a',
-}
-
-const mokPreviewImageStyle: React.CSSProperties = {
-  display: 'block',
-  width: 'auto',
-  height: 'auto',
-  maxWidth: '100%',
-  maxHeight: '100%',
-  objectFit: 'contain',
-  transition: 'none',
-}
-
-const homeVisualSlotStyle: React.CSSProperties = {
-  position: 'relative',
-  display: 'flex',
-  minHeight: 142,
-  flexDirection: 'column',
-  justifyContent: 'center',
-  gap: 7,
-  overflow: 'hidden',
-  padding: '14px',
-  border: '1px dashed rgba(255, 255, 255, 0.2)',
-  borderRadius: 10,
-  background: '#202020',
-  color: '#d8d8d8',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  textAlign: 'left',
-}
-
-const homeVisualPreviewStyle: React.CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  width: '100%',
-  height: '100%',
-  objectFit: 'cover',
-  opacity: 0.78,
-}
-
-const homeVisualContentStyle: React.CSSProperties = {
-  position: 'relative',
-  zIndex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-}
+const CODEX_IMAGE_MODEL_ID = 'codex:gpt-5.5'
 
 const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
   {
@@ -233,100 +143,12 @@ function normalizeImageModelId(modelId: string): string {
     : id
 }
 
-function normalizeModelOptions(
-  availableModels: LlmModelInfo[],
-  selectedModels: string[],
-  defaultModel: string,
-): LlmModelInfo[] {
-  const map = new Map<string, LlmModelInfo>()
-  for (const model of CODEX_CHAT_MODEL_OPTIONS) {
-    map.set(model.id, model)
-  }
-  for (const model of availableModels) {
-    const id = (model.id || model.label || '').trim()
-    if (!id) continue
-    map.set(id, { ...model, id, label: model.label || id })
-  }
-  for (const id of uniqueModelIds([...selectedModels, defaultModel])) {
-    if (!map.has(id)) {
-      map.set(id, { id, label: id })
-    }
-  }
-  return Array.from(map.values())
-}
-
 function cleanImageModelIds(models: string[]): string[] {
   return uniqueModelIds(models.map(normalizeImageModelId))
 }
 
 function cleanVideoModelIds(models: string[]): string[] {
   return uniqueModelIds(models)
-}
-
-function normalizeImageModelOptions(
-  availableModels: LlmModelInfo[],
-  selectedModels: string[],
-  defaultModel: string,
-): LlmModelInfo[] {
-  const map = new Map<string, LlmModelInfo>()
-  for (const model of IMAGE_MODELS) {
-    map.set(model.id, {
-      id: model.id,
-      label: model.label,
-      description: model.description,
-    })
-  }
-  map.set('codex:gpt-5.5', {
-    id: 'codex:gpt-5.5',
-    label: 'codex:gpt-5.5',
-    description: 'OpenAI CLI 图片模型',
-  })
-  for (const model of availableModels) {
-    const id = normalizeImageModelId(model.id || model.label || '')
-    if (!id) continue
-    if (!map.has(id)) {
-      map.set(id, { ...model, id, label: model.label || id })
-    }
-  }
-  for (const id of uniqueModelIds([...selectedModels, defaultModel])) {
-    const normalizedId = normalizeImageModelId(id)
-    if (!normalizedId || map.has(normalizedId)) continue
-    map.set(normalizedId, {
-      id: normalizedId,
-      label: normalizedId,
-      description: normalizedId === 'codex:gpt-5.5'
-        ? 'OpenAI CLI 图片模型'
-        : '第三方 API 图片模型',
-    })
-  }
-  return Array.from(map.values())
-}
-
-function normalizeVideoModelOptions(
-  availableModels: LlmModelInfo[],
-  selectedModels: string[],
-  defaultModel: string,
-): LlmModelInfo[] {
-  const map = new Map<string, LlmModelInfo>()
-  for (const model of VIDEO_MODELS) {
-    map.set(model.id, {
-      id: model.id,
-      label: model.label,
-    })
-  }
-  for (const model of availableModels) {
-    const id = (model.id || model.label || '').trim()
-    if (!id) continue
-    if (!map.has(id)) {
-      map.set(id, { ...model, id, label: model.label || id })
-    }
-  }
-  for (const id of uniqueModelIds([...selectedModels, defaultModel])) {
-    if (!map.has(id)) {
-      map.set(id, { id, label: id })
-    }
-  }
-  return Array.from(map.values())
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
@@ -359,8 +181,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [loadingLlmModels, setLoadingLlmModels] = useState(false)
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
   const autoFetchedModelsRef = useRef(false)
-  const homeHeroInputRef = useRef<HTMLInputElement>(null)
-  const homeMokHeroInputRef = useRef<HTMLInputElement>(null)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
@@ -398,220 +218,21 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const updateHomeVisualFromFile = async (file: File | undefined, field: 'homeHeroImagePath' | 'homeMokHeroImagePath') => {
-    if (!file) return
-    setSaveError(null)
-    if (!file.type.startsWith('image/')) {
-      setSaveError('请选择图片文件')
-      return
-    }
-    try {
-      const asset = await uploadAsset(file)
-      update(field, getAssetFileUrl(asset.id))
-    } catch (err: unknown) {
-      setSaveError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  const renderSlider = (
-    label: string,
-    value: number,
-    min: number,
-    max: number,
-    step: number,
-    unit: string,
-    onChange: (v: number) => void,
-  ) => (
-    <div style={sliderControlStyle}>
-      <span style={sliderLabelStyle}>{label}</span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={sliderInputStyle}
-      />
-      <span style={sliderValueStyle}>{value.toFixed(step < 1 ? 2 : 0)}{unit}</span>
-    </div>
-  )
-
-  const renderHomeVisualSlot = (
-    title: string,
-    emptyHint: string,
-    inputRef: React.RefObject<HTMLInputElement | null>,
-    inputId: string,
-    field: 'homeHeroImagePath' | 'homeMokHeroImagePath',
-    options?: {
-      isMokHero?: boolean
-    },
-  ) => {
-    const value = form[field]?.trim() ?? ''
-    const isMok = options?.isMokHero
-
-    return (
-      <div style={fieldStyle}>
-        <span style={labelStyle}>{title}</span>
-        <label
-          htmlFor={inputId}
-          style={{ ...homeVisualSlotStyle, cursor: 'pointer' }}
-          onDragOver={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            e.dataTransfer.dropEffect = 'copy'
-          }}
-          onDragEnter={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            e.currentTarget.style.borderColor = '#666'
-            e.currentTarget.style.background = '#222'
-          }}
-          onDragLeave={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            e.currentTarget.style.borderColor = ''
-            e.currentTarget.style.background = ''
-          }}
-          onDrop={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            e.currentTarget.style.borderColor = ''
-            e.currentTarget.style.background = ''
-            void updateHomeVisualFromFile(e.dataTransfer.files[0], field)
-          }}
-        >
-          {value && <img src={value} alt="" aria-hidden="true" style={homeVisualPreviewStyle} />}
-          <span style={homeVisualContentStyle}>
-            <strong style={{ color: '#f0f0f0', fontSize: 13 }}>{title}</strong>
-            <span style={{ color: '#b8b8b8', fontSize: 12 }}>拖入图片或点击选择</span>
-            <span style={{ color: '#777', fontSize: 11 }}>{emptyHint}</span>
-          </span>
-        </label>
-        <input
-          id={inputId}
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            void updateHomeVisualFromFile(e.currentTarget.files?.[0], field)
-            e.currentTarget.value = ''
-          }}
-        />
-        {value && (
-          <button
-            type="button"
-            style={{ ...subtleButtonStyle, alignSelf: 'flex-start', padding: '5px 9px' }}
-            onClick={() => update(field, '')}
-          >
-            清除
-          </button>
-        )}
-        {isMok && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px', padding: '10px', background: '#181818', borderRadius: '8px', border: '1px solid #2a2a2a' }}>
-            <span style={{ ...labelStyle, color: '#c0c0c0', marginBottom: '2px' }}>实时预览</span>
-            <div style={mokPreviewContainerStyle}>
-              <img
-                src={value || defaultMokHeroUrl}
-                alt="预览"
-                style={{
-                  ...mokPreviewImageStyle,
-                  marginTop: `${(form.homeMokHeroMarginTop ?? 0) * 0.8}px`,
-                  maxWidth: `${200 * (form.homeMokHeroScale ?? 1)}px`,
-                  width: `${Math.min(80 * (form.homeMokHeroScale ?? 1), 80)}%`,
-                  transform: `translate(${(form.homeMokHeroOffsetX ?? 0) * 0.6}px, ${(form.homeMokHeroOffsetY ?? 0) * 0.6}px)`,
-                }}
-              />
-            </div>
-            <span style={{ ...labelStyle, color: '#c0c0c0', marginTop: '6px' }}>尺寸与位置调整</span>
-            <span style={{ color: '#888', fontSize: '11px', marginTop: '-4px' }}>拖动滑块实时预览，点击「保存」后应用到首页</span>
-            {renderSlider(
-              '大小',
-              form.homeMokHeroScale ?? 1,
-              0.4,
-              1.6,
-              0.05,
-              'x',
-              (v) => update('homeMokHeroScale', v),
-            )}
-            {renderSlider(
-              '左右',
-              form.homeMokHeroOffsetX ?? 0,
-              -100,
-              100,
-              1,
-              'px',
-              (v) => update('homeMokHeroOffsetX', v),
-            )}
-            {renderSlider(
-              '上下',
-              form.homeMokHeroOffsetY ?? 0,
-              -80,
-              80,
-              1,
-              'px',
-              (v) => update('homeMokHeroOffsetY', v),
-            )}
-            {renderSlider(
-              '上边距',
-              form.homeMokHeroMarginTop ?? 0,
-              -20,
-              80,
-              1,
-              'px',
-              (v) => update('homeMokHeroMarginTop', v),
-            )}
-            <button
-              type="button"
-              style={{ ...subtleButtonStyle, alignSelf: 'flex-start', padding: '4px 10px', fontSize: '11px', marginTop: '2px' }}
-              onClick={() => {
-                update('homeMokHeroScale', 1)
-                update('homeMokHeroOffsetX', 0)
-                update('homeMokHeroOffsetY', 0)
-                update('homeMokHeroMarginTop', 0)
-              }}
-            >
-              重置为默认
-            </button>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   const handleSave = async () => {
     setSubmitting(true)
     setSaveError(null)
     try {
-      const cleanedModels = uniqueModelIds([
-        ...(form.llmModels ?? []),
-        form.llmModel,
-      ])
-      const cleanedImageModels =
-        cleanImageModelIds([
-          ...(form.imageModels ?? []),
-        ])
-      const cleanedVideoModels =
-        cleanVideoModelIds([
-          ...(form.videoModels ?? []),
-        ])
-      const imageModels =
-        cleanedImageModels.length > 0
-          ? cleanedImageModels
-          : DEFAULT_SETTINGS.imageModels
-      const videoModels =
-        cleanedVideoModels.length > 0
-          ? cleanedVideoModels
-          : DEFAULT_SETTINGS.videoModels
+      const cleanedModels = uniqueModelIds(form.llmModels ?? [])
+      const cleanedImageModels = cleanImageModelIds(form.imageModels ?? [])
+      const cleanedVideoModels = cleanVideoModelIds(form.videoModels ?? [])
       const nextForm = {
         ...form,
-        llmModel: form.llmModel.trim() || cleanedModels[0] || DEFAULT_SETTINGS.llmModel,
-        llmModels: cleanedModels.length > 0 ? cleanedModels : [DEFAULT_SETTINGS.llmModel],
+        llmModel: form.llmModel.trim() || cleanedModels[0] || '',
+        llmModels: cleanedModels,
         defaultModel: '',
-        imageModels,
+        imageModels: cleanedImageModels,
         defaultVideoModel: '',
-        videoModels,
+        videoModels: cleanedVideoModels,
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
       await saveSettings(nextForm)
@@ -712,36 +333,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }
 
-  const addLlmModelRow = () => {
-    const used = new Set(form.llmModels ?? [])
-    const next = availableLlmModels.find((model) => !used.has(model.id))?.id ?? ''
-    update('llmModels', [...(form.llmModels ?? []), next])
-  }
-
   const updateLlmModelRow = (index: number, modelId: string) => {
     const next = [...(form.llmModels ?? [])]
     next[index] = modelId
     update('llmModels', uniqueModelIds(next))
-    if (!form.llmModel.trim()) update('llmModel', modelId)
   }
 
   const removeLlmModelRow = (index: number) => {
     const next = (form.llmModels ?? []).filter((_, itemIndex) => itemIndex !== index)
-    const cleaned = uniqueModelIds(next)
-    update('llmModels', cleaned)
-    if (form.llmModel && !cleaned.includes(form.llmModel)) {
-      update('llmModel', cleaned[0] ?? '')
-    }
-  }
-
-  const addImageModelRow = () => {
-    const used = new Set(form.imageModels ?? [])
-    const next =
-      imageModelOptions.find((model) => !used.has(model.id))?.id ??
-      DEFAULT_SETTINGS.imageModels[0] ??
-      ''
-    if (!next) return
-    update('imageModels', cleanImageModelIds([...(form.imageModels ?? []), next]))
+    update('llmModels', uniqueModelIds(next))
   }
 
   const updateImageModelRow = (index: number, modelId: string) => {
@@ -757,16 +357,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     update('imageModels', cleaned)
   }
 
-  const addVideoModelRow = () => {
-    const used = new Set(form.videoModels ?? [])
-    const next =
-      videoModelOptions.find((model) => !used.has(model.id))?.id ??
-      DEFAULT_SETTINGS.videoModels[0] ??
-      ''
-    if (!next) return
-    update('videoModels', cleanVideoModelIds([...(form.videoModels ?? []), next]))
-  }
-
   const updateVideoModelRow = (index: number, modelId: string) => {
     const next = [...(form.videoModels ?? [])]
     next[index] = modelId
@@ -778,6 +368,36 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const next = (form.videoModels ?? []).filter((_, itemIndex) => itemIndex !== index)
     const cleaned = cleanVideoModelIds(next)
     update('videoModels', cleaned)
+  }
+
+  const addJimengImageModel = () => {
+    const used = new Set(form.imageModels ?? [])
+    const next = IMAGE_MODELS.find((m) => !used.has(m.id))?.id ?? ''
+    update('imageModels', [...(form.imageModels ?? []), next])
+  }
+
+  const addCodexImageModel = () => {
+    const used = new Set(form.imageModels ?? [])
+    const next = !used.has(CODEX_IMAGE_MODEL_ID) ? CODEX_IMAGE_MODEL_ID : ''
+    update('imageModels', [...(form.imageModels ?? []), next])
+  }
+
+  const addJimengVideoModel = () => {
+    const used = new Set(form.videoModels ?? [])
+    const next = VIDEO_MODELS.find((m) => !used.has(m.id))?.id ?? ''
+    update('videoModels', [...(form.videoModels ?? []), next])
+  }
+
+  const addCodexChatModel = () => {
+    const used = new Set(form.llmModels ?? [])
+    const next = CODEX_CHAT_MODEL_OPTIONS.find((m) => !used.has(m.id))?.id ?? ''
+    update('llmModels', [...(form.llmModels ?? []), next])
+  }
+
+  const addRelayModel = () => {
+    const used = new Set(form.llmModels ?? [])
+    const next = availableLlmModels.find((m) => !used.has(m.id))?.id ?? ''
+    update('llmModels', [...(form.llmModels ?? []), next])
   }
 
   const renderTestResult = (result: { ok: boolean; message: string } | null) => {
@@ -804,49 +424,137 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     )
   }
 
-  const structuredChatModelIds = getModelConfigsByCapability(
-    form.modelConfigs,
-    'chat',
-  ).map((model) => model.id)
-  const structuredImageModelIds = getModelConfigsByCapability(
-    form.modelConfigs,
-    'image',
-  ).map((model) => model.id)
-  const structuredVideoModelIds = getModelConfigsByCapability(
-    form.modelConfigs,
-    'video',
-  ).map((model) => model.id)
-  const selectedLlmModels = uniqueModelIds([
-    ...(form.llmModels ?? []),
-    ...structuredChatModelIds,
-  ])
-  const llmModelOptions = normalizeModelOptions(
-    availableLlmModels,
-    selectedLlmModels,
-    form.llmModel,
+  const selectedLlmModels = form.llmModels ?? []
+  const selectedImageModels = form.imageModels ?? []
+  const selectedVideoModels = form.videoModels ?? []
+
+  const jimengImageModelIndices = selectedImageModels
+    .map((id, idx) => ({ id, idx }))
+    .filter(({ id }) => isJimengImageModel(id))
+    .map(({ idx }) => idx)
+  const jimengImageModels = jimengImageModelIndices.map((idx) => selectedImageModels[idx])
+
+  const codexImageModelIndices = selectedImageModels
+    .map((id, idx) => ({ id, idx }))
+    .filter(({ id }) => id.toLowerCase().startsWith('codex:'))
+    .map(({ idx }) => idx)
+  const codexImageModels = codexImageModelIndices.map((idx) => selectedImageModels[idx])
+
+  const jimengVideoModelIndices = selectedVideoModels
+    .map((id, idx) => ({ id, idx }))
+    .filter(({ id }) => isJimengVideoModel(id))
+    .map(({ idx }) => idx)
+  const jimengVideoModels = jimengVideoModelIndices.map((idx) => selectedVideoModels[idx])
+
+  const codexChatModelIndices = selectedLlmModels
+    .map((id, idx) => ({ id, idx }))
+    .filter(({ id }) => id.toLowerCase().startsWith('codex:'))
+    .map(({ idx }) => idx)
+  const codexChatModels = codexChatModelIndices.map((idx) => selectedLlmModels[idx])
+
+  const relayModelIndices = selectedLlmModels
+    .map((id, idx) => ({ id, idx }))
+    .filter(
+      ({ id }) =>
+        !id.toLowerCase().startsWith('codex:') &&
+        !isJimengImageModel(id) &&
+        !isJimengVideoModel(id),
+    )
+    .map(({ idx }) => idx)
+  const relayModels = relayModelIndices.map((idx) => selectedLlmModels[idx])
+
+  const jimengImageOptions = IMAGE_MODELS.map((m) => ({ id: m.id, label: m.label }))
+  const codexImageOptions = [{ id: CODEX_IMAGE_MODEL_ID, label: CODEX_IMAGE_MODEL_ID }]
+  const jimengVideoOptions = VIDEO_MODELS.map((m) => ({ id: m.id, label: m.label }))
+  const codexChatOptions = CODEX_CHAT_MODEL_OPTIONS
+  const relayModelOptions = availableLlmModels
+
+  const renderModelList = (
+    title: string,
+    emptyHint: string,
+    models: string[],
+    indices: number[],
+    options: LlmModelInfo[],
+    datalistId: string,
+    placeholder: string,
+    addLabel: string,
+    onAdd: () => void,
+    onUpdate: (displayIndex: number, value: string) => void,
+    onRemove: (displayIndex: number) => void,
+  ) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ ...labelStyle, color: '#c0c0c0' }}>{title}</div>
+      {models.length === 0 && (
+        <div
+          style={{
+            padding: '10px',
+            border: '1px dashed #383838',
+            borderRadius: '8px',
+            color: '#777',
+            fontSize: 12,
+          }}
+        >
+          {emptyHint}
+        </div>
+      )}
+
+      <datalist id={datalistId}>
+        {options.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.label || model.id}
+          </option>
+        ))}
+      </datalist>
+
+      {models.map((modelId, displayIndex) => {
+        const originalIndex = indices[displayIndex]
+        return (
+          <div
+            key={`${modelId}-${originalIndex}`}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 34px',
+              gap: '8px',
+              alignItems: 'center',
+            }}
+          >
+            <input
+              className="settings-dropdown-control"
+              style={dropdownControlStyle}
+              list={datalistId}
+              value={modelId}
+              onChange={(e) => onUpdate(displayIndex, e.target.value)}
+              placeholder={placeholder}
+            />
+            <button
+              type="button"
+              style={iconButtonStyle}
+              onClick={() => onRemove(displayIndex)}
+              aria-label={`移除${title}`}
+              title={`移除${title}`}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )
+      })}
+
+      <button
+        type="button"
+        style={{
+          ...subtleButtonStyle,
+          width: '100%',
+          justifyContent: 'center',
+          borderStyle: 'dashed',
+        }}
+        onClick={onAdd}
+      >
+        <Plus size={14} />
+        {addLabel}
+      </button>
+    </div>
   )
-  const defaultModelOptions = uniqueModelIds([
-    ...selectedLlmModels,
-    form.llmModel,
-  ])
-  const selectedImageModels = cleanImageModelIds([
-    ...(form.imageModels ?? []),
-    ...structuredImageModelIds,
-  ])
-  const imageModelOptions = normalizeImageModelOptions(
-    availableLlmModels,
-    selectedImageModels,
-    '',
-  )
-  const selectedVideoModels = cleanVideoModelIds([
-    ...(form.videoModels ?? []),
-    ...structuredVideoModelIds,
-  ])
-  const videoModelOptions = normalizeVideoModelOptions(
-    availableLlmModels,
-    selectedVideoModels,
-    '',
-  )
+
   const codexSetupRows = [
     { label: '安装 Codex CLI', command: codexSetupCommands.installCodex },
     { label: '打开登录', command: codexSetupCommands.login },
@@ -945,28 +653,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           )}
 
-          {/* Home */}
-          <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>首页视觉</div>
-            <div style={homeVisualGridStyle}>
-              {renderHomeVisualSlot(
-                '首页主图（MO.K）',
-                '留空使用默认 MO.K 黑猫图',
-                homeMokHeroInputRef,
-                'settings-home-mok-hero-input',
-                'homeMokHeroImagePath',
-                { isMokHero: true },
-              )}
-              {renderHomeVisualSlot(
-                '首页背景',
-                '留空使用默认深色背景',
-                homeHeroInputRef,
-                'settings-home-hero-input',
-                'homeHeroImagePath',
-              )}
-            </div>
-          </section>
-
           {/* Dreamina CLI */}
           <section style={sectionStyle}>
             <div
@@ -1011,6 +697,34 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
               </span>
             </div>
+            <div style={{ ...fieldStyle, gap: '16px', marginTop: '8px' }}>
+              {renderModelList(
+                '图片模型',
+                '暂未添加即梦图片模型。点击下方加号添加。',
+                jimengImageModels,
+                jimengImageModelIndices,
+                jimengImageOptions,
+                'set-jimeng-image-model-options',
+                '选择或输入图片模型 ID',
+                '添加一个图片模型',
+                addJimengImageModel,
+                (displayIndex, value) => updateImageModelRow(jimengImageModelIndices[displayIndex], value),
+                (displayIndex) => removeImageModelRow(jimengImageModelIndices[displayIndex]),
+              )}
+              {renderModelList(
+                '视频模型',
+                '暂未添加即梦视频模型。点击下方加号添加。',
+                jimengVideoModels,
+                jimengVideoModelIndices,
+                jimengVideoOptions,
+                'set-jimeng-video-model-options',
+                '选择或输入视频模型 ID',
+                '添加一个视频模型',
+                addJimengVideoModel,
+                (displayIndex, value) => updateVideoModelRow(jimengVideoModelIndices[displayIndex], value),
+                (displayIndex) => removeVideoModelRow(jimengVideoModelIndices[displayIndex]),
+              )}
+            </div>
           </section>
 
           {/* OpenAI CLI */}
@@ -1043,7 +757,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             {renderTestResult(codexTestResult)}
             <div style={helperTextStyle}>
-              已登录本机 Codex 后，可在图片模型里添加 codex:gpt-5.5，图片节点会使用 ChatGPT/Codex 账户通道生成。Codex chat 模型走本机 ChatGPT 登录态。
+              已登录本机 Codex 后，可在下方添加 codex:gpt-5.5 等 OpenAI CLI 模型。
             </div>
             <div
               style={{
@@ -1091,207 +805,33 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </div>
               ))}
             </div>
-          </section>
-
-          {/* Image Models */}
-          <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>图片模型</div>
-            <div style={{ ...fieldStyle, gap: '10px' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                }}
-              >
-                <div style={helperTextStyle}>
-                  这里决定图片节点下拉菜单显示哪些图片模型；即梦模型走本机 dreamina，OpenAI CLI 模型走 Codex，其他模型走下方 OpenAI-compatible API。
-                </div>
-                <button
-                  type="button"
-                  style={{
-                    ...subtleButtonStyle,
-                    opacity: loadingLlmModels ? 0.65 : 1,
-                    cursor: loadingLlmModels ? 'not-allowed' : 'pointer',
-                  }}
-                  disabled={loadingLlmModels}
-                  onClick={() => void refreshLlmModels()}
-                >
-                  <RefreshCw size={13} className={loadingLlmModels ? 'animate-spin' : undefined} />
-                  {loadingLlmModels ? '拉取中' : '刷新中转站'}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {selectedImageModels.length === 0 && (
-                  <div
-                    style={{
-                      padding: '10px',
-                      border: '1px dashed #383838',
-                      borderRadius: '8px',
-                      color: '#777',
-                      fontSize: 12,
-                    }}
-                  >
-                    暂未添加常用图片模型。保存时会自动使用即梦默认模型，也可以手动输入第三方模型 ID。
-                  </div>
-                )}
-
-                <datalist id="set-image-model-options">
-                  {imageModelOptions.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label || model.id}
-                    </option>
-                  ))}
-                </datalist>
-
-                {selectedImageModels.map((modelId, index) => (
-                  <div
-                    key={`${modelId}-${index}`}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 34px',
-                      gap: '8px',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <input
-                      className="settings-dropdown-control"
-                      style={dropdownControlStyle}
-                      list="set-image-model-options"
-                      value={modelId}
-                      onChange={(e) => updateImageModelRow(index, e.target.value)}
-                      placeholder="选择或输入图片模型 ID，例如 gpt-image-1"
-                    />
-                    <button
-                      type="button"
-                      style={iconButtonStyle}
-                      onClick={() => removeImageModelRow(index)}
-                      aria-label="移除图片模型"
-                      title="移除图片模型"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  style={{
-                    ...subtleButtonStyle,
-                    width: '100%',
-                    justifyContent: 'center',
-                    borderStyle: 'dashed',
-                  }}
-                  onClick={addImageModelRow}
-                >
-                  <Plus size={14} />
-                  添加一个图片模型
-                </button>
-              </div>
-
-            </div>
-          </section>
-
-          {/* Video Models */}
-          <section style={sectionStyle}>
-            <div style={sectionTitleStyle}>视频模型</div>
-            <div style={{ ...fieldStyle, gap: '10px' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                }}
-              >
-                <div style={helperTextStyle}>
-                  这里决定视频节点和 Agent 视频生成显示哪些视频模型；可添加 Seedance 或第三方中转站视频模型 ID。
-                </div>
-                <button
-                  type="button"
-                  style={{
-                    ...subtleButtonStyle,
-                    opacity: loadingLlmModels ? 0.65 : 1,
-                    cursor: loadingLlmModels ? 'not-allowed' : 'pointer',
-                  }}
-                  disabled={loadingLlmModels}
-                  onClick={() => void refreshLlmModels()}
-                >
-                  <RefreshCw size={13} className={loadingLlmModels ? 'animate-spin' : undefined} />
-                  {loadingLlmModels ? '拉取中' : '刷新中转站'}
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {selectedVideoModels.length === 0 && (
-                  <div
-                    style={{
-                      padding: '10px',
-                      border: '1px dashed #383838',
-                      borderRadius: '8px',
-                      color: '#777',
-                      fontSize: 12,
-                    }}
-                  >
-                    暂未添加常用视频模型。保存时会自动使用 Seedance 默认模型，也可以手动输入第三方视频模型 ID。
-                  </div>
-                )}
-
-                <datalist id="set-video-model-options">
-                  {videoModelOptions.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label || model.id}
-                    </option>
-                  ))}
-                </datalist>
-
-                {selectedVideoModels.map((modelId, index) => (
-                  <div
-                    key={`${modelId}-${index}`}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 34px',
-                      gap: '8px',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <input
-                      className="settings-dropdown-control"
-                      style={dropdownControlStyle}
-                      list="set-video-model-options"
-                      value={modelId}
-                      onChange={(e) => updateVideoModelRow(index, e.target.value)}
-                      placeholder="选择或输入视频模型 ID，例如 veo3-fast"
-                    />
-                    <button
-                      type="button"
-                      style={iconButtonStyle}
-                      onClick={() => removeVideoModelRow(index)}
-                      aria-label="移除视频模型"
-                      title="移除视频模型"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
-
-                <button
-                  type="button"
-                  style={{
-                    ...subtleButtonStyle,
-                    width: '100%',
-                    justifyContent: 'center',
-                    borderStyle: 'dashed',
-                  }}
-                  onClick={addVideoModelRow}
-                >
-                  <Plus size={14} />
-                  添加一个视频模型
-                </button>
-              </div>
-
+            <div style={{ ...fieldStyle, gap: '16px', marginTop: '8px' }}>
+              {renderModelList(
+                '图片模型',
+                '暂未添加 OpenAI CLI 图片模型。点击下方加号添加。',
+                codexImageModels,
+                codexImageModelIndices,
+                codexImageOptions,
+                'set-codex-image-model-options',
+                '选择或输入图片模型 ID',
+                '添加一个图片模型',
+                addCodexImageModel,
+                (displayIndex, value) => updateImageModelRow(codexImageModelIndices[displayIndex], value),
+                (displayIndex) => removeImageModelRow(codexImageModelIndices[displayIndex]),
+              )}
+              {renderModelList(
+                '大语言模型',
+                '暂未添加 OpenAI CLI 大语言模型。点击下方加号添加。',
+                codexChatModels,
+                codexChatModelIndices,
+                codexChatOptions,
+                'set-codex-chat-model-options',
+                '选择或输入模型 ID',
+                '添加一个模型',
+                addCodexChatModel,
+                (displayIndex, value) => updateLlmModelRow(codexChatModelIndices[displayIndex], value),
+                (displayIndex) => removeLlmModelRow(codexChatModelIndices[displayIndex]),
+              )}
             </div>
           </section>
 
@@ -1360,9 +900,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   }}
                 >
                   <div>
-                    <div style={{ ...labelStyle, marginBottom: 3 }}>常用模型</div>
+                    <div style={{ ...labelStyle, marginBottom: 3 }}>模型</div>
                     <div style={helperTextStyle}>
-                      先从中转站拉取模型池，再用加号添加你常用的模型；保存后 Agent 和文本节点只优先显示这些模型。
+                      先从中转站拉取模型池，再用加号添加模型；保存后 Agent 和文本节点只优先显示这些模型。
                     </div>
                   </div>
                   <button
@@ -1386,94 +926,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
                 )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {selectedLlmModels.length === 0 && (
-                    <div
-                      style={{
-                        padding: '10px',
-                        border: '1px dashed #383838',
-                        borderRadius: '8px',
-                        color: '#777',
-                        fontSize: 12,
-                      }}
-                    >
-                      暂未添加常用模型。点击下方加号添加一栏。
-                    </div>
-                  )}
-
-                  {selectedLlmModels.map((modelId, index) => (
-                    <div
-                      key={`${modelId}-${index}`}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 34px',
-                        gap: '8px',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <select
-                        className="settings-dropdown-control"
-                        style={dropdownControlStyle}
-                        value={modelId}
-                        onChange={(e) => updateLlmModelRow(index, e.target.value)}
-                      >
-                        <option value="" disabled>
-                          选择一个模型
-                        </option>
-                        {llmModelOptions.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label || model.id}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        style={iconButtonStyle}
-                        onClick={() => removeLlmModelRow(index)}
-                        aria-label="移除常用模型"
-                        title="移除常用模型"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    style={{
-                      ...subtleButtonStyle,
-                      width: '100%',
-                      justifyContent: 'center',
-                      borderStyle: 'dashed',
-                    }}
-                    onClick={addLlmModelRow}
-                  >
-                    <Plus size={14} />
-                    添加一个常用模型
-                  </button>
-                </div>
-
-                <div style={fieldStyle}>
-                  <label style={labelStyle} htmlFor="set-llm-model">
-                    默认模型
-                  </label>
-                  <select
-                    id="set-llm-model"
-                    className="settings-dropdown-control"
-                    style={dropdownControlStyle}
-                    value={form.llmModel}
-                    onChange={(e) => update('llmModel', e.target.value)}
-                  >
-                    {defaultModelOptions.length === 0 && (
-                      <option value="">请先添加常用模型</option>
-                    )}
-                    {defaultModelOptions.map((modelId) => (
-                      <option key={modelId} value={modelId}>
-                        {modelId}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {renderModelList(
+                  '模型',
+                  '暂未添加中转站模型。点击下方加号添加。',
+                  relayModels,
+                  relayModelIndices,
+                  relayModelOptions,
+                  'set-relay-model-options',
+                  '选择或输入模型 ID',
+                  '添加一个模型',
+                  addRelayModel,
+                  (displayIndex, value) => updateLlmModelRow(relayModelIndices[displayIndex], value),
+                  (displayIndex) => removeLlmModelRow(relayModelIndices[displayIndex]),
+                )}
               </div>
             </div>
           </section>

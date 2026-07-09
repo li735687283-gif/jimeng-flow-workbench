@@ -8,7 +8,7 @@ interface Particle {
   phase: number
 }
 
-const SPACING = 42
+const SPACING = 28
 const BASE_RADIUS = 1.7
 const SYMBOL_SIZE = 14
 const REPEL_RADIUS = 136
