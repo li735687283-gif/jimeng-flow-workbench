@@ -32,6 +32,34 @@ import './App.css'
 
 type AppView = 'home' | 'canvas'
 
+const LAST_VIEW_KEY = 'jimeng-flow:lastView'
+const LAST_FLOW_ID_KEY = 'jimeng-flow:lastFlowId'
+
+function getLastView(): AppView {
+  if (typeof window === 'undefined') return 'home'
+  const value = window.localStorage.getItem(LAST_VIEW_KEY)
+  return value === 'canvas' ? 'canvas' : 'home'
+}
+
+function setLastView(view: AppView) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(LAST_VIEW_KEY, view)
+}
+
+function getLastFlowId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(LAST_FLOW_ID_KEY)
+}
+
+function setLastFlowId(id: string | null) {
+  if (typeof window === 'undefined') return
+  if (id) {
+    window.localStorage.setItem(LAST_FLOW_ID_KEY, id)
+  } else {
+    window.localStorage.removeItem(LAST_FLOW_ID_KEY)
+  }
+}
+
 function resolveHomeHeroImage(path: string | undefined): string {
   const trimmed = path?.trim()
   return trimmed || defaultHeroUrl
@@ -68,7 +96,8 @@ function resolveHomeMokHeroStyles(settings: {
 }
 
 function AppInner() {
-  const [view, setView] = useState<AppView>('home')
+  const [view, setView] = useState<AppView>(getLastView)
+  const [restoringView, setRestoringView] = useState(() => getLastView() === 'canvas')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [openModalOpen, setOpenModalOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(true)
@@ -100,7 +129,8 @@ function AppInner() {
   const centeredFlowIdRef = useRef<string | null>(null)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
-  useAutoSave(view === 'canvas')
+  // 恢复上次画布期间先禁用，避免与恢复逻辑冲突。
+  useAutoSave(view === 'canvas' && !restoringView)
 
   const reloadWorks = useCallback(async () => {
     try {
@@ -121,6 +151,35 @@ function AppInner() {
     })
     void reloadWorks()
   }, [loadSettings, reloadWorks])
+
+  useEffect(() => {
+    setLastView(view)
+  }, [view])
+
+  useEffect(() => {
+    setLastFlowId(currentFlowId)
+  }, [currentFlowId])
+
+  useEffect(() => {
+    if (view !== 'canvas') return
+    if (currentFlowId) return
+
+    const lastFlowId = getLastFlowId()
+    if (!lastFlowId) return
+
+    setRestoringView(true)
+    loadFlow(lastFlowId)
+      .then(() => {
+        centeredFlowIdRef.current = null
+      })
+      .catch((err: unknown) => {
+        console.error('[App] 恢复上次画布失败:', err)
+        setView('home')
+      })
+      .finally(() => {
+        setRestoringView(false)
+      })
+  }, [view, currentFlowId, loadFlow])
 
   useEffect(() => {
     if (view !== 'home') return
