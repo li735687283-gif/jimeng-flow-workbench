@@ -1,5 +1,4 @@
 import { useCanvasStore } from '../../state/canvasStore'
-import { TextComposer } from '../TextComposer'
 import { VideoComposer } from '../VideoComposer'
 import { AgentPanel } from '../AgentPanel'
 
@@ -8,11 +7,10 @@ export function BottomPanel() {
   const nodes = useCanvasStore((s) => s.nodes)
   const node = nodes.find((n) => n.id === selectedNodeId)
 
+  // 文本节点交互已迁移到节点下方浮动编辑器（对齐图片节点）。
   let content: React.ReactNode
   if (!node) {
     content = <AgentPanel />
-  } else if (node.type === 'text') {
-    content = <TextComposer nodeId={node.id} />
   } else if (node.type === 'video') {
     content = <VideoComposer nodeId={node.id} />
   } else {

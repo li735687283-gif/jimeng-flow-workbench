@@ -9,4 +9,7 @@ test('empty video node uses a centered camera icon instead of the play triangle'
   assert.equal(source.includes('video-placeholder-icon'), true)
   assert.equal(source.includes('<Video'), true)
   assert.equal(source.includes('<Play size='), false)
+  // 生成中隐藏摄像机占位图标，只保留进度条
+  assert.match(source, /\{\s*!running\s*\?\s*\(/)
+  assert.match(source, /video-placeholder-icon/)
 })

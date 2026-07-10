@@ -2,6 +2,7 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  FileText,
   Film,
   Sparkles,
 } from 'lucide-react'
@@ -27,6 +28,10 @@ interface VideoGenerationPanelProps {
   prompt: string
   referenceAssetIds: string[]
   mentionImages?: MentionImage[]
+  /** 上游文本节点提示词简介（胶囊展示） */
+  upstreamTextBrief?: string
+  /** 上游文本全文（悬停 title） */
+  upstreamTextFull?: string
   modelOptions: VideoModelOption[]
   selectedModelId: string
   modelMenuOpen: boolean
@@ -68,6 +73,8 @@ export function VideoGenerationPanel({
   prompt,
   referenceAssetIds,
   mentionImages = [],
+  upstreamTextBrief = '',
+  upstreamTextFull = '',
   modelOptions,
   selectedModelId,
   modelMenuOpen,
@@ -135,10 +142,24 @@ export function VideoGenerationPanel({
         onRemove={onRemoveReference}
       />
 
+      {upstreamTextBrief ? (
+        <div className="reference-text-strip" aria-label="已引用文本提示词">
+          <span className="reference-text-chip" title={upstreamTextFull || upstreamTextBrief}>
+            <FileText size={13} strokeWidth={1.8} />
+            <span className="reference-text-chip-tag">文本提示词</span>
+            <span className="reference-text-chip-label">{upstreamTextBrief}</span>
+          </span>
+        </div>
+      ) : null}
+
       <MentionablePromptEditor
         value={prompt}
         onChange={onPromptChange}
-        placeholder="描述视频画面，输入 @ 可引用上游图片"
+        placeholder={
+          upstreamTextBrief
+            ? '已引用上游文本，可直接发送；也可在此补充或覆盖视频提示词'
+            : '描述视频画面，输入 @ 可引用上游图片'
+        }
         disabled={running}
         mentionImages={mentionImages}
       />

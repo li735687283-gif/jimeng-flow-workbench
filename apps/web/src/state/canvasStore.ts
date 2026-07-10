@@ -39,8 +39,25 @@ const VIDEO_MODES = new Set<VideoMode>([
 type UpscaleResolution = '2k' | '4k' | '8k'
 
 function getAssetId(node: Node | undefined): string | null {
-  const assetId = (node?.data as BaseNodeData | undefined)?.assetId
-  return typeof assetId === 'string' && assetId ? assetId : null
+  const data = node?.data as BaseNodeData | undefined
+  if (!data) return null
+  if (typeof data.assetId === 'string' && data.assetId.trim()) {
+    return data.assetId.trim()
+  }
+  // 兼容只写了 outputAssetIds 的图片节点
+  const outputs = data.outputAssetIds
+  if (Array.isArray(outputs)) {
+    for (const item of outputs) {
+      if (typeof item === 'string' && item.trim()) return item.trim()
+    }
+  }
+  const assetIds = data.assetIds
+  if (Array.isArray(assetIds)) {
+    for (const item of assetIds) {
+      if (typeof item === 'string' && item.trim()) return item.trim()
+    }
+  }
+  return null
 }
 
 function getNodeModel(node: Node | undefined): string {
@@ -198,7 +215,28 @@ function syncConnectedImageReference(
   const target = nodesById.get(targetId)
   const assetId = getAssetId(source)
   const sourceModel = getNodeModel(source)
-  if (!target || !CONNECTABLE_IMAGE_TARGETS.has(target.type as FlowNodeType)) {
+  if (!target) return nodes
+
+  const targetType = target.type as FlowNodeType
+  // 图片 → 文本：把图挂到文本节点 inputImageAssetIds，供识图反推
+  if (targetType === 'text') {
+    if (source?.type !== 'image' || !assetId) return nodes
+    return nodes.map((node) => {
+      if (node.id !== targetId) return node
+      const data = node.data as BaseNodeData
+      const inputImageAssetIds = stringArray(data.inputImageAssetIds)
+      if (inputImageAssetIds.includes(assetId)) return node
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          inputImageAssetIds: [...inputImageAssetIds, assetId],
+        },
+      }
+    })
+  }
+
+  if (!CONNECTABLE_IMAGE_TARGETS.has(targetType)) {
     return nodes
   }
   if (!assetId && !(target.type === 'image' && sourceModel)) {
@@ -290,10 +328,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   onConnect: (connection: Connection) => {
-    set((state) => ({
-      nodes: syncConnectedImageReference(state.nodes, connection),
-      edges: addEdge({ ...connection, type: 'cut' }, state.edges),
-    }))
+    set((state) => {
+      const edges = addEdge({ ...connection, type: 'cut' }, state.edges)
+      // 先按连接写引用，再全量同步文本节点上游图（保证重渲染 + 数据一致）
+      let nodes = syncConnectedImageReference(state.nodes, connection)
+      // 动态导入避免循环依赖（canvasStore ↔ utils）
+      // 同步函数体量小，直接内联调用同文件逻辑已覆盖 image→text
+      return { nodes, edges }
+    })
   },
 
   onNodesDelete: (nodes: Node[]) => {

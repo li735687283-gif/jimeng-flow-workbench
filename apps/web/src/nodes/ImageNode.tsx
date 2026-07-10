@@ -14,6 +14,7 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  FileText,
   History,
   Image as ImageIcon,
   LayoutTemplate,
@@ -58,7 +59,12 @@ import {
   getImageGenerationProgressState,
   shouldShowImagePlaceholderIcon,
 } from '../utils/imageGenerationProgress'
-import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import {
+  getImageGenerationInputImages,
+  getUpstreamTextReferences,
+  joinUpstreamTextPrompts,
+  resolveImageGenerationPrompt,
+} from '../utils/imageGenerationInputs'
 import {
   getConfiguredImageModels,
   getImageModelMenuWidth,
@@ -359,6 +365,32 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     nodes,
     selectedModelId,
   ])
+  /** 上游文本节点引用：可作为生图提示词，无需在图片节点重复填写 */
+  const upstreamTextRefs = useMemo(
+    () =>
+      getUpstreamTextReferences({
+        nodeId: id,
+        nodes,
+        edges,
+      }),
+    [edges, id, nodes],
+  )
+  const upstreamTextPrompt = useMemo(
+    () => joinUpstreamTextPrompts(upstreamTextRefs),
+    [upstreamTextRefs],
+  )
+  const upstreamTextBrief = useMemo(() => {
+    const text = upstreamTextPrompt.replace(/\s+/g, ' ').trim()
+    if (!text) return ''
+    // 简介 + 省略号，不展开全文
+    return `${text.slice(0, 16)}…`
+  }, [upstreamTextPrompt])
+
+  // 已引用上游文本时，清掉「请输入提示词」类错误
+  useEffect(() => {
+    if (!upstreamTextPrompt || !sendError) return
+    if (sendError.includes('提示词')) setSendError('')
+  }, [sendError, upstreamTextPrompt])
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
       removeIncomingImageReference(id, assetId)
@@ -878,8 +910,15 @@ export function ImageNode({ id, data, selected }: NodeProps) {
 
   const handleSend = async (options: ImageGenerationSubmitOptions = {}) => {
     if (isGenerating) return
-    const effectivePrompt = options.prompt ?? prompt
-    const trimmedPrompt = effectivePrompt.trim()
+    // 发送时从 store 取最新 nodes/edges，避免闭包过期读不到上游文本
+    const canvasSnapshot = useCanvasStore.getState()
+    const resolved = resolveImageGenerationPrompt({
+      localPrompt: options.prompt ?? prompt,
+      nodeId: id,
+      nodes: canvasSnapshot.nodes,
+      edges: canvasSnapshot.edges,
+    })
+    const trimmedPrompt = resolved.prompt
     const effectiveModel =
       modelOptions.find((model) => model.id === options.modelId) ??
       selectedModel
@@ -888,9 +927,14 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     const effectiveResolution = options.resolution ?? resolution
     const effectiveCount = options.count ?? count
     if (!trimmedPrompt) {
-      setSendError('请输入提示词')
+      setSendError(
+        resolved.upstreamRefs.length > 0
+          ? '上游文本节点暂无可用内容，请先在文本节点填写'
+          : '请输入提示词，或连接带内容的文本节点',
+      )
       return
     }
+    setSendError('')
     if (isJimengImageModel(effectiveModel.id) && !isJimengConfigured) {
       setSendError('未配置 dreamina CLI，请先在设置中配置')
       return
@@ -905,7 +949,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       return
     }
     setIsGenerating(true)
-    const store = useCanvasStore.getState()
+    const store = canvasSnapshot
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
     const upstreamInputImages =
       options.inputImageAssetIds ??
@@ -913,8 +957,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         assetId: undefined,
         modelId: effectiveModel.id,
         nodeId: id,
-        nodes,
-        edges,
+        nodes: store.nodes,
+        edges: store.edges,
       })
     const selfAssetId =
       typeof nodeData.assetId === 'string' ? nodeData.assetId.trim() : ''
@@ -1336,10 +1380,32 @@ export function ImageNode({ id, data, selected }: NodeProps) {
               onRemove={handleRemoveReferenceAsset}
             />
 
+            {upstreamTextBrief ? (
+              <div
+                className="reference-text-strip"
+                aria-label="已引用文本提示词"
+              >
+                <span
+                  className="reference-text-chip"
+                  title={upstreamTextPrompt}
+                >
+                  <FileText size={13} strokeWidth={1.8} />
+                  <span className="reference-text-chip-tag">文本提示词</span>
+                  <span className="reference-text-chip-label">
+                    {upstreamTextBrief}
+                  </span>
+                </span>
+              </div>
+            ) : null}
+
             <PromptEditor
               value={prompt}
               onChange={persistPromptDraft}
-              placeholder="可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜"
+              placeholder={
+                upstreamTextBrief
+                  ? '已引用上方文本提示词，可直接发送；也可在此补充或覆盖'
+                  : '可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜'
+              }
             />
 
             <div className="image-editor-bottom">

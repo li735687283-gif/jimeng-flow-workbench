@@ -186,10 +186,7 @@ export function PromptTemplateLibrary({
   return (
     <section className="prompt-template-library" style={style}>
       <header className="prompt-template-library-head">
-        <div>
-          <strong>提示词模板库</strong>
-          <span>内置标准库 + 我的收藏</span>
-        </div>
+        <strong className="prompt-template-library-title">提示词模板库</strong>
         <button type="button" onClick={onClose} aria-label="关闭模板库">
           <X size={18} strokeWidth={1.8} />
         </button>
@@ -305,7 +302,6 @@ export function PromptTemplateLibrary({
             <div className="prompt-template-card-head">
               <div>
                 <strong>{template.title}</strong>
-                <span>{template.source === 'custom' ? '我的收藏' : template.category}</span>
               </div>
               {template.source === 'custom' ? (
                 <button

@@ -59,7 +59,15 @@ export function VideoActionCard({
       <button
         type="button"
         className="image-action-button icon-only"
-        onClick={onOpenFullSize}
+        onPointerDown={(event) => {
+          // 阻止画布/节点指针逻辑抢焦点，保证放大能打开
+          event.stopPropagation()
+        }}
+        onClick={(event) => {
+          event.stopPropagation()
+          event.preventDefault()
+          onOpenFullSize()
+        }}
         disabled={busy}
         aria-label="放大查看视频"
         title="放大"

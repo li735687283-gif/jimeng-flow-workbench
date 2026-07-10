@@ -10,6 +10,7 @@ import type {
   LlmOutputFormat,
   TextContentType,
 } from '@jimeng-flow/shared/textNode'
+import { TEXT_NODE_SYSTEM_PROMPT } from '@jimeng-flow/shared/textNode'
 import {
   getModelConfigsByCapability,
   type Settings,
@@ -40,10 +41,16 @@ export interface GenerateResult {
   }
 }
 
+/** OpenAI 多模态 content part（文本 / 图片） */
+type OpenAiContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 /** OpenAI Chat Completions 响应中单个 message 的结构 */
 interface OpenAiMessage {
   role?: string
-  content?: string
+  /** 纯文本，或多模态 parts（识图/反推） */
+  content?: string | OpenAiContentPart[]
 }
 
 interface OpenAiChoice {
@@ -301,16 +308,59 @@ async function callChatCompletions(
  * @param model 模型 id（例如 gpt-4o-mini、gvlm-3.1）
  * @param message 用户输入的自然语言需求
  * @param opts 输出格式 / 超时 / 覆盖配置
+ * @param imageDataUrls 可选：data URL / 远程图 URL，用于识图反推（多模态）
  */
 export async function generateText(
   model: string,
   message: string,
   opts?: GenerateOptions,
+  imageDataUrls?: string[],
 ): Promise<GenerateResult> {
+  const images = (imageDataUrls ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  // 统一 system：禁止「当然可以 / 希望对你有帮助」等客套话，只产出正文
+  const systemMessage: OpenAiMessage = {
+    role: 'system',
+    content: TEXT_NODE_SYSTEM_PROMPT,
+  }
+
+  if (images.length === 0) {
+    return callChatCompletions(
+      model,
+      [systemMessage, { role: 'user', content: message }],
+      opts ?? {},
+    )
+  }
+
+  // Codex CLI 文本通道不支持多模态识图
+  const settings = await getSettings()
+  if (getLlmGenerationProviderForSettings(model, settings) === 'codex') {
+    throw new Error(
+      '当前模型不支持图片识图/反推，请改用支持视觉的 OpenAI 兼容模型（如 gpt-4o、qwen-vl 等）',
+    )
+  }
+
+  // OpenAI / 中转站视觉模型：content 为 text + image_url parts
+  const contentParts: OpenAiContentPart[] = [
+    { type: 'text', text: message },
+    ...images.map(
+      (url): OpenAiContentPart => ({
+        type: 'image_url',
+        image_url: { url },
+      }),
+    ),
+  ]
+
   return callChatCompletions(
     model,
-    [{ role: 'user', content: message }],
-    opts ?? {},
+    [systemMessage, { role: 'user', content: contentParts }],
+    {
+      ...(opts ?? {}),
+      // 识图通常更慢
+      timeoutMs: opts?.timeoutMs ?? 120_000,
+    },
   )
 }
 

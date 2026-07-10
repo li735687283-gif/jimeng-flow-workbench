@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
@@ -7,12 +6,12 @@ import { createGeneration, subscribeGeneration } from '../api/generations'
 import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
-import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
 import { NodeWrapper } from './NodeWrapper'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
+import { useVideoPlayerStore } from '../state/videoPlayerStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import type { BaseNodeData } from '../types/nodeTypes'
@@ -21,7 +20,12 @@ import {
   shouldCloseFloatingMenuOnPointerDown,
 } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
-import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import {
+  getImageGenerationInputImages,
+  getUpstreamTextReferences,
+  joinUpstreamTextPrompts,
+  resolveImageGenerationPrompt,
+} from '../utils/imageGenerationInputs'
 import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
@@ -123,7 +127,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
-  const [fullSizeOpen, setFullSizeOpen] = useState(false)
+  const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
 
   useEffect(() => {
     return () => {
@@ -199,7 +203,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     setModelMenuOpen(false)
     setQualityMenuOpen(false)
     setCountMenuOpen(false)
-    setFullSizeOpen(false)
     setEditorClosing(true)
     clearCloseTimer()
     closeTimerRef.current = window.setTimeout(() => {
@@ -241,13 +244,17 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
   }, [nodeData.assetIds])
 
-  const handleOpenFullSize = useCallback(() => {
-    const assetId = nodeData.assetIds[0]
-    if (!assetId) {
-      return
-    }
-    setFullSizeOpen(true)
-  }, [nodeData.assetIds])
+  /** 与首页一致：走 App 层全局 VideoPlayerModal */
+  const handleOpenFullSize = useCallback(
+    (event?: { stopPropagation?: () => void; preventDefault?: () => void }) => {
+      event?.stopPropagation?.()
+      event?.preventDefault?.()
+      const assetId = nodeData.assetIds[0]
+      if (!assetId) return
+      openVideoPlayer(getAssetFileUrl(assetId), nodeData.title || '视频预览')
+    },
+    [nodeData.assetIds, nodeData.title, openVideoPlayer],
+  )
 
   const persistPromptDraft = useCallback(
     (value: string) => {
@@ -389,6 +396,31 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       })),
     [referenceAssetIds],
   )
+  /** 上游文本节点：可作为视频提示词，无需在视频节点重复填写 */
+  const upstreamTextRefs = useMemo(
+    () =>
+      getUpstreamTextReferences({
+        nodeId: id,
+        nodes,
+        edges,
+      }),
+    [edges, id, nodes],
+  )
+  const upstreamTextPrompt = useMemo(
+    () => joinUpstreamTextPrompts(upstreamTextRefs),
+    [upstreamTextRefs],
+  )
+  const upstreamTextBrief = useMemo(() => {
+    const text = upstreamTextPrompt.replace(/\s+/g, ' ').trim()
+    if (!text) return ''
+    return `${text.slice(0, 16)}…`
+  }, [upstreamTextPrompt])
+
+  useEffect(() => {
+    if (!upstreamTextPrompt || !sendError) return
+    if (sendError.includes('提示词')) setSendError('')
+  }, [sendError, upstreamTextPrompt])
+
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
       removeIncomingImageReference(id, assetId)
@@ -510,9 +542,21 @@ export function VideoNode({ id, data, selected }: NodeProps) {
 
   const handleSend = async () => {
     if (running) return
-    const trimmedPrompt = prompt.trim()
+    // 发送时取最新画布，本地提示词为空则回退上游文本节点
+    const canvasSnapshot = useCanvasStore.getState()
+    const resolved = resolveImageGenerationPrompt({
+      localPrompt: prompt,
+      nodeId: id,
+      nodes: canvasSnapshot.nodes,
+      edges: canvasSnapshot.edges,
+    })
+    const trimmedPrompt = resolved.prompt
     if (!trimmedPrompt) {
-      setSendError('请输入视频提示词')
+      setSendError(
+        resolved.upstreamRefs.length > 0
+          ? '上游文本节点暂无可用内容，请先在文本节点填写'
+          : '请输入视频提示词，或连接带内容的文本节点',
+      )
       return
     }
     if (!selectedModel) {
@@ -527,6 +571,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       setSendError(unsupportedModelMessage)
       return
     }
+    setSendError('')
 
     const inputImages = referenceAssetIds
     const effectiveMode = resolveVideoModeForInputImages(
@@ -631,7 +676,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   }, [])
 
   return (
-    <>
     <NodeWrapper
       icon={Film}
       title={nodeData.title}
@@ -655,24 +699,37 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             }
             onValidate={() => void handleValidateVideoProvider()}
             onDownload={handleDownloadVideo}
-            onOpenFullSize={handleOpenFullSize}
+            onOpenFullSize={() => handleOpenFullSize()}
           />
         )}
 
         {firstAssetId ? (
           <div
-            className="media-display-node video-media-display nodrag nopan"
+            className="media-display-node video-media-display"
             style={VIDEO_DISPLAY_STYLE}
             onClick={handleOpenEditor}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              handleOpenFullSize(event)
+            }}
           >
+            {/*
+              容器与 video 均不加 nodrag，保证节点可拖动（对齐图片节点）。
+              仅静音按钮等控件加 nodrag，避免误触拖拽。
+              双击视频打开首页同款放大播放器。
+            */}
             <video
               ref={videoRef}
               src={getAssetFileUrl(firstAssetId)}
-              className="nodrag nopan"
               controls
               playsInline
               muted={videoMuted}
               draggable={false}
+              onDoubleClick={(event) => {
+                event.stopPropagation()
+                event.preventDefault()
+                handleOpenFullSize(event)
+              }}
               onLoadedMetadata={(event) => {
                 event.currentTarget.muted = videoMuted
                 if (!videoMuted) event.currentTarget.volume = 1
@@ -704,17 +761,20 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           </div>
         ) : (
           <div
-            className="image-node-container video-node-container nodrag nopan"
+            className="image-node-container video-node-container"
             onClick={handleOpenEditor}
             style={EMPTY_VIDEO_FRAME_STYLE}
           >
-            <div className="node-preview-area image-node-preview">
-              <Video
-                size={64}
-                strokeWidth={1.8}
-                className="node-placeholder-icon video-placeholder-icon"
-              />
-            </div>
+            {/* 生成中只显示进度，隐藏摄像机占位图标 */}
+            {!running ? (
+              <div className="node-preview-area image-node-preview">
+                <Video
+                  size={64}
+                  strokeWidth={1.8}
+                  className="node-placeholder-icon video-placeholder-icon"
+                />
+              </div>
+            ) : null}
             {videoGenerationProgressOverlay}
           </div>
         )}
@@ -725,6 +785,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             prompt={prompt}
             referenceAssetIds={referenceAssetIds}
             mentionImages={mentionImages}
+            upstreamTextBrief={upstreamTextBrief}
+            upstreamTextFull={upstreamTextPrompt}
             modelOptions={videoModelOptions}
             selectedModelId={selectedModel?.id ?? ''}
             modelMenuOpen={modelMenuOpen}
@@ -775,18 +837,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         ) : null}
       </>
     </NodeWrapper>
-    {fullSizeOpen && firstAssetId && typeof document !== 'undefined'
-      ? createPortal(
-          <VideoPlayerModal
-            open={fullSizeOpen}
-            src={getAssetFileUrl(firstAssetId)}
-            title={nodeData.title}
-            onClose={() => setFullSizeOpen(false)}
-          />,
-          document.body,
-        )
-      : null}
-    </>
   )
 }
 

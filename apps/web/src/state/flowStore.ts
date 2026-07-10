@@ -79,9 +79,14 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const flow = await flowsApi.getFlow(id)
+      // 回填文本节点的上游图片引用，保证识图反推 UI 能读到
+      const { syncAllTextNodeImageRefs } = await import(
+        '../utils/syncTextNodeImageRefs'
+      )
+      const nodes = syncAllTextNodeImageRefs(flow.nodes, flow.edges)
       // 把 nodes / edges 写入画布
       useCanvasStore.setState({
-        nodes: flow.nodes,
+        nodes,
         edges: flow.edges,
         deletedNodeIds: [],
         selectedNodeId: null,
