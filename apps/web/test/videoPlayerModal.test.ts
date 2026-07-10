@@ -2,56 +2,60 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-test('video player modal uses homepage-style black player chrome', async () => {
-  const source = await readFile(
+test('video player uses two-level open: windowed first, fullscreen only on toggle', async () => {
+  const modal = await readFile(
     new URL('../src/components/VideoPlayerModal.tsx', import.meta.url),
     'utf8',
   )
-  const css = await readFile(new URL('../src/App.css', import.meta.url), 'utf8')
-
-  assert.match(source, /video-player-overlay/)
-  assert.match(source, /video-player-container/)
-  assert.match(source, /video-player-video/)
-  assert.match(source, /video-player-top-bar/)
-  assert.match(source, /video-player-controls/)
-  assert.match(source, /ArrowLeft/)
-  // 必须始终可返回画布
-  assert.match(source, /video-player-close-fixed/)
-  assert.match(source, /返回画布/)
-  assert.match(source, /handleClose/)
-  assert.match(source, /onClick=\{handleClose\}/)
-  assert.equal(source.includes('image-fullscreen-viewer'), false)
-
-  assert.match(css, /\.video-player-overlay\s*\{[^}]*background:\s*#000/)
-  assert.match(css, /\.video-player-close-fixed/)
-  assert.match(css, /\.video-player-container\s*\{/)
-})
-
-test('canvas video node opens the same global player as homepage', async () => {
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
   const videoNode = await readFile(
     new URL('../src/nodes/VideoNode.tsx', import.meta.url),
     'utf8',
   )
-  const store = await readFile(
-    new URL('../src/state/videoPlayerStore.ts', import.meta.url),
-    'utf8',
+  const css = await readFile(new URL('../src/App.css', import.meta.url), 'utf8')
+
+  // 一级：小播放器弹层
+  assert.match(modal, /video-player-overlay/)
+  assert.match(modal, /video-player-container/)
+  assert.match(modal, /data-player-mode/)
+  assert.match(modal, /windowed/)
+  assert.match(modal, /视频小播放器/)
+  assert.match(modal, /setIsFullscreen\(false\)/)
+  // 打开时不得 requestFullscreen
+  assert.doesNotMatch(
+    modal,
+    /useEffect\(\(\) => \{[\s\S]*requestFullscreen[\s\S]*\}, \[open/,
   )
 
-  assert.match(store, /useVideoPlayerStore/)
-  assert.match(store, /openPlayer/)
-  assert.match(store, /closePlayer/)
+  // 二级：仅 toggleFullscreen 进入应用内全屏（不自动 requestFullscreen）
+  assert.match(modal, /toggleFullscreen/)
+  assert.match(modal, /setIsFullscreen\(\(prev\) => !prev\)/)
+  assert.match(modal, /onClick=\{toggleFullscreen\}/)
+  assert.match(modal, /Minimize2/)
+  // 打开时强制 windowed
+  assert.match(modal, /强制非全屏打开|绝不全屏打开/)
 
-  // App 层挂载唯一播放器（与首页相同）
-  assert.match(app, /useVideoPlayerStore/)
+  // 关闭路径
+  assert.match(modal, /closeModal/)
+
+  // 首页 + 画布共用
   assert.match(app, /<VideoPlayerModal/)
-  assert.match(app, /openVideoPlayer/)
+  assert.match(videoNode, /createPortal/)
+  assert.match(videoNode, /VideoPlayerModal/)
+  assert.match(videoNode, /playerOpen/)
+  assert.match(videoNode, /setPlayerOpen\(true\)/)
+  // 双击节点 + 工具条放大 都打开一级播放器
+  assert.match(videoNode, /onOpenFullSize=\{\(\) => handleOpenFullSize\(\)\}/)
+  assert.match(videoNode, /onDoubleClick=\{\(event\) => handleOpenFullSize\(event\)\}/)
+  assert.match(videoNode, /controlsList="nofullscreen/)
+  assert.match(videoNode, /dblclick/)
+  assert.match(videoNode, /exitNativeVideoFullscreen/)
+  // 节点侧不得直接 requestFullscreen
+  assert.doesNotMatch(videoNode, /requestFullscreen/)
 
-  // 画布节点只负责调起全局播放器，不再本地 createPortal
-  assert.match(videoNode, /useVideoPlayerStore/)
-  assert.match(videoNode, /openVideoPlayer/)
-  assert.match(videoNode, /getAssetFileUrl/)
-  assert.equal(videoNode.includes('createPortal'), false)
-  assert.equal(videoNode.includes('<VideoPlayerModal'), false)
-  assert.equal(videoNode.includes('fullSizeOpen'), false)
+  // CSS：约 8/9 视口的小播放器（2/3 再大 1/3）+ 全屏态
+  assert.match(css, /\.video-player-overlay/)
+  assert.match(css, /88\.889vw|8\/9/)
+  assert.match(css, /\.video-player-container\.is-fullscreen/)
+  assert.match(css, /:fullscreen/)
 })

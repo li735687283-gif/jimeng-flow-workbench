@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
@@ -7,11 +8,11 @@ import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
+import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
-import { useVideoPlayerStore } from '../state/videoPlayerStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import type { BaseNodeData } from '../types/nodeTypes'
@@ -127,7 +128,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
-  const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
+  /** 画布内直接挂首页同款 VideoPlayerModal */
+  const [playerOpen, setPlayerOpen] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -244,16 +246,44 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
   }, [nodeData.assetIds])
 
-  /** 与首页一致：走 App 层全局 VideoPlayerModal */
+  /** 退出节点上可能触发的浏览器原生全屏（双击 video 常见） */
+  const exitNativeVideoFullscreen = useCallback(() => {
+    const video = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitDisplayingFullscreen?: boolean
+          webkitExitFullscreen?: () => void
+        })
+      | null
+    try {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined)
+      }
+      if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+        video.webkitExitFullscreen()
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  /**
+   * 打开一级小播放器（非全屏）。
+   * 入口：工具条放大、双击节点/视频。
+   * 全屏仅在播放器内再点全屏按钮。
+   */
   const handleOpenFullSize = useCallback(
-    (event?: { stopPropagation?: () => void; preventDefault?: () => void }) => {
-      event?.stopPropagation?.()
+    (event?: {
+      preventDefault?: () => void
+      stopPropagation?: () => void
+    }) => {
       event?.preventDefault?.()
-      const assetId = nodeData.assetIds[0]
-      if (!assetId) return
-      openVideoPlayer(getAssetFileUrl(assetId), nodeData.title || '视频预览')
+      event?.stopPropagation?.()
+      // 先干掉原生全屏，再开我们的弹层小播放器
+      exitNativeVideoFullscreen()
+      if (!nodeData.assetIds[0]) return
+      setPlayerOpen(true)
     },
-    [nodeData.assetIds, nodeData.title, openVideoPlayer],
+    [exitNativeVideoFullscreen, nodeData.assetIds],
   )
 
   const persistPromptDraft = useCallback(
@@ -675,7 +705,51 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     })
   }, [])
 
+  const playerSrc = firstAssetId ? getAssetFileUrl(firstAssetId) : ''
+
+  // 捕获阶段拦截双击：阻止 Chromium 等对 <video controls> 的原生全屏
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !firstAssetId) return
+
+    const onDblClickCapture = (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      exitNativeVideoFullscreen()
+      if (!nodeData.assetIds[0]) return
+      // 只开一级小播放器，绝不进系统全屏
+      setPlayerOpen(true)
+    }
+
+    const onFullscreenChange = () => {
+      // 节点内 video 被原生全屏时立刻退出（全屏只允许播放器内按钮）
+      if (
+        document.fullscreenElement === video ||
+        (video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean })
+          .webkitDisplayingFullscreen
+      ) {
+        exitNativeVideoFullscreen()
+      }
+    }
+
+    video.addEventListener('dblclick', onDblClickCapture, true)
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    video.addEventListener(
+      'webkitbeginfullscreen',
+      exitNativeVideoFullscreen as EventListener,
+    )
+    return () => {
+      video.removeEventListener('dblclick', onDblClickCapture, true)
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+      video.removeEventListener(
+        'webkitbeginfullscreen',
+        exitNativeVideoFullscreen as EventListener,
+      )
+    }
+  }, [exitNativeVideoFullscreen, firstAssetId, nodeData.assetIds])
+
   return (
+    <>
     <NodeWrapper
       icon={Film}
       title={nodeData.title}
@@ -708,28 +782,19 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             className="media-display-node video-media-display"
             style={VIDEO_DISPLAY_STYLE}
             onClick={handleOpenEditor}
-            onDoubleClick={(event) => {
-              event.stopPropagation()
-              handleOpenFullSize(event)
-            }}
+            onDoubleClick={(event) => handleOpenFullSize(event)}
           >
-            {/*
-              容器与 video 均不加 nodrag，保证节点可拖动（对齐图片节点）。
-              仅静音按钮等控件加 nodrag，避免误触拖拽。
-              双击视频打开首页同款放大播放器。
-            */}
             <video
               ref={videoRef}
-              src={getAssetFileUrl(firstAssetId)}
+              src={playerSrc}
               controls
+              // 去掉原生全屏入口，避免与双击/工具条逻辑冲突
+              controlsList="nofullscreen nodownload noremoteplayback"
+              disablePictureInPicture
               playsInline
               muted={videoMuted}
               draggable={false}
-              onDoubleClick={(event) => {
-                event.stopPropagation()
-                event.preventDefault()
-                handleOpenFullSize(event)
-              }}
+              onDoubleClick={(event) => handleOpenFullSize(event)}
               onLoadedMetadata={(event) => {
                 event.currentTarget.muted = videoMuted
                 if (!videoMuted) event.currentTarget.volume = 1
@@ -837,6 +902,20 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         ) : null}
       </>
     </NodeWrapper>
+
+    {/* 首页同一个 VideoPlayerModal，直接挂到 body */}
+    {typeof document !== 'undefined'
+      ? createPortal(
+          <VideoPlayerModal
+            open={playerOpen && Boolean(playerSrc)}
+            src={playerSrc}
+            title={nodeData.title || '视频预览'}
+            onClose={() => setPlayerOpen(false)}
+          />,
+          document.body,
+        )
+      : null}
+    </>
   )
 }
 

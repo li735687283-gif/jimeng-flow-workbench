@@ -15,7 +15,7 @@ interface VideoPlayerStore {
  * 全局视频播放器状态。
  * 首页与画布视频节点共用 App 层的 VideoPlayerModal，保证样式与弹出行为一致。
  */
-export const useVideoPlayerStore = create<VideoPlayerStore>((set) => ({
+export const useVideoPlayerStore = create<VideoPlayerStore>((set, get) => ({
   player: null,
   openPlayer: (src, title) => {
     const normalized = src.trim()
@@ -27,5 +27,9 @@ export const useVideoPlayerStore = create<VideoPlayerStore>((set) => ({
       },
     })
   },
-  closePlayer: () => set({ player: null }),
+  closePlayer: () => {
+    // 幂等关闭，避免重复点击/Esc 竞态
+    if (get().player === null) return
+    set({ player: null })
+  },
 }))

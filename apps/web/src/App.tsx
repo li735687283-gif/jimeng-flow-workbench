@@ -106,7 +106,6 @@ function AppInner() {
   const [videoAdminOpen, setVideoAdminOpen] = useState(false)
   const videoPlayer = useVideoPlayerStore((s) => s.player)
   const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
-  const closeVideoPlayer = useVideoPlayerStore((s) => s.closePlayer)
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
   const [showcaseAssets, setShowcaseAssets] = useState<Asset[]>([])
   const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
@@ -475,7 +474,10 @@ function AppInner() {
         open={!!videoPlayer}
         src={videoPlayer?.src ?? ''}
         title={videoPlayer?.title}
-        onClose={closeVideoPlayer}
+        onClose={() => {
+          // 直接关全局 store，避免引用失效导致关不掉
+          useVideoPlayerStore.getState().closePlayer()
+        }}
       />
 
       <FlowsHistoryModal

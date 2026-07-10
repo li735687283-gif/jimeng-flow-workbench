@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   Maximize2,
+  Minimize2,
   Pause,
   Play,
   Repeat,
@@ -26,8 +27,9 @@ function formatTime(seconds: number): string {
 }
 
 /**
- * 首页 / 视频节点共用的视频放大播放器。
- * 样式：全黑遮罩 + 居中 16:9 播放区 + 顶部返回/标题 + 底部进度与控制条。
+ * 两级播放体验（首页 / 画布共用）：
+ * 1. 双击或工具条放大 → 居中「小播放器」弹层（非全屏）
+ * 2. 小播放器内再点放大 → 全屏（浏览器 Fullscreen，失败则 CSS 铺满）
  */
 export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -39,6 +41,8 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const isDraggingRef = useRef(false)
   const durationRef = useRef(0)
   const rafRef = useRef<number | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
@@ -47,6 +51,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
+  /** 仅二级全屏为 true；打开弹层时必须为 false */
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isLooping, setIsLooping] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -54,29 +59,15 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const [showSpeed, setShowSpeed] = useState(false)
   const [showControls, setShowControls] = useState(true)
 
-  const resetState = useCallback(() => {
-    setIsPlaying(false)
-    setCurrentTime(0)
-    setDuration(0)
-    durationRef.current = 0
-    setBuffered(0)
-    setVolume(1)
-    setMuted(false)
-    setPlaybackRate(1)
-    setIsLooping(false)
-    isDraggingRef.current = false
-    setIsDragging(false)
-    setShowVolume(false)
-    setShowSpeed(false)
-    setShowControls(true)
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = null
+  const clearHideTimer = useCallback(() => {
+    if (hideControlsTimer.current) {
+      clearTimeout(hideControlsTimer.current)
+      hideControlsTimer.current = null
     }
   }, [])
 
   const scheduleHideControls = useCallback(() => {
-    if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
+    clearHideTimer()
     hideControlsTimer.current = setTimeout(() => {
       const video = videoRef.current
       if (
@@ -89,18 +80,40 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
         setShowControls(false)
       }
     }, 2500)
-  }, [showVolume, showSpeed])
+  }, [clearHideTimer, showVolume, showSpeed])
 
   const handleMouseMove = useCallback(() => {
     setShowControls(true)
     scheduleHideControls()
   }, [scheduleHideControls])
 
+  const exitFullscreenOnly = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => undefined)
+    }
+    setIsFullscreen(false)
+  }, [])
+
+  const closeModal = useCallback(() => {
+    clearHideTimer()
+    const video = videoRef.current
+    if (video) {
+      try {
+        video.pause()
+      } catch {
+        // ignore
+      }
+    }
+    exitFullscreenOnly()
+    document.body.style.overflow = ''
+    onCloseRef.current()
+  }, [clearHideTimer, exitFullscreenOnly])
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current
     if (!video) return
     if (video.paused || video.ended) {
-      void video.play()
+      void video.play().catch(() => undefined)
     } else {
       video.pause()
     }
@@ -123,14 +136,18 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     setMuted(v === 0)
   }, [])
 
+  /**
+   * 二级：仅播放器内「全屏」按钮进入全屏。
+   * 双击 / 打开弹层时绝不调用。
+   * 使用应用内铺满（CSS），不自动 requestFullscreen，避免误进系统全屏。
+   */
   const toggleFullscreen = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    if (!document.fullscreenElement) {
-      void el.requestFullscreen?.()
-    } else {
-      void document.exitFullscreen?.()
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => undefined)
+      setIsFullscreen(false)
+      return
     }
+    setIsFullscreen((prev) => !prev)
   }, [])
 
   const changePlaybackRate = useCallback((rate: number) => {
@@ -195,18 +212,21 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     [performSeek, scheduleHideControls],
   )
 
+  // Esc：全屏时先退回小播放器；小播放器再 Esc 才关闭
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!open) return
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        if (document.fullscreenElement) {
-          void document.exitFullscreen?.().finally(() => onClose())
+        if (document.fullscreenElement || isFullscreen) {
+          exitFullscreenOnly()
         } else {
-          onClose()
+          closeModal()
         }
-      } else if (e.key === ' ' || e.key === 'k') {
+        return
+      }
+      if (e.key === ' ' || e.key === 'k') {
         e.preventDefault()
         togglePlay()
       } else if (e.key === 'ArrowLeft') {
@@ -222,65 +242,85 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
         toggleMute()
       }
     }
-    // capture：优先于画布其它 Esc 关闭逻辑
-    window.addEventListener('keydown', handleKeyDown, true)
-    return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [open, onClose, togglePlay, toggleMute, toggleFullscreen])
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [
+    open,
+    closeModal,
+    exitFullscreenOnly,
+    isFullscreen,
+    togglePlay,
+    toggleFullscreen,
+    toggleMute,
+  ])
 
   useEffect(() => {
-    const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
+    // 应用内全屏不依赖 Fullscreen API；若外部进了系统全屏则退出并保持 windowed
+    const onFs = () => {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined)
+        setIsFullscreen(false)
+      }
     }
-    document.addEventListener('fullscreenchange', handleFsChange)
-    return () => document.removeEventListener('fullscreenchange', handleFsChange)
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
   }, [])
 
   useEffect(() => {
     if (!open) return
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        volumePopoverRef.current &&
-        !volumePopoverRef.current.contains(e.target as Node)
-      ) {
+    const onDocDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (volumePopoverRef.current && !volumePopoverRef.current.contains(t)) {
         setShowVolume(false)
       }
-      if (
-        speedPopoverRef.current &&
-        !speedPopoverRef.current.contains(e.target as Node)
-      ) {
+      if (speedPopoverRef.current && !speedPopoverRef.current.contains(t)) {
         setShowSpeed(false)
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', onDocDown)
+    return () => document.removeEventListener('mousedown', onDocDown)
   }, [open])
 
+  // 打开 = 一级小播放器（windowed）；关闭时清理。绝不全屏打开。
   useEffect(() => {
     if (!open) {
-      const video = videoRef.current
-      if (video) {
-        video.pause()
-        video.removeAttribute('src')
-        video.load()
-      }
-      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
-      resetState()
+      document.body.style.overflow = ''
+      setIsFullscreen(false)
       return
     }
-
-    resetState()
-    // 打开后尝试自动播放（与首页体验一致）
-    const frame = window.requestAnimationFrame(() => {
+    // 强制非全屏打开：清掉任何残留系统全屏 + CSS 全屏态
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.().catch(() => undefined)
+    }
+    setIsFullscreen(false)
+    document.body.style.overflow = 'hidden'
+    setShowControls(true)
+    setShowVolume(false)
+    setShowSpeed(false)
+    const t = window.setTimeout(() => {
+      // 再保险：下一帧仍保持 windowed
+      setIsFullscreen(false)
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined)
+      }
       const video = videoRef.current
-      if (!video || !src) return
-      video.src = src
-      video.load()
-      void video.play().catch(() => {
-        // 浏览器可能拦截自动播放，保留手动播放
-      })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [open, resetState, src])
+      if (!video) return
+      void video.play().catch(() => undefined)
+    }, 50)
+    return () => {
+      window.clearTimeout(t)
+      document.body.style.overflow = ''
+      clearHideTimer()
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined)
+      }
+      setIsFullscreen(false)
+    }
+  }, [open, src, clearHideTimer])
 
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current
@@ -293,8 +333,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
 
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current
-    if (!video) return
-    if (isDraggingRef.current) return
+    if (!video || isDraggingRef.current) return
     setCurrentTime(video.currentTime)
     if (video.buffered.length > 0) {
       setBuffered(video.buffered.end(video.buffered.length - 1))
@@ -307,10 +346,6 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
       setBuffered(video.buffered.end(video.buffered.length - 1))
     }
   }, [])
-
-  const handleVideoClick = useCallback(() => {
-    togglePlay()
-  }, [togglePlay])
 
   const handlePlay = useCallback(() => {
     setIsPlaying(true)
@@ -330,50 +365,30 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0
 
-  const handleClose = useCallback(() => {
-    // 若在浏览器原生全屏中，先退出再关弹层，避免黑屏卡住画布
-    if (document.fullscreenElement) {
-      void document.exitFullscreen?.().finally(() => onClose())
-      return
-    }
-    onClose()
-  }, [onClose])
-
   if (!open) return null
 
   return (
     <div
-      className="video-player-overlay"
+      className={`video-player-overlay${isFullscreen ? ' is-fullscreen' : ''}`}
       role="dialog"
       aria-modal="true"
-      aria-label="视频播放"
+      aria-label="视频小播放器"
+      data-player-mode={isFullscreen ? 'fullscreen' : 'windowed'}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => {
         const video = videoRef.current
         if (video && !video.paused) setShowControls(false)
       }}
-      // 点遮罩空白处返回画布
-      onClick={handleClose}
+      onClick={() => {
+        // 全屏时点遮罩不关；小播放器点遮罩关闭
+        if (!isFullscreen) closeModal()
+      }}
     >
-      {/* 始终可点的返回，不随控件自动隐藏 */}
-      <button
-        type="button"
-        className="video-player-close-fixed"
-        onClick={(event) => {
-          event.stopPropagation()
-          handleClose()
-        }}
-        title="返回画布"
-        aria-label="返回画布"
-      >
-        <ArrowLeft size={20} strokeWidth={2} />
-        <span>返回</span>
-      </button>
-
+      {/* 一级：居中小播放器（默认） / 二级：全屏铺满 */}
       <div
         ref={containerRef}
-        className={`video-player-container${isFullscreen ? ' fullscreen' : ''}`}
-        onClick={(event) => event.stopPropagation()}
+        className={`video-player-container${isFullscreen ? ' is-fullscreen' : ''}`}
+        onClick={(e) => e.stopPropagation()}
       >
         <video
           ref={videoRef}
@@ -381,7 +396,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
           src={src}
           playsInline
           preload="auto"
-          onClick={handleVideoClick}
+          onClick={togglePlay}
           onLoadedMetadata={handleLoadedMetadata}
           onTimeUpdate={handleTimeUpdate}
           onPlay={handlePlay}
@@ -390,7 +405,22 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
           onProgress={handleProgress}
         />
 
-        <div className={`video-player-top-bar${showControls ? ' visible' : ''}`}>
+        <div className="video-player-top-bar visible">
+          <button
+            type="button"
+            className="video-player-icon-btn"
+            onClick={() => {
+              if (isFullscreen) {
+                exitFullscreenOnly()
+              } else {
+                closeModal()
+              }
+            }}
+            title={isFullscreen ? '退出全屏' : '关闭播放器'}
+            aria-label={isFullscreen ? '退出全屏' : '关闭播放器'}
+          >
+            <ArrowLeft size={20} />
+          </button>
           {title ? <span className="video-player-title">{title}</span> : null}
           <div style={{ flex: 1 }} />
         </div>
@@ -452,7 +482,9 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                   )}
                 </button>
                 <div
-                  className={`video-player-volume-popover${showVolume ? ' visible' : ''}`}
+                  className={`video-player-volume-popover${
+                    showVolume ? ' visible' : ''
+                  }`}
                 >
                   <input
                     type="range"
@@ -493,7 +525,9 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                   {playbackRate}x
                 </button>
                 <div
-                  className={`video-player-speed-popover${showSpeed ? ' visible' : ''}`}
+                  className={`video-player-speed-popover${
+                    showSpeed ? ' visible' : ''
+                  }`}
                 >
                   {PLAYBACK_RATES.map((rate) => (
                     <button
@@ -510,6 +544,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                 </div>
               </div>
 
+              {/* 仅此处进入 / 退出全屏；打开时不会走到这里 */}
               <button
                 type="button"
                 className="video-player-icon-btn"
@@ -517,7 +552,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                 title={isFullscreen ? '退出全屏' : '全屏'}
                 aria-label={isFullscreen ? '退出全屏' : '全屏'}
               >
-                <Maximize2 size={18} />
+                {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
             </div>
           </div>

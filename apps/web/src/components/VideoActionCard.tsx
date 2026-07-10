@@ -59,13 +59,8 @@ export function VideoActionCard({
       <button
         type="button"
         className="image-action-button icon-only"
-        onPointerDown={(event) => {
-          // 阻止画布/节点指针逻辑抢焦点，保证放大能打开
-          event.stopPropagation()
-        }}
         onClick={(event) => {
           event.stopPropagation()
-          event.preventDefault()
           onOpenFullSize()
         }}
         disabled={busy}
