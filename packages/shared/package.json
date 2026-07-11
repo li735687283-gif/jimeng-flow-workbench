@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit --composite false --incremental false --pretty false"
+  },
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -14,5 +17,8 @@
       "types": "./src/*.ts",
       "default": "./src/*.ts"
     }
+  },
+  "devDependencies": {
+    "typescript": "~5.7.2"
   }
 }
