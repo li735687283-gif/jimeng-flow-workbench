@@ -59,6 +59,8 @@ export interface VideoNodeData {
   assetIds: string[]
   /** 视频节点生成历史，用于重复抽卡和恢复版本 */
   generationRuns?: VideoGenerationRun[]
+  /** 当前后端生成任务 id，用于刷新后恢复任务订阅 */
+  generationId?: string
   mode: VideoMode
   model: string
   aspectRatio: VideoAspectRatio
@@ -344,6 +346,7 @@ export function mergeVideoDefaults(
     references: normalizeVideoReferences(data.references),
     assetIds: data.assetIds ?? VIDEO_DEFAULTS.assetIds,
     generationRuns: normalizeVideoGenerationRuns(data.generationRuns),
+    generationId: data.generationId,
     mode: data.mode ?? VIDEO_DEFAULTS.mode,
     model: data.model ?? VIDEO_DEFAULTS.model,
     aspectRatio: data.aspectRatio ?? VIDEO_DEFAULTS.aspectRatio,

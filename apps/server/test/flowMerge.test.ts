@@ -101,6 +101,7 @@ test('mergeNodesForFlowUpdate keeps video assets and history when a stale autosa
         title: '视频节点 1',
         status: 'success',
         assetIds: ['asset_video_new'],
+        generationId: 'gen_video_new',
         generationRuns: [
           {
             id: 'gen_video_new',
@@ -133,6 +134,7 @@ test('mergeNodesForFlowUpdate keeps video assets and history when a stale autosa
       data: {
         title: '视频节点 1',
         status: 'idle',
+        generationId: 'gen_video_stale',
         updatedAt: '2026-07-05T11:00:30.000Z',
       },
     },
@@ -142,6 +144,7 @@ test('mergeNodesForFlowUpdate keeps video assets and history when a stale autosa
 
   assert.equal(merged[0].position.x, 30)
   assert.deepEqual(merged[0].data.assetIds, ['asset_video_new'])
+  assert.equal(merged[0].data.generationId, 'gen_video_new')
   assert.equal(merged[0].data.status, 'success')
   assert.deepEqual(
     (merged[0].data.generationRuns as Array<{ generationId: string }>).map(

@@ -23,7 +23,6 @@ export interface HomePageProps {
   workAssets: Asset[]
   featuredWorks?: ManagedWork[]
   galleryWorks?: ManagedWork[]
-  heroImageUrl: string
   mokHeroImageUrl: string
   mokHeroContainerStyle?: CSSProperties
   mokHeroImageStyle?: CSSProperties
@@ -36,7 +35,6 @@ export interface HomePageProps {
   onOpenAssetLibrary: () => void
   onOpenVideoAdmin?: () => void
   onOpenSettings: () => void
-  onReturnHome: () => void
   onPlayVideo?: (src: string, title?: string) => void
   onRenameFlow?: (id: string, name: string) => void
   onDeleteFlow?: (id: string) => void
@@ -286,7 +284,6 @@ export function HomePage({
   workAssets,
   featuredWorks = [],
   galleryWorks = [],
-  heroImageUrl,
   mokHeroImageUrl,
   mokHeroContainerStyle,
   mokHeroImageStyle,
@@ -299,7 +296,6 @@ export function HomePage({
   onOpenAssetLibrary,
   onOpenVideoAdmin,
   onOpenSettings,
-  onReturnHome,
   onPlayVideo,
   onRenameFlow,
   onDeleteFlow,
@@ -307,7 +303,8 @@ export function HomePage({
   const visibleFlows = recentFlows.slice(0, 3)
   const featuredAssets = showcaseAssets.slice(0, 3)
   const visibleFeaturedWorks = featuredWorks.slice(0, 3)
-  const visibleGalleryWorks = galleryWorks.length > 0 ? galleryWorks.slice(0, 10) : workAssets.slice(0, 10)
+  const visibleManagedGalleryWorks = galleryWorks.slice(0, 10)
+  const visibleWorkAssets = workAssets.slice(0, 10)
   const useManagedGallery = galleryWorks.length > 0
 
   const handleRename = useCallback(
@@ -462,9 +459,9 @@ export function HomePage({
 
         <section className="home-section home-works-layer" aria-labelledby="home-works-title">
           {useManagedGallery ? (
-            visibleGalleryWorks.length > 0 ? (
+            visibleManagedGalleryWorks.length > 0 ? (
               <div className="home-works-grid five-up">
-                {visibleGalleryWorks.map((work) => (
+                {visibleManagedGalleryWorks.map((work) => (
                   <GalleryWorkCard
                     key={work.id}
                     work={work}
@@ -479,9 +476,9 @@ export function HomePage({
             ) : (
               <p className="home-empty-text">暂无作品，请在作品管理中添加</p>
             )
-          ) : visibleGalleryWorks.length > 0 ? (
+          ) : visibleWorkAssets.length > 0 ? (
             <div className="home-works-grid five-up">
-              {visibleGalleryWorks.map((asset) => {
+              {visibleWorkAssets.map((asset) => {
                 const isVideoAsset = asset.type === 'video'
                 const canPlay = isVideoAsset && !!onPlayVideo
                 return (

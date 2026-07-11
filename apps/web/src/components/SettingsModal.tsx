@@ -15,6 +15,11 @@ import {
 import { IMAGE_MODELS, isJimengImageModel } from '@jimeng-flow/shared/generateNode'
 import { VIDEO_MODELS, isJimengVideoModel } from '@jimeng-flow/shared/videoNode'
 import { useSettingsStore } from '../state/settingsStore'
+import { getAssetFileUrl, uploadAsset } from '../api/assets'
+import {
+  createSettingsDraft,
+  getSettingsModalGuards,
+} from '../utils/settingsModalState'
 import {
   type CodexStatus,
   getCodexStatus,
@@ -110,6 +115,15 @@ const helperTextStyle: React.CSSProperties = {
   fontSize: 11,
 }
 
+const DEFAULT_MOK_HERO_PREVIEW_URL = new URL('../assets/mok-hero.png', import.meta.url).href
+
+const MOK_HERO_LAYOUT_CONTROLS = [
+  { key: 'homeMokHeroScale', id: 'settings-home-mok-hero-scale', label: '主图尺寸', min: 0.4, max: 1.6, step: 0.05, fallback: 1 },
+  { key: 'homeMokHeroOffsetX', id: 'settings-home-mok-hero-offset-x', label: '水平位置', min: -240, max: 240, step: 1, fallback: 0 },
+  { key: 'homeMokHeroOffsetY', id: 'settings-home-mok-hero-offset-y', label: '垂直位置', min: -240, max: 240, step: 1, fallback: 0 },
+  { key: 'homeMokHeroMarginTop', id: 'settings-home-mok-hero-margin-top', label: '顶部间距', min: -120, max: 240, step: 1, fallback: 0 },
+] as const
+
 const CODEX_IMAGE_MODEL_ID = 'codex:gpt-5.5'
 
 const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
@@ -153,7 +167,7 @@ function cleanVideoModelIds(models: string[]): string[] {
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { settings, loadSettings, saveSettings } = useSettingsStore()
-  const [form, setForm] = useState<FormState>(DEFAULT_SETTINGS)
+  const [form, setForm] = useState<FormState>(() => createSettingsDraft(DEFAULT_SETTINGS))
   const [submitting, setSubmitting] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -180,11 +194,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [availableLlmModels, setAvailableLlmModels] = useState<LlmModelInfo[]>([])
   const [loadingLlmModels, setLoadingLlmModels] = useState(false)
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
+  const [uploadingMokHero, setUploadingMokHero] = useState(false)
+  const [mokHeroUploadError, setMokHeroUploadError] = useState<string | null>(null)
   const autoFetchedModelsRef = useRef(false)
+  const mokHeroInputRef = useRef<HTMLInputElement>(null)
+  const mokHeroUploadRequestRef = useRef(0)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      mokHeroUploadRequestRef.current += 1
+      setUploadingMokHero(false)
+      return
+    }
+    setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setLoadError(null)
     setSaveError(null)
     setJimengTestResult(null)
@@ -192,6 +215,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setCodexSetupCommands(FALLBACK_CODEX_SETUP_COMMANDS)
     setLlmTestResult(null)
     setLlmModelsMessage(null)
+    setMokHeroUploadError(null)
     autoFetchedModelsRef.current = false
     loadSettings().catch((err: unknown) => {
       setLoadError(err instanceof Error ? err.message : String(err))
@@ -201,7 +225,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // settings 加载完成后同步到本地 form
   useEffect(() => {
     if (settings) {
-      setForm(settings)
+      setForm(createSettingsDraft(settings))
     }
   }, [settings])
 
@@ -214,11 +238,65 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   if (!open) return null
 
+  const guards = getSettingsModalGuards(submitting, uploadingMokHero)
+
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  const handleMokHeroFile = async (file: File | null | undefined) => {
+    if (!file || guards.mokHeroBlocked) return
+    if (!file.type.startsWith('image/')) {
+      setMokHeroUploadError('请选择图片文件')
+      return
+    }
+
+    const requestId = ++mokHeroUploadRequestRef.current
+    setUploadingMokHero(true)
+    setMokHeroUploadError(null)
+    try {
+      const asset = await uploadAsset(file)
+      if (requestId !== mokHeroUploadRequestRef.current) return
+      update('homeMokHeroImagePath', getAssetFileUrl(asset.id))
+    } catch (err: unknown) {
+      if (requestId !== mokHeroUploadRequestRef.current) return
+      setMokHeroUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (requestId === mokHeroUploadRequestRef.current) {
+        setUploadingMokHero(false)
+      }
+    }
+  }
+
+  const clearMokHeroImage = () => {
+    if (guards.mokHeroBlocked) return
+    update('homeMokHeroImagePath', '')
+    setMokHeroUploadError(null)
+  }
+
+  const resetMokHeroLayout = () => {
+    if (guards.mokHeroBlocked) return
+    setForm((prev) => ({
+      ...prev,
+      homeMokHeroScale: DEFAULT_SETTINGS.homeMokHeroScale,
+      homeMokHeroOffsetX: DEFAULT_SETTINGS.homeMokHeroOffsetX,
+      homeMokHeroOffsetY: DEFAULT_SETTINGS.homeMokHeroOffsetY,
+      homeMokHeroMarginTop: DEFAULT_SETTINGS.homeMokHeroMarginTop,
+    }))
+  }
+
+  const mokHeroImagePath = form.homeMokHeroImagePath?.trim() ?? ''
+  const mokHeroPreviewUrl = mokHeroImagePath || DEFAULT_MOK_HERO_PREVIEW_URL
+  const mokHeroUploadStatus = mokHeroUploadError
+    ? `上传失败：${mokHeroUploadError}`
+    : uploadingMokHero
+      ? 'MO.K 主图上传中...'
+      : mokHeroImagePath
+        ? '当前使用自定义 MO.K 主图'
+        : '当前使用默认 MO.K 主图'
+
   const handleSave = async () => {
+    if (guards.saveBlocked) return
     setSubmitting(true)
     setSaveError(null)
     try {
@@ -244,6 +322,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
 
   const handleCancel = () => {
+    if (guards.closeBlocked) return
+    setForm(createSettingsDraft(useSettingsStore.getState().settings))
+    mokHeroUploadRequestRef.current += 1
+    setUploadingMokHero(false)
+    setMokHeroUploadError(null)
     setSaveError(null)
     onClose()
   }
@@ -619,12 +702,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <button
             type="button"
             onClick={handleCancel}
+            disabled={guards.closeBlocked}
             aria-label="关闭"
             style={{
               background: 'transparent',
               border: 'none',
               color: '#9a9a9a',
-              cursor: 'pointer',
+              cursor: guards.closeBlocked ? 'not-allowed' : 'pointer',
               padding: '4px',
               display: 'flex',
               alignItems: 'center',
@@ -651,6 +735,128 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               加载设置失败：{loadError}
             </div>
           )}
+
+          <section aria-label="首页主图（MO.K）设置" style={sectionStyle}>
+            <div style={sectionTitleStyle}>首页主图（MO.K）</div>
+            <div style={{ ...gridStyle, alignItems: 'start' }}>
+              <div style={{ ...fieldStyle, gap: '8px' }}>
+                <span style={{ ...labelStyle, color: '#c0c0c0' }}>预览</span>
+                <img
+                  src={mokHeroPreviewUrl}
+                  alt="MO.K 首页主图预览"
+                  style={{
+                    width: '100%',
+                    maxHeight: '200px',
+                    objectFit: 'contain',
+                    borderRadius: '8px',
+                    background: '#111',
+                  }}
+                />
+                <span style={helperTextStyle}>留空使用默认主图</span>
+              </div>
+
+              <div style={{ ...fieldStyle, gap: '12px' }}>
+                <label
+                  htmlFor="settings-home-mok-hero-input"
+                  role="button"
+                  tabIndex={0}
+                  aria-disabled={guards.mokHeroBlocked}
+                  onClick={(event) => {
+                    if (guards.mokHeroBlocked) event.preventDefault()
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    if (!guards.mokHeroBlocked) mokHeroInputRef.current?.click()
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    event.dataTransfer.dropEffect = guards.mokHeroBlocked ? 'none' : 'copy'
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (guards.mokHeroBlocked) return
+                    void handleMokHeroFile(event.dataTransfer.files?.[0])
+                  }}
+                  style={{
+                    ...fieldStyle,
+                    alignItems: 'center',
+                    padding: '16px',
+                    border: '1px dashed #444',
+                    borderRadius: '8px',
+                    color: guards.mokHeroBlocked ? '#777' : '#cfcfcf',
+                    cursor: guards.mokHeroBlocked ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  <span>{uploadingMokHero ? '上传中...' : '拖入图片或点击选择'}</span>
+                  <small style={helperTextStyle}>支持常见图片格式</small>
+                </label>
+                <input
+                  ref={mokHeroInputRef}
+                  id="settings-home-mok-hero-input"
+                  type="file"
+                  accept="image/*"
+                  disabled={guards.mokHeroBlocked}
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    event.currentTarget.value = ''
+                    void handleMokHeroFile(file)
+                  }}
+                />
+
+                <span
+                  role={mokHeroUploadError ? 'alert' : 'status'}
+                  aria-live={mokHeroUploadError ? 'assertive' : 'polite'}
+                  style={{ ...helperTextStyle, color: '#cfcfcf' }}
+                >
+                  {mokHeroUploadStatus}
+                </span>
+
+                {MOK_HERO_LAYOUT_CONTROLS.map((control) => (
+                  <label
+                    key={control.id}
+                    htmlFor={control.id}
+                    style={{ ...fieldStyle, gap: '6px' }}
+                  >
+                    <span style={labelStyle}>{control.label}</span>
+                    <input
+                      id={control.id}
+                      type="range"
+                      min={control.min}
+                      max={control.max}
+                      step={control.step}
+                      value={form[control.key] ?? control.fallback}
+                      disabled={guards.mokHeroBlocked}
+                      onChange={(event) => update(control.key, Number(event.target.value))}
+                    />
+                  </label>
+                ))}
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    style={{ ...subtleButtonStyle, flex: 1 }}
+                    disabled={!mokHeroImagePath || guards.mokHeroBlocked}
+                    onClick={clearMokHeroImage}
+                  >
+                    清除自定义图
+                  </button>
+                  <button
+                    type="button"
+                    style={{ ...subtleButtonStyle, flex: 1 }}
+                    disabled={guards.mokHeroBlocked}
+                    onClick={resetMokHeroLayout}
+                  >
+                    重置
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
 
           {/* Dreamina CLI */}
           <section style={sectionStyle}>
@@ -965,14 +1171,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <button
             type="button"
             onClick={handleCancel}
-            disabled={submitting}
+            disabled={guards.closeBlocked}
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
               border: '1px solid #333',
               background: 'transparent',
               color: '#cfcfcf',
-              cursor: submitting ? 'not-allowed' : 'pointer',
+              cursor: guards.closeBlocked ? 'not-allowed' : 'pointer',
               fontSize: '13px',
             }}
           >
@@ -981,14 +1187,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={submitting}
+            disabled={guards.saveBlocked}
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
               border: '1px solid #4a4a4a',
-              background: submitting ? '#3a3a3a' : '#2d2d2d',
+              background: guards.saveBlocked ? '#3a3a3a' : '#2d2d2d',
               color: '#fff',
-              cursor: submitting ? 'not-allowed' : 'pointer',
+              cursor: guards.saveBlocked ? 'not-allowed' : 'pointer',
               fontSize: '13px',
             }}
           >

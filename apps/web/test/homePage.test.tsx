@@ -17,6 +17,7 @@ test('home page renders a restrained creation entry with logo menu items', async
           createdAt: '2026-07-07T09:00:00.000Z',
           updatedAt: '2026-07-08T10:30:00.000Z',
           nodeCount: 8,
+          coverAssetId: 'asset_cover',
         },
       ]}
       showcaseAssets={[
@@ -45,39 +46,35 @@ test('home page renders a restrained creation entry with logo menu items', async
           createdAt: '2026-07-08T12:00:00.000Z',
         },
       ]}
-      heroImageUrl="/hero-test.png"
+      mokHeroImageUrl="/mok-hero-test.png"
       logoImageUrl="/agent-avatar.png"
       onCreateFlow={() => undefined}
       onOpenFlow={() => undefined}
       onOpenAllFlows={() => undefined}
       onOpenAssetLibrary={() => undefined}
+      onOpenVideoAdmin={() => undefined}
       onOpenSettings={() => undefined}
-      onReturnHome={() => undefined}
     />,
   )
 
   for (const text of [
-    '首页',
     '历史项目',
     '资源库',
+    '作品管理',
     '设置',
     'MO.K',
-    '晚上好，L-zw~',
-    '说说你的创意',
     '新建画布',
-    '历史工程',
+    '全部项目',
     '品牌视觉方案',
-    '作品',
     '展示封面',
   ]) {
     assert.equal(html.includes(text), true)
   }
 
-  assert.equal(html.includes('/hero-test.png'), true)
+  assert.equal(html.includes('/mok-hero-test.png'), true)
   assert.equal(html.includes('NeoAI'), false)
   assert.equal(html.includes('home-particle-field'), true)
   assert.equal(html.includes('dot-field'), false)
-  assert.equal(html.includes('home-creative-card'), true)
   assert.equal(html.includes('home-project-layer'), true)
   assert.equal(html.includes('home-project-cover'), true)
   assert.equal(html.includes('home-featured-layer'), true)
@@ -108,13 +105,12 @@ test('home page uses quiet empty states without fake projects or assets', async 
       recentFlows={[]}
       showcaseAssets={[]}
       workAssets={[]}
-      heroImageUrl="/hero-test.png"
+      mokHeroImageUrl="/mok-hero-test.png"
       onCreateFlow={() => undefined}
       onOpenFlow={() => undefined}
       onOpenAllFlows={() => undefined}
       onOpenAssetLibrary={() => undefined}
       onOpenSettings={() => undefined}
-      onReturnHome={() => undefined}
     />,
   )
 

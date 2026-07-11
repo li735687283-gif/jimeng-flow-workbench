@@ -59,6 +59,7 @@ export function buildVideoRunningNodePatch(
   return {
     status: 'running',
     error: undefined,
+    generationId: undefined,
     assetIds: currentData.assetIds ?? [],
     generationRuns: currentData.generationRuns,
     prompt: request.prompt,
@@ -76,6 +77,19 @@ export function buildVideoRunningNodePatch(
     count: normalizeVideoCount(request.count),
     generateAudio: request.generateAudio,
     updatedAt,
+  }
+}
+
+export async function persistInitialVideoGenerationResponse(
+  response: GenerationResponse,
+  deps: {
+    applyResponse: (response: GenerationResponse) => void
+    saveCurrent: () => Promise<void>
+  },
+): Promise<void> {
+  deps.applyResponse(response)
+  if (response.status === 'queued' || response.status === 'running') {
+    await deps.saveCurrent()
   }
 }
 

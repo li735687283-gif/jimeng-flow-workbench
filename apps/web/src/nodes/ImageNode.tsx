@@ -64,6 +64,7 @@ import {
   getImageModelMenuWidth,
   shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
+import { validateImageProvider } from '../utils/imageProviderValidation'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
@@ -166,10 +167,6 @@ const PROMPT_LIBRARY_ESTIMATED_HEIGHT = 520
 const PROMPT_LIBRARY_WIDTH = 720
 
 type ImageEditorMenuKind = 'model' | 'quality' | 'count' | 'prompt'
-
-function isCodexImageModel(modelId: string): boolean {
-  return modelId.trim().toLowerCase().startsWith('codex:')
-}
 
 interface ImageGenerationSubmitOptions {
   prompt?: string
@@ -607,19 +604,11 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setActionBusy(true)
     setValidationStatus('checking')
     try {
-      if (shouldRequireJimengCliForImageModel(selectedModel.id)) {
-        const result = await testJimengConnection(settings ?? {})
-        setValidationStatus(result.ok ? 'success' : 'error')
-        return
-      }
-
-      if (isCodexImageModel(selectedModel.id)) {
-        const result = await getCodexStatus()
-        setValidationStatus(result.available ? 'success' : 'error')
-        return
-      }
-
-      setValidationStatus('success')
+      const valid = await validateImageProvider(selectedModel.id, {
+        probeJimeng: async () => (await testJimengConnection(settings ?? {})).ok,
+        probeCodex: async () => (await getCodexStatus()).available,
+      })
+      setValidationStatus(valid ? 'success' : 'error')
     } catch {
       setValidationStatus('error')
     } finally {

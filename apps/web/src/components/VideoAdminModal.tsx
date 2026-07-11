@@ -7,16 +7,13 @@ import {
   listWorks,
   updateWork,
 } from '../api/videos'
-
-interface WorkFormState {
-  mediaType: WorkMediaType
-  title: string
-  description: string
-  sortOrder: string
-  isFeatured: boolean
-  isPinned: boolean
-  isPublished: boolean
-}
+import {
+  buildWorkAdminEditForm,
+  buildWorkAdminListQuery,
+  clampWorkAdminPage,
+  type WorkAdminFormState,
+  type WorkAdminTab,
+} from '../utils/videoAdminState'
 
 export interface VideoAdminModalProps {
   open: boolean
@@ -25,7 +22,7 @@ export interface VideoAdminModalProps {
   onPlayVideo?: (src: string, title?: string) => void
 }
 
-const EMPTY_FORM: WorkFormState = {
+const EMPTY_FORM: WorkAdminFormState = {
   mediaType: 'video',
   title: '',
   description: '',
@@ -34,8 +31,6 @@ const EMPTY_FORM: WorkFormState = {
   isPinned: false,
   isPublished: true,
 }
-
-type TabFilter = 'all' | 'video' | 'image' | 'featured'
 
 function sortOrderValue(value: string): number {
   const parsed = Number(value)
@@ -55,12 +50,12 @@ export function VideoAdminModal({
     pageSize: 8,
   })
   const [page, setPage] = useState(1)
-  const [activeTab, setActiveTab] = useState<TabFilter>('all')
+  const [activeTab, setActiveTab] = useState<WorkAdminTab>('all')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editingWork, setEditingWork] = useState<ManagedWork | null>(null)
-  const [form, setForm] = useState<WorkFormState>(EMPTY_FORM)
+  const [form, setForm] = useState<WorkAdminFormState>(EMPTY_FORM)
   const [mediaFile, setMediaFile] = useState<File | null>(null)
   const [coverFile, setCoverFile] = useState<File | null>(null)
   const [mediaPreviewUrl, setMediaPreviewUrl] = useState<string | null>(null)
@@ -73,16 +68,11 @@ export function VideoAdminModal({
   )
 
   const refresh = useCallback(
-    async (nextPage = 1, tab: TabFilter = activeTab) => {
+    async (nextPage = 1, tab: WorkAdminTab = activeTab) => {
       setLoading(true)
       setError(null)
       try {
-        const next = await listWorks({
-          page: nextPage,
-          pageSize,
-          mediaType: tab === 'all' || tab === 'featured' ? undefined : tab,
-          isFeatured: tab === 'featured' ? true : undefined,
-        })
+        const next = await listWorks(buildWorkAdminListQuery(tab, nextPage, pageSize))
         setResponse(next)
         setPage(next.page)
       } catch (err) {
@@ -138,15 +128,7 @@ export function VideoAdminModal({
       URL.revokeObjectURL(coverPreviewUrl)
     }
     setEditingWork(work)
-    setForm({
-      mediaType: work.mediaType,
-      title: work.title,
-      description: work.description,
-      sortOrder: String(work.sortOrder),
-      isFeatured: work.isFeatured,
-      isPinned: work.isPinned,
-      isPublished: work.isPublished,
-    })
+    setForm(buildWorkAdminEditForm(work))
     setMediaFile(null)
     setCoverFile(null)
     setMediaPreviewUrl(work.mediaUrl)
@@ -260,7 +242,7 @@ export function VideoAdminModal({
     }
   }
 
-  const handleTabChange = (tab: TabFilter) => {
+  const handleTabChange = (tab: WorkAdminTab) => {
     setActiveTab(tab)
     setPage(1)
   }
@@ -286,7 +268,6 @@ export function VideoAdminModal({
   if (!open) return null
 
   const isImageType = form.mediaType === 'image'
-  const requireCover = isImageType ? false : true
 
   return (
     <div className="modal-overlay video-admin-overlay" onClick={onClose}>
@@ -658,7 +639,7 @@ export function VideoAdminModal({
                   className="modal-btn"
                   disabled={page <= 1}
                   onClick={() => {
-                    const next = Math.max(1, page - 1)
+                    const next = clampWorkAdminPage(page - 1, pageCount)
                     setPage(next)
                     void refresh(next, activeTab)
                   }}
@@ -670,7 +651,7 @@ export function VideoAdminModal({
                   className="modal-btn"
                   disabled={page >= pageCount}
                   onClick={() => {
-                    const next = Math.min(pageCount, page + 1)
+                    const next = clampWorkAdminPage(page + 1, pageCount)
                     setPage(next)
                     void refresh(next, activeTab)
                   }}

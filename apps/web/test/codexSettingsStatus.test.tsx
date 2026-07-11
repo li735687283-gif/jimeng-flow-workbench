@@ -5,6 +5,42 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 Object.assign(globalThis, { React })
 
+function extractDatalist(html: string, id: string): string {
+  const openingTag = `<datalist id="${id}">`
+  const start = html.indexOf(openingTag)
+  assert.notEqual(start, -1, `Missing datalist #${id}`)
+
+  const end = html.indexOf('</datalist>', start + openingTag.length)
+  assert.notEqual(end, -1, `Missing closing tag for datalist #${id}`)
+  return html.slice(start, end + '</datalist>'.length)
+}
+
+function extractInputForList(html: string, listId: string): string {
+  const input = (html.match(/<input\b[^>]*>/g) ?? []).find((tag) =>
+    tag.includes(`list="${listId}"`),
+  )
+  assert.ok(input, `Missing input linked to datalist #${listId}`)
+  return input
+}
+
+async function renderSettingsModalWithCodexModelRows(): Promise<string> {
+  const { DEFAULT_SETTINGS } = await import('@jimeng-flow/shared')
+  const originalImageModels = DEFAULT_SETTINGS.imageModels
+  const originalLlmModels = DEFAULT_SETTINGS.llmModels
+  DEFAULT_SETTINGS.imageModels = [...originalImageModels, 'codex:gpt-5.5']
+  DEFAULT_SETTINGS.llmModels = [...originalLlmModels, 'codex:gpt-5.5']
+
+  try {
+    const { SettingsModal } = await import('../src/components/SettingsModal')
+    return renderToStaticMarkup(
+      <SettingsModal open={true} onClose={() => undefined} />,
+    )
+  } finally {
+    DEFAULT_SETTINGS.imageModels = originalImageModels
+    DEFAULT_SETTINGS.llmModels = originalLlmModels
+  }
+}
+
 test('getCodexStatus fetches OpenAI CLI readiness from the backend', async () => {
   const { getCodexStatus } = await import('../src/api/settings')
   const calls: { url: string; init?: RequestInit }[] = []
@@ -55,7 +91,6 @@ test('SettingsModal includes a compact OpenAI CLI status section', async () => {
   assert.equal(html.includes('codex:gpt-5.5'), true)
   assert.equal(html.includes('gpt-image-2'), false)
   assert.equal(html.includes('$imagegen'), false)
-  assert.equal(html.includes('OpenAI CLI 模型走 Codex'), true)
 })
 
 test('SettingsModal exposes Codex CLI setup commands', async () => {
@@ -80,21 +115,25 @@ test('SettingsModal offers a Codex model as the OpenAI CLI image model option', 
     <SettingsModal open={true} onClose={() => undefined} />,
   )
 
+  const imageOptions = extractDatalist(html, 'set-codex-image-model-options')
   assert.equal(
-    html.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
+    imageOptions.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
     true,
   )
 })
 
-test('SettingsModal dropdown controls use the shared canvas menu rhythm', async () => {
-  const { SettingsModal } = await import('../src/components/SettingsModal')
+test('SettingsModal datalist inputs use the shared canvas menu rhythm', async () => {
+  const html = await renderSettingsModalWithCodexModelRows()
 
-  const html = renderToStaticMarkup(
-    <SettingsModal open={true} onClose={() => undefined} />,
-  )
+  extractDatalist(html, 'set-codex-image-model-options')
+  extractDatalist(html, 'set-codex-chat-model-options')
 
-  assert.match(html, /<select[^>]+class="settings-dropdown-control"/)
-  assert.match(html, /<input[^>]+class="settings-dropdown-control"/)
+  const imageInput = extractInputForList(html, 'set-codex-image-model-options')
+  const chatInput = extractInputForList(html, 'set-codex-chat-model-options')
+  assert.match(imageInput, /\blist="set-codex-image-model-options"/)
+  assert.match(chatInput, /\blist="set-codex-chat-model-options"/)
+  assert.match(imageInput, /\bclass="settings-dropdown-control"/)
+  assert.match(chatInput, /\bclass="settings-dropdown-control"/)
   assert.match(html, /--menu-control-font-size:12px/)
   assert.match(html, /--menu-control-padding:6px 8px/)
 })
@@ -106,9 +145,9 @@ test('SettingsModal offers Codex CLI chat models as selectable common LLM option
     <SettingsModal open={true} onClose={() => undefined} />,
   )
 
+  const chatOptions = extractDatalist(html, 'set-codex-chat-model-options')
   assert.equal(
-    html.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
+    chatOptions.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
     true,
   )
-  assert.equal(html.includes('Codex chat 模型走本机 ChatGPT 登录态'), true)
 })

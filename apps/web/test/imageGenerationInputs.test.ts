@@ -22,7 +22,7 @@ test('image generation keeps blank image nodes text-to-image', () => {
   )
 })
 
-test('image generation includes connected upstream image assets after the current image', () => {
+test('image generation includes directly connected upstream image assets after the current image', () => {
   assert.deepEqual(
     getImageGenerationInputImages({
       assetId: 'asset_current',
@@ -38,7 +38,7 @@ test('image generation includes connected upstream image assets after the curren
         { source: 'middle', target: 'target' },
       ],
     }),
-    ['asset_current', 'asset_root', 'asset_middle'],
+    ['asset_current', 'asset_middle'],
   )
 })
 

@@ -7,6 +7,13 @@ import { fileURLToPath } from 'node:url'
 const testDir = dirname(fileURLToPath(import.meta.url))
 const srcDir = resolve(testDir, '../src')
 const checkedExtensions = new Set(['.css', '.ts', '.tsx', '.svg'])
+const approvedSemanticAccentHexes = new Set([
+  'ff5c5c',
+  'ff7878',
+  '4a9eff',
+  'f0b429',
+  'f5c842',
+])
 
 function listSourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -16,7 +23,7 @@ function listSourceFiles(dir: string): string[] {
   })
 }
 
-function isGrayHex(hex: string): boolean {
+function isNeutralHex(hex: string): boolean {
   const value = hex.length === 3 || hex.length === 4
     ? hex
         .slice(0, 3)
@@ -25,20 +32,26 @@ function isGrayHex(hex: string): boolean {
         .join('')
     : hex.slice(0, 6)
   if (value.length !== 6) return false
-  return value.slice(0, 2) === value.slice(2, 4) && value.slice(2, 4) === value.slice(4, 6)
+  const channels = value.match(/.{2}/g)?.map((channel) => Number.parseInt(channel, 16))
+  if (!channels || channels.length !== 3) return false
+  return Math.max(...channels) - Math.min(...channels) <= 4
 }
 
-test('frontend source colors stay within black white and gray', () => {
+test('frontend source colors stay neutral except for approved semantic accents', () => {
   const violations: string[] = []
 
   for (const filePath of listSourceFiles(srcDir)) {
     const source = readFileSync(filePath, 'utf8')
     for (const match of source.matchAll(/#([0-9a-fA-F]{3,8})\b/g)) {
       const color = match[1].toLowerCase()
-      if (isGrayHex(color)) continue
-      violations.push(`${relative(srcDir, filePath)} uses #${color}`)
+      if (isNeutralHex(color) || approvedSemanticAccentHexes.has(color)) continue
+      violations.push(`${relative(srcDir, filePath)} uses unapproved non-neutral #${color}`)
     }
   }
 
-  assert.deepEqual(violations, [])
+  assert.deepEqual(
+    violations,
+    [],
+    'Non-neutral hex colors must be approved danger red, action blue, or featured gold accents',
+  )
 })

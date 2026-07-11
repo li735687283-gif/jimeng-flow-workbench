@@ -21,7 +21,8 @@ test('resolveGenerationFlowId falls back to local only when no flow is available
 test('generation entrypoints do not hard-code local flow ids', () => {
   const files = [
     'src/components/AgentPanel.tsx',
-    'src/components/GenerateComposer.tsx',
+    'src/nodes/ImageNode.tsx',
+    'src/nodes/VideoNode.tsx',
     'src/components/VideoComposer.tsx',
   ]
 

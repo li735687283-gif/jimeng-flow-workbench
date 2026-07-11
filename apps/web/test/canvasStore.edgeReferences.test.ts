@@ -11,11 +11,11 @@ test('removeEdge removes image asset references from the target node', () => {
     data: { title: 'Image 1', status: 'idle', assetId: 'asset-a' },
   }
   const targetNode: Node = {
-    id: 'generate-1',
-    type: 'generate',
+    id: 'image-2',
+    type: 'image',
     position: { x: 320, y: 0 },
     data: {
-      title: 'Generate 1',
+      title: 'Image 2',
       status: 'idle',
       inputImageAssetIds: ['asset-a', 'asset-b'],
     },
@@ -158,11 +158,11 @@ test('onConnect appends image asset references to the target node', () => {
     data: { title: 'Image 1', status: 'idle', assetId: 'asset_a' },
   }
   const targetNode: Node = {
-    id: 'generate-1',
-    type: 'generate',
+    id: 'image-2',
+    type: 'image',
     position: { x: 320, y: 0 },
     data: {
-      title: 'Generate 1',
+      title: 'Image 2',
       status: 'idle',
       inputImageAssetIds: ['asset_b'],
     },
@@ -317,11 +317,11 @@ test('removeNode removes connected image references from downstream nodes', () =
     data: { title: 'Image 1', status: 'idle', assetId: 'asset-a' },
   }
   const targetNode: Node = {
-    id: 'generate-1',
-    type: 'generate',
+    id: 'image-2',
+    type: 'image',
     position: { x: 320, y: 0 },
     data: {
-      title: 'Generate 1',
+      title: 'Image 2',
       status: 'idle',
       inputImageAssetIds: ['asset-a', 'asset-b'],
     },

@@ -147,6 +147,7 @@ function mergeGeneratedVideoData(
     status: currentData.status,
     error: currentData.error,
     assetIds: currentData.assetIds,
+    generationId: currentData.generationId,
     generationRuns: currentData.generationRuns,
     prompt: currentData.prompt,
     model: currentData.model,

@@ -26,7 +26,6 @@ import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
 import agentAvatarUrl from '../../../image/agent-avatar-black.png'
-import defaultHeroUrl from './assets/hero.png'
 import defaultMokHeroUrl from './assets/mok-hero.png'
 import './App.css'
 
@@ -60,11 +59,6 @@ function setLastFlowId(id: string | null) {
   }
 }
 
-function resolveHomeHeroImage(path: string | undefined): string {
-  const trimmed = path?.trim()
-  return trimmed || defaultHeroUrl
-}
-
 function resolveHomeMokHeroImage(path: string | undefined): string {
   const trimmed = path?.trim()
   return trimmed || defaultMokHeroUrl
@@ -75,7 +69,7 @@ function resolveHomeMokHeroStyles(settings: {
   homeMokHeroOffsetX?: number
   homeMokHeroOffsetY?: number
   homeMokHeroMarginTop?: number
-} | undefined): { container: CSSProperties; image: CSSProperties } {
+} | null | undefined): { container: CSSProperties; image: CSSProperties } {
   const scale = settings?.homeMokHeroScale ?? 1
   const offsetX = settings?.homeMokHeroOffsetX ?? 0
   const offsetY = settings?.homeMokHeroOffsetY ?? 0
@@ -121,7 +115,6 @@ function AppInner() {
   const loadFlow = useFlowStore((s) => s.loadFlow)
   const createFlow = useFlowStore((s) => s.createFlow)
   const renameFlowAction = useFlowStore((s) => s.renameFlow)
-  const duplicateFlowAction = useFlowStore((s) => s.duplicateFlow)
   const deleteFlowAction = useFlowStore((s) => s.deleteFlow)
   const settings = useSettingsStore((s) => s.settings)
   const loadSettings = useSettingsStore((s) => s.loadSettings)
@@ -309,17 +302,6 @@ function AppInner() {
     [renameFlowAction],
   )
 
-  const handleDuplicateFlow = useCallback(
-    async (id: string) => {
-      try {
-        await duplicateFlowAction(id)
-      } catch (err: unknown) {
-        console.error('[App] 复制失败:', err)
-      }
-    },
-    [duplicateFlowAction],
-  )
-
   const handleDeleteFlow = useCallback(
     async (id: string) => {
       try {
@@ -388,7 +370,6 @@ function AppInner() {
           workAssets={homeAssets}
           featuredWorks={featuredWorks}
           galleryWorks={galleryWorks}
-          heroImageUrl={resolveHomeHeroImage(settings?.homeHeroImagePath)}
           mokHeroImageUrl={resolveHomeMokHeroImage(settings?.homeMokHeroImagePath)}
           mokHeroContainerStyle={resolveHomeMokHeroStyles(settings).container}
           mokHeroImageStyle={resolveHomeMokHeroStyles(settings).image}
@@ -401,7 +382,6 @@ function AppInner() {
           onOpenAssetLibrary={() => setAssetLibraryOpen(true)}
           onOpenVideoAdmin={() => setVideoAdminOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
-          onReturnHome={handleShowHome}
           onPlayVideo={handlePlayVideo}
           onRenameFlow={handleRenameFlow}
           onDeleteFlow={handleDeleteFlow}

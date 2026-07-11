@@ -1,13 +1,30 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { VideoGenerationRun } from '@jimeng-flow/shared/videoNode'
+import {
+  mergeVideoDefaults,
+  type VideoGenerationRun,
+} from '@jimeng-flow/shared/videoNode'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
   getVideoSubmitLabel,
+  persistInitialVideoGenerationResponse,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
 } from '../src/utils/videoGenerationState'
+
+test('mergeVideoDefaults preserves generationId for persisted running jobs', () => {
+  const persistedNode = {
+    id: 'video-1',
+    title: '恢复中的视频',
+    status: 'running' as const,
+    generationId: 'gen_video_running',
+  }
+
+  const restoredNode = mergeVideoDefaults(persistedNode)
+
+  assert.equal(restoredNode.generationId, 'gen_video_running')
+})
 
 test('buildVideoRunningNodePatch keeps the current video visible while drawing again', () => {
   const existingRun: VideoGenerationRun = {
@@ -47,6 +64,7 @@ test('buildVideoRunningNodePatch keeps the current video visible while drawing a
     },
     {
       assetIds: ['asset_video_old'],
+      generationId: 'gen_video_old',
       generationRuns: [existingRun],
     },
     '2026-07-06T11:00:00.000Z',
@@ -54,6 +72,8 @@ test('buildVideoRunningNodePatch keeps the current video visible while drawing a
 
   assert.deepEqual(patch.assetIds, ['asset_video_old'])
   assert.deepEqual(patch.generationRuns, [existingRun])
+  assert.equal(Object.hasOwn(patch, 'generationId'), true)
+  assert.equal(patch.generationId, undefined)
   assert.equal(patch.status, 'running')
   assert.equal(patch.prompt, 'new draw')
   assert.equal(patch.model, 'seedance-2.0-fast')
@@ -62,6 +82,29 @@ test('buildVideoRunningNodePatch keeps the current video visible while drawing a
   assert.deepEqual(patch.references, [
     { kind: 'image', role: 'first_frame', assetId: 'asset_ref' },
   ])
+})
+
+test('initial video generation response persists the new id after applying it', async () => {
+  const events: string[] = []
+  let appliedGenerationId: string | undefined
+  const response = {
+    id: 'gen_video_new',
+    nodeId: 'video-1',
+    status: 'queued' as const,
+    createdAt: '2026-07-06T11:00:00.000Z',
+  }
+
+  await persistInitialVideoGenerationResponse(response, {
+    applyResponse: (next) => {
+      appliedGenerationId = next.id
+      events.push(`apply:${next.id}`)
+    },
+    saveCurrent: async () => {
+      events.push(`save:${appliedGenerationId}`)
+    },
+  })
+
+  assert.deepEqual(events, ['apply:gen_video_new', 'save:gen_video_new'])
 })
 
 test('buildVideoCompletionNodePatch keeps current video when the redraw returns no assets', () => {

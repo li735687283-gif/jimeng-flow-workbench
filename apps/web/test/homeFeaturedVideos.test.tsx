@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 Object.assign(globalThis, { React })
 
-test('home page renders featured video cards with cover and muted loop playback', async () => {
+test('home page renders featured work cards with cover and muted loop playback', async () => {
   const { HomePage } = await import('../src/components/HomePage')
 
   const html = renderToStaticMarkup(
@@ -13,14 +13,15 @@ test('home page renders featured video cards with cover and muted loop playback'
       recentFlows={[]}
       showcaseAssets={[]}
       workAssets={[]}
-      featuredVideos={[
+      featuredWorks={[
         {
           id: 'video_featured',
+          mediaType: 'video',
           title: '首页精选视频',
           description: '悬停自动播放',
-          videoAssetId: 'asset_video_featured',
+          mediaAssetId: 'asset_video_featured',
           coverAssetId: 'asset_cover_featured',
-          videoUrl: '/api/assets/asset_video_featured/file',
+          mediaUrl: '/api/assets/asset_video_featured/file',
           coverUrl: '/api/assets/asset_cover_featured/file',
           isFeatured: true,
           isPinned: false,
@@ -30,14 +31,13 @@ test('home page renders featured video cards with cover and muted loop playback'
           updatedAt: '2026-07-08T10:00:00.000Z',
         },
       ]}
-      heroImageUrl="/hero-test.png"
+      mokHeroImageUrl="/mok-hero-test.png"
       onCreateFlow={() => undefined}
       onOpenFlow={() => undefined}
       onOpenAllFlows={() => undefined}
       onOpenAssetLibrary={() => undefined}
       onOpenVideoAdmin={() => undefined}
       onOpenSettings={() => undefined}
-      onReturnHome={() => undefined}
     />,
   )
 

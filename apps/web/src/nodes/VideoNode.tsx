@@ -29,6 +29,7 @@ import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
+  persistInitialVideoGenerationResponse,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
 } from '../utils/videoGenerationState'
@@ -569,7 +570,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     try {
       await useFlowStore.getState().saveCurrent()
       const response = await createGeneration(request)
-      handleGenerationResponse(response, request)
+      try {
+        await persistInitialVideoGenerationResponse(response, {
+          applyResponse: (next) => handleGenerationResponse(next, request),
+          saveCurrent: () => useFlowStore.getState().saveCurrent(),
+        })
+      } catch (saveError) {
+        setSendError(
+          `视频任务已创建，但保存任务状态失败：${
+            saveError instanceof Error ? saveError.message : String(saveError)
+          }`,
+        )
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       updateNodeData(id, {

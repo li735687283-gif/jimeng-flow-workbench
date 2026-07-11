@@ -407,7 +407,6 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                     step={0.01}
                     value={muted ? 0 : volume}
                     onChange={(e) => changeVolume(Number(e.target.value))}
-                    orient="vertical"
                   />
                 </div>
               </div>
