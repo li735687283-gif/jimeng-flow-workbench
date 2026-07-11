@@ -22,6 +22,7 @@ import {
   buildAssetRestorePatch,
   resolveAssetSourceNodeId,
 } from './utils/assetLibrarySelection'
+import { startLastFlowRestore } from './utils/lastFlowRestore'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
@@ -120,6 +121,7 @@ function AppInner() {
   const loadSettings = useSettingsStore((s) => s.loadSettings)
   const { fitView, screenToFlowPosition } = useReactFlow()
   const centeredFlowIdRef = useRef<string | null>(null)
+  const restoringFlowIdRef = useRef<string | null>(null)
   const lastSavedFlowIdRef = useRef<string | null>(currentFlowId)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
@@ -164,16 +166,30 @@ function AppInner() {
     const lastFlowId = getLastFlowId()
     if (!lastFlowId) return
 
+    const restore = startLastFlowRestore({
+      activeFlowId: restoringFlowIdRef,
+      flowId: lastFlowId,
+      loadFlow,
+      getCurrentFlowId: () => useFlowStore.getState().currentFlowId,
+      getStoredFlowId: getLastFlowId,
+      clearStoredFlowId: () => {
+        setLastFlowId(null)
+        lastSavedFlowIdRef.current = null
+      },
+      onSettled: () => setRestoringView(false),
+    })
+    if (!restore) return
+
     setRestoringView(true)
     centeredFlowIdRef.current = lastFlowId
-    loadFlow(lastFlowId)
-      .catch((err: unknown) => {
-        console.error('[App] 恢复上次画布失败:', err)
+    void restore
+      .then((result) => {
+        if (result.status === 'restored' || result.status === 'stale') return
+        if (result.status === 'failed') {
+          console.error('[App] 恢复上次画布失败:', result.error)
+        }
         centeredFlowIdRef.current = null
         setView('home')
-      })
-      .finally(() => {
-        setRestoringView(false)
       })
   }, [view, currentFlowId, loadFlow])
 

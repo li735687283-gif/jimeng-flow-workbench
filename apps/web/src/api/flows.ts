@@ -11,6 +11,40 @@ import type {
   DuplicateFlowRequest,
 } from '@jimeng-flow/shared/flow'
 
+type FlowApiErrorPayload = {
+  message?: unknown
+  code?: unknown
+}
+
+export class FlowApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message)
+    this.name = 'FlowApiError'
+  }
+}
+
+async function readFlowApiError(
+  res: Response,
+  fallback: string,
+): Promise<FlowApiError> {
+  const payload = (await res.json().catch(() => null)) as FlowApiErrorPayload | null
+  const message = typeof payload?.message === 'string' ? payload.message : fallback
+  const code = typeof payload?.code === 'string' ? payload.code : undefined
+  return new FlowApiError(message, res.status, code)
+}
+
+export function isFlowNotFoundError(error: unknown): error is FlowApiError {
+  return (
+    error instanceof FlowApiError &&
+    error.status === 404 &&
+    error.code === 'FLOW_NOT_FOUND'
+  )
+}
+
 /** 列出所有工作流摘要 */
 export async function listFlows(): Promise<FlowSummary[]> {
   const res = await fetch('/api/flows', {
@@ -30,7 +64,10 @@ export async function getFlow(id: string): Promise<Flow> {
     headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {
-    throw new Error(`读取工作流失败：${res.status} ${res.statusText}`)
+    throw await readFlowApiError(
+      res,
+      `读取工作流失败：${res.status} ${res.statusText}`,
+    )
   }
   return (await res.json()) as Flow
 }
