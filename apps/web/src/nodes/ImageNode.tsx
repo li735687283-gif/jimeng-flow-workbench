@@ -391,7 +391,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
 
   const imageSrc = nodeData.assetId
     ? getAssetFileUrl(nodeData.assetId)
-    : nodeData.localPreviewUrl
+    : (nodeData as unknown as { outputAssetIds?: string[] }).outputAssetIds?.[0]
+      ? getAssetFileUrl((nodeData as unknown as { outputAssetIds: string[] }).outputAssetIds[0])
+      : nodeData.localPreviewUrl
   const hasImage = !!imageSrc && !imgError
   const generationProgress = getImageGenerationProgressState(
     nodeData.status,
@@ -996,7 +998,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           return
         }
         try {
-          await useFlowStore.getState().loadFlow(startedFlowId)
+          await useFlowStore
+            .getState()
+            .loadFlow(startedFlowId, { mode: 'refresh' })
           setImgError(false)
           handleCloseEditor()
         } catch (reloadErr) {

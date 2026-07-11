@@ -81,3 +81,6 @@ export const nodeRegistryList = Object.values(nodeRegistry)
 export const nodeTypes = Object.fromEntries(
   nodeRegistryList.map((def) => [def.type, def.Component]),
 ) as Record<string, ComponentType<NodeProps>>
+
+// 向后兼容：旧版本的 'generate' 节点使用 ImageNode 渲染
+nodeTypes['generate'] = ImageNode

@@ -7,6 +7,7 @@ import {
   Repeat,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react'
 
 export interface VideoPlayerModalProps {
@@ -14,6 +15,7 @@ export interface VideoPlayerModalProps {
   src: string
   title?: string
   onClose: () => void
+  variant?: 'default' | 'compact'
 }
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -25,13 +27,12 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModalProps) {
+export function VideoPlayerModal({ open, src, title, onClose, variant = 'default' }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<HTMLDivElement>(null)
   const volumePopoverRef = useRef<HTMLDivElement>(null)
   const speedPopoverRef = useRef<HTMLDivElement>(null)
-  const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isDraggingRef = useRef(false)
   const durationRef = useRef(0)
   const rafRef = useRef<number | null>(null)
@@ -48,7 +49,8 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const [isDragging, setIsDragging] = useState(false)
   const [showVolume, setShowVolume] = useState(false)
   const [showSpeed, setShowSpeed] = useState(false)
-  const [showControls, setShowControls] = useState(true)
+
+  const isCompact = variant === 'compact'
 
   const resetState = useCallback(() => {
     setIsPlaying(false)
@@ -64,27 +66,11 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     setIsDragging(false)
     setShowVolume(false)
     setShowSpeed(false)
-    setShowControls(true)
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
   }, [])
-
-  const scheduleHideControls = useCallback(() => {
-    if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
-    hideControlsTimer.current = setTimeout(() => {
-      const video = videoRef.current
-      if (video && !video.paused && !showVolume && !showSpeed && !isDraggingRef.current) {
-        setShowControls(false)
-      }
-    }, 2500)
-  }, [showVolume, showSpeed])
-
-  const handleMouseMove = useCallback(() => {
-    setShowControls(true)
-    scheduleHideControls()
-  }, [scheduleHideControls])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -155,7 +141,6 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     e.stopPropagation()
     isDraggingRef.current = true
     setIsDragging(true)
-    setShowControls(true)
     performSeek(e.clientX)
 
     const handleWindowMouseMove = (ev: MouseEvent) => {
@@ -175,12 +160,11 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
       }
       window.removeEventListener('mousemove', handleWindowMouseMove)
       window.removeEventListener('mouseup', handleWindowMouseUp)
-      scheduleHideControls()
     }
 
     window.addEventListener('mousemove', handleWindowMouseMove)
     window.addEventListener('mouseup', handleWindowMouseUp)
-  }, [performSeek, scheduleHideControls])
+  }, [performSeek])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -246,7 +230,6 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
         video.removeAttribute('src')
         video.load()
       }
-      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current)
       resetState()
     } else {
       resetState()
@@ -285,71 +268,88 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
 
   const handlePlay = useCallback(() => {
     setIsPlaying(true)
-    scheduleHideControls()
-  }, [scheduleHideControls])
+  }, [])
 
   const handlePause = useCallback(() => {
     setIsPlaying(false)
-    setShowControls(true)
   }, [])
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false)
-    setShowControls(true)
   }, [])
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPercent = duration > 0 ? (buffered / duration) * 100 : 0
 
+  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
+    if (isCompact && e.target === e.currentTarget) {
+      onClose()
+    }
+  }, [isCompact, onClose])
+
   if (!open) return null
+
+  const iconSize = isCompact ? 18 : 20
+  const smallIconSize = isCompact ? 16 : 18
 
   return (
     <div
-      className="video-player-overlay"
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => {
-        const video = videoRef.current
-        if (video && !video.paused) setShowControls(false)
-      }}
+      className={`video-player-overlay${isCompact ? ' is-compact' : ''}`}
+      onClick={handleOverlayClick}
     >
       <div
         ref={containerRef}
-        className={`video-player-container${isFullscreen ? ' fullscreen' : ''}`}
+        className={`video-player-wrapper${isFullscreen ? ' fullscreen' : ''}${isCompact ? ' compact' : ''}`}
       >
-        <video
-          ref={videoRef}
-          className="video-player-video"
-          src={src}
-          playsInline
-          preload="auto"
-          onClick={handleVideoClick}
-          onLoadedMetadata={handleLoadedMetadata}
-          onTimeUpdate={handleTimeUpdate}
-          onPlay={handlePlay}
-          onPause={handlePause}
-          onEnded={handleEnded}
-          onProgress={handleProgress}
-        />
-
-        <div
-          className={`video-player-top-bar${showControls ? ' visible' : ''}`}
-        >
-          <button
-            type="button"
-            className="video-player-icon-btn"
-            onClick={onClose}
-            title="返回"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          {title && <span className="video-player-title">{title}</span>}
-          <div style={{ flex: 1 }} />
+        <div className={`video-player-header${isCompact ? ' compact' : ''}`}>
+          {isCompact ? (
+            <>
+              {title && <span className="video-player-title-external">{title}</span>}
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                className="video-player-close-btn"
+                onClick={onClose}
+                title="关闭"
+              >
+                <X size={20} />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="video-player-back-btn"
+                onClick={onClose}
+                title="返回"
+              >
+                <ArrowLeft size={22} />
+                <span>返回</span>
+              </button>
+              {title && <span className="video-player-title-external">{title}</span>}
+              <div style={{ flex: 1 }} />
+            </>
+          )}
         </div>
 
-        <div
-          className={`video-player-controls${showControls ? ' visible' : ''}`}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="video-player-stage">
+          <video
+            ref={videoRef}
+            className="video-player-video"
+            src={src}
+            playsInline
+            preload="auto"
+            onClick={handleVideoClick}
+            onLoadedMetadata={handleLoadedMetadata}
+            onTimeUpdate={handleTimeUpdate}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onEnded={handleEnded}
+            onProgress={handleProgress}
+          />
+        </div>
+
+        <div className={`video-player-controls-external${isCompact ? ' compact' : ''}`}>
           <div
             ref={progressRef}
             className={`video-player-progress${isDragging ? ' dragging' : ''}`}
@@ -374,17 +374,17 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
             <div className="video-player-controls-left">
               <button
                 type="button"
-                className="video-player-icon-btn"
+                className={`video-player-control-btn${isCompact ? ' compact' : ''}`}
                 onClick={togglePlay}
                 title={isPlaying ? '暂停' : '播放'}
               >
-                {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                {isPlaying ? <Pause size={iconSize} /> : <Play size={iconSize} />}
               </button>
 
               <div className="video-player-volume-group" ref={volumePopoverRef}>
                 <button
                   type="button"
-                  className="video-player-icon-btn"
+                  className={`video-player-control-btn${isCompact ? ' compact' : ''}`}
                   onClick={() => {
                     if (muted || volume === 0) {
                       changeVolume(volume > 0 ? volume : 0.7)
@@ -394,7 +394,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                   }}
                   title="音量"
                 >
-                  {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                  {muted || volume === 0 ? <VolumeX size={iconSize} /> : <Volume2 size={iconSize} />}
                 </button>
                 <div
                   className={`video-player-volume-popover${showVolume ? ' visible' : ''}`}
@@ -411,7 +411,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
                 </div>
               </div>
 
-              <span className="video-player-time">
+              <span className={`video-player-time${isCompact ? ' compact' : ''}`}>
                 {formatTime(currentTime)} / {formatTime(duration)}
               </span>
             </div>
@@ -419,17 +419,17 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
             <div className="video-player-controls-right">
               <button
                 type="button"
-                className={`video-player-icon-btn${isLooping ? ' active' : ''}`}
+                className={`video-player-control-btn${isCompact ? ' compact' : ''}${isLooping ? ' active' : ''}`}
                 onClick={toggleLoop}
                 title="循环播放"
               >
-                <Repeat size={16} />
+                <Repeat size={smallIconSize} />
               </button>
 
               <div className="video-player-speed-group" ref={speedPopoverRef}>
                 <button
                   type="button"
-                  className="video-player-speed-btn"
+                  className={`video-player-speed-btn${isCompact ? ' compact' : ''}`}
                   onClick={() => setShowSpeed((v) => !v)}
                 >
                   {playbackRate}x
@@ -452,11 +452,11 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
 
               <button
                 type="button"
-                className="video-player-icon-btn"
+                className={`video-player-control-btn${isCompact ? ' compact' : ''}`}
                 onClick={toggleFullscreen}
                 title={isFullscreen ? '退出全屏' : '全屏'}
               >
-                <Maximize2 size={18} />
+                <Maximize2 size={iconSize} />
               </button>
             </div>
           </div>

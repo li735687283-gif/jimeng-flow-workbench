@@ -9,6 +9,21 @@ import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import * as flowsApi from '../api/flows'
 import { useCanvasStore } from './canvasStore'
 
+interface LoadFlowOptions {
+  mode?: 'navigate' | 'refresh'
+}
+
+interface SameFlowReload {
+  flowId: string
+  intentId: number
+  promise: Promise<void>
+}
+
+interface SaveCurrentOptions {
+  preserveError?: boolean
+  ignoredReload?: SameFlowReload
+}
+
 interface FlowState {
   /** 当前工作流 id（null 表示尚未加载/新建） */
   currentFlowId: string | null
@@ -28,7 +43,7 @@ interface FlowState {
   /** 拉取工作流列表 */
   loadFlowList: () => Promise<FlowSummary[]>
   /** 加载某个工作流到画布 */
-  loadFlow: (id: string) => Promise<void>
+  loadFlow: (id: string, options?: LoadFlowOptions) => Promise<void>
   /** 新建空白工作流并清空画布 */
   createFlow: () => Promise<void>
   /** 确保当前画布绑定到一个工作流，不清空已有节点 */
@@ -50,7 +65,475 @@ interface FlowState {
 const normalizeFlowName = (name: string): string =>
   name === '未命名工作流' ? '无限画布' : name
 
-export const useFlowStore = create<FlowState>((set, get) => ({
+function migrateLegacyNodes(nodes: unknown[]): unknown[] {
+  return nodes.map((node) => {
+    if (!node || typeof node !== 'object') return node
+    const n = node as Record<string, unknown>
+    if (n.type === 'generate') {
+      const data = (n.data ?? {}) as Record<string, unknown>
+      const outputAssetIds = (data.outputAssetIds as string[] | undefined) ?? []
+      const firstAssetId = outputAssetIds[0]
+      return {
+        ...n,
+        type: 'image',
+        data: {
+          ...data,
+          assetId: firstAssetId ?? data.assetId,
+        },
+      }
+    }
+    return node
+  })
+}
+
+class FlowIntentSupersededError extends Error {
+  constructor() {
+    super('Flow intent superseded')
+    this.name = 'FlowIntentSupersededError'
+  }
+}
+
+let latestNavigationRequestId = 0
+interface ActiveNavigationRequest {
+  id: number
+  settled: Promise<void>
+  settle: () => void
+}
+
+let activeNavigationRequest: ActiveNavigationRequest | null = null
+let flowIntentId = 0
+let activeSameFlowReload: SameFlowReload | null = null
+const deferredSameFlowRefreshes = new Map<
+  string,
+  { flowEpoch: number; promise: Promise<void> }
+>()
+const flowMutationEpochs = new Map<string, number>()
+let ensureCurrentFlowInFlight: {
+  navigationRequestId: number
+  intentId: number
+  promise: Promise<string>
+} | null = null
+let saveQueueTail: Promise<void> = Promise.resolve()
+let latestSaveCallId = 0
+
+type CanvasSnapshotMarker = {
+  nodes: ReturnType<typeof useCanvasStore.getState>['nodes']
+  edges: ReturnType<typeof useCanvasStore.getState>['edges']
+  deletedNodeIds: Set<string>
+}
+
+type StabilizeFlowResult =
+  | { status: 'stable'; marker: CanvasSnapshotMarker; changed: boolean }
+  | { status: 'flow-changed' | 'cancelled' }
+
+function beginNavigationRequest(id: number): ActiveNavigationRequest {
+  let settle!: () => void
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve
+  })
+  const navigation = { id, settled, settle }
+  activeNavigationRequest = navigation
+  return navigation
+}
+
+function finishNavigationRequest(
+  navigation: ActiveNavigationRequest,
+): void {
+  if (activeNavigationRequest === navigation) {
+    activeNavigationRequest = null
+  }
+  navigation.settle()
+}
+
+async function waitForNavigationChain(): Promise<void> {
+  while (true) {
+    const navigation = activeNavigationRequest
+    if (!navigation) return
+    await navigation.settled
+  }
+}
+
+function getFlowMutationEpoch(flowId: string): number {
+  return flowMutationEpochs.get(flowId) ?? 0
+}
+
+function incrementFlowMutationEpoch(flowId: string): void {
+  flowMutationEpochs.set(flowId, getFlowMutationEpoch(flowId) + 1)
+}
+
+async function drainSaveQueue(): Promise<void> {
+  while (true) {
+    const observedTail = saveQueueTail
+    try {
+      await observedTail
+    } catch (error) {
+      if (observedTail === saveQueueTail) throw error
+    }
+    if (observedTail === saveQueueTail) return
+  }
+}
+
+async function waitForSameFlowReload(
+  flowId: string,
+  ignoredReload?: SameFlowReload,
+): Promise<void> {
+  while (true) {
+    const reload = activeSameFlowReload
+    if (
+      !reload ||
+      reload === ignoredReload ||
+      reload.flowId !== flowId
+    ) {
+      return
+    }
+    await reload.promise
+  }
+}
+
+export const useFlowStore = create<FlowState>((set, get) => {
+  const saveCurrentInternal = (
+    options?: SaveCurrentOptions,
+  ): Promise<void> => {
+    const { currentFlowId } = get()
+    if (!currentFlowId) return Promise.resolve()
+    const reload = activeSameFlowReload
+    if (
+      reload &&
+      reload !== options?.ignoredReload &&
+      reload.flowId === currentFlowId
+    ) {
+      set(
+        options?.preserveError
+          ? { saving: true }
+          : { saving: true, error: null },
+      )
+      return reload.promise.then(() => saveCurrentInternal(options))
+    }
+
+    const intentId = flowIntentId
+    const saveCallId = ++latestSaveCallId
+    set(
+      options?.preserveError
+        ? { saving: true }
+        : { saving: true, error: null },
+    )
+    const runSave = async () => {
+      try {
+        if (
+          intentId !== flowIntentId ||
+          get().currentFlowId !== currentFlowId
+        ) {
+          return
+        }
+        if (saveCallId === latestSaveCallId) {
+          set({ saving: true })
+        }
+
+        const { nodes, edges, deletedNodeIds } = useCanvasStore.getState()
+        const updated = await flowsApi.updateFlow(currentFlowId, {
+          nodes,
+          edges,
+          ...(deletedNodeIds.length > 0 ? { deletedNodeIds } : {}),
+        })
+        if (
+          intentId !== flowIntentId ||
+          get().currentFlowId !== currentFlowId
+        ) {
+          return
+        }
+
+        if (deletedNodeIds.length > 0) {
+          const acknowledgedIds = new Set(deletedNodeIds)
+          useCanvasStore.setState((state) => ({
+            deletedNodeIds: state.deletedNodeIds.filter(
+              (nodeId) => !acknowledgedIds.has(nodeId),
+            ),
+          }))
+        }
+        if (saveCallId === latestSaveCallId) {
+          set({
+            currentFlowName: normalizeFlowName(updated.name),
+            lastSavedAt: Date.now(),
+            saving: false,
+          })
+        }
+      } catch (err) {
+        if (
+          intentId === flowIntentId &&
+          get().currentFlowId === currentFlowId &&
+          saveCallId === latestSaveCallId
+        ) {
+          set({
+            saving: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+        throw err
+      }
+    }
+    const task = saveQueueTail.then(runSave, runSave)
+    saveQueueTail = task
+    return task
+  }
+
+  const startSameFlowRefresh = (
+    flowId: string,
+    flowEpoch: number,
+    preserveError = false,
+    knownStableMarker?: CanvasSnapshotMarker,
+  ): Promise<void> => {
+    if (
+      get().currentFlowId !== flowId ||
+      getFlowMutationEpoch(flowId) !== flowEpoch
+    ) {
+      return Promise.resolve()
+    }
+
+    const intentId = ++flowIntentId
+    set(
+      preserveError
+        ? { loading: true, saving: false }
+        : { loading: true, saving: false, error: null },
+    )
+    let reload!: SameFlowReload
+    const promise: Promise<void> = Promise.resolve().then(async () => {
+      const isSuperseded = (): boolean =>
+        intentId !== flowIntentId ||
+        get().currentFlowId !== flowId ||
+        getFlowMutationEpoch(flowId) !== flowEpoch
+
+      try {
+        const prepared = await stabilizeCurrentFlow(
+          flowId,
+          isSuperseded,
+          knownStableMarker,
+          reload,
+        )
+        if (prepared.status !== 'stable' || isSuperseded()) {
+          return
+        }
+        let stableMarker = prepared.marker
+
+        while (true) {
+          const flow = await flowsApi.getFlow(flowId)
+          if (isSuperseded()) return
+
+          const stabilized = await stabilizeCurrentFlow(
+            flowId,
+            isSuperseded,
+            stableMarker,
+            reload,
+          )
+          if (stabilized.status !== 'stable' || isSuperseded()) {
+            return
+          }
+          if (stabilized.changed) {
+            stableMarker = stabilized.marker
+            continue
+          }
+
+          useCanvasStore.setState({
+            nodes: migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
+            edges: flow.edges,
+            deletedNodeIds: [],
+            selectedNodeId: null,
+          })
+          set({
+            currentFlowId: flow.id,
+            currentFlowName: normalizeFlowName(flow.name),
+            lastSavedAt: Date.now(),
+            loading: false,
+            saving: false,
+          })
+          return
+        }
+      } catch (err) {
+        if (isSuperseded()) return
+        set({
+          loading: false,
+          saving: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        throw err
+      }
+    })
+    reload = { flowId, intentId, promise }
+    activeSameFlowReload = reload
+    void promise.then(
+      () => {
+        if (activeSameFlowReload === reload) activeSameFlowReload = null
+      },
+      () => {
+        if (activeSameFlowReload === reload) activeSameFlowReload = null
+      },
+    )
+    return promise
+  }
+
+  const captureCanvasSnapshotMarker = (): CanvasSnapshotMarker => {
+    const { nodes, edges, deletedNodeIds } = useCanvasStore.getState()
+    return {
+      nodes,
+      edges,
+      deletedNodeIds: new Set(deletedNodeIds),
+    }
+  }
+
+  const canvasChangedSince = (marker: CanvasSnapshotMarker): boolean => {
+    const { nodes, edges, deletedNodeIds } = useCanvasStore.getState()
+    return (
+      nodes !== marker.nodes ||
+      edges !== marker.edges ||
+      deletedNodeIds.some((nodeId) => !marker.deletedNodeIds.has(nodeId))
+    )
+  }
+
+  const stabilizeCurrentFlow = async (
+    flowId: string,
+    isCancelled: () => boolean,
+    knownStableMarker?: CanvasSnapshotMarker,
+    ignoredReload?: SameFlowReload,
+  ): Promise<StabilizeFlowResult> => {
+    let knownMarker = knownStableMarker
+    let changedSinceKnown = false
+
+    while (true) {
+      if (get().currentFlowId !== flowId) {
+        return { status: 'flow-changed' }
+      }
+      if (isCancelled()) return { status: 'cancelled' }
+
+      await waitForSameFlowReload(flowId, ignoredReload)
+      if (get().currentFlowId !== flowId) {
+        return { status: 'flow-changed' }
+      }
+      if (isCancelled()) return { status: 'cancelled' }
+
+      if (knownMarker) {
+        await drainSaveQueue()
+        if (get().currentFlowId !== flowId) {
+          return { status: 'flow-changed' }
+        }
+        if (isCancelled()) return { status: 'cancelled' }
+        if (!canvasChangedSince(knownMarker)) {
+          return {
+            status: 'stable',
+            marker: captureCanvasSnapshotMarker(),
+            changed: changedSinceKnown,
+          }
+        }
+        changedSinceKnown = true
+        knownMarker = undefined
+      }
+
+      const markerBeforeSave = captureCanvasSnapshotMarker()
+      const save = saveCurrentInternal({
+        preserveError: true,
+        ignoredReload,
+      })
+      await save
+      await drainSaveQueue()
+      if (get().currentFlowId !== flowId) {
+        return { status: 'flow-changed' }
+      }
+      if (isCancelled()) return { status: 'cancelled' }
+      if (
+        (
+          !activeSameFlowReload ||
+          activeSameFlowReload === ignoredReload ||
+          activeSameFlowReload.flowId !== flowId
+        ) &&
+        !canvasChangedSince(markerBeforeSave)
+      ) {
+        return {
+          status: 'stable',
+          marker: captureCanvasSnapshotMarker(),
+          changed: true,
+        }
+      }
+    }
+  }
+
+  const deferSameFlowRefresh = (
+    flowId: string,
+    flowEpoch: number,
+  ): Promise<void> => {
+    const existing = deferredSameFlowRefreshes.get(flowId)
+    if (existing?.flowEpoch === flowEpoch) return existing.promise
+
+    const promise = (async () => {
+      while (true) {
+        await waitForNavigationChain()
+        if (
+          get().currentFlowId !== flowId ||
+          getFlowMutationEpoch(flowId) !== flowEpoch
+        ) {
+          return
+        }
+
+        const stabilized = await stabilizeCurrentFlow(
+          flowId,
+          () =>
+            activeNavigationRequest !== null ||
+            getFlowMutationEpoch(flowId) !== flowEpoch,
+        )
+        if (
+          get().currentFlowId !== flowId ||
+          getFlowMutationEpoch(flowId) !== flowEpoch
+        ) {
+          return
+        }
+        if (stabilized.status !== 'stable') {
+          if (stabilized.status === 'cancelled') continue
+          return
+        }
+        return startSameFlowRefresh(
+          flowId,
+          flowEpoch,
+          true,
+          stabilized.marker,
+        )
+      }
+    })()
+    const deferred = { flowEpoch, promise }
+    deferredSameFlowRefreshes.set(flowId, deferred)
+    void promise.then(
+      () => {
+        if (deferredSameFlowRefreshes.get(flowId) === deferred) {
+          deferredSameFlowRefreshes.delete(flowId)
+        }
+      },
+      () => {
+        if (deferredSameFlowRefreshes.get(flowId) === deferred) {
+          deferredSameFlowRefreshes.delete(flowId)
+        }
+      },
+    )
+    return promise
+  }
+
+  const prepareNavigationSource = async (
+    sourceFlowId: string | null,
+    navigationRequestId: number,
+  ): Promise<CanvasSnapshotMarker | null | false> => {
+    if (!sourceFlowId) {
+      return navigationRequestId === latestNavigationRequestId ? null : false
+    }
+
+    const stabilized = await stabilizeCurrentFlow(
+      sourceFlowId,
+      () => navigationRequestId !== latestNavigationRequestId,
+    )
+    if (
+      stabilized.status === 'cancelled' ||
+      navigationRequestId !== latestNavigationRequestId
+    ) {
+      return false
+    }
+    return stabilized.status === 'stable' ? stabilized.marker : null
+  }
+
+  return {
   currentFlowId: null,
   currentFlowName: '无限画布',
   loading: false,
@@ -75,117 +558,292 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     }
   },
 
-  loadFlow: async (id) => {
-    set({ loading: true, error: null })
-    try {
-      const flow = await flowsApi.getFlow(id)
-      // 把 nodes / edges 写入画布
-      useCanvasStore.setState({
-        nodes: flow.nodes,
-        edges: flow.edges,
-        deletedNodeIds: [],
-        selectedNodeId: null,
-      })
-      set({
-        currentFlowId: flow.id,
-        currentFlowName: normalizeFlowName(flow.name),
-        lastSavedAt: Date.now(),
-        loading: false,
-      })
-    } catch (err) {
-      set({
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw err
+  loadFlow: (id, options) => {
+    const mode = options?.mode ?? 'navigate'
+    const flowEpoch = getFlowMutationEpoch(id)
+    if (mode === 'refresh') {
+      if (get().currentFlowId !== id) {
+        return Promise.resolve()
+      }
+      if (activeNavigationRequest) {
+        return deferSameFlowRefresh(id, flowEpoch)
+      }
+      return startSameFlowRefresh(id, flowEpoch)
     }
+
+    const navigationRequestId = ++latestNavigationRequestId
+    const navigation = beginNavigationRequest(navigationRequestId)
+    const sourceFlowId = get().currentFlowId
+    set({ error: null })
+    const promise = (async () => {
+      try {
+        let sourceMarker: CanvasSnapshotMarker | null | false
+        try {
+          sourceMarker = await prepareNavigationSource(
+            sourceFlowId,
+            navigationRequestId,
+          )
+        } catch (error) {
+          if (navigationRequestId === latestNavigationRequestId) {
+            set({ loading: false })
+          }
+          throw error
+        }
+        if (
+          sourceMarker === false ||
+          navigationRequestId !== latestNavigationRequestId ||
+          getFlowMutationEpoch(id) !== flowEpoch
+        ) {
+          return
+        }
+        let stableSourceMarker: CanvasSnapshotMarker | null = sourceMarker
+
+        const intentId = ++flowIntentId
+        set({ loading: true, saving: false })
+        try {
+          while (true) {
+            const flow = await flowsApi.getFlow(id)
+            if (
+              navigationRequestId !== latestNavigationRequestId ||
+              intentId !== flowIntentId ||
+              getFlowMutationEpoch(id) !== flowEpoch
+            ) {
+              return
+            }
+
+            const stabilized: StabilizeFlowResult = sourceFlowId
+              ? await stabilizeCurrentFlow(
+                  sourceFlowId,
+                  () => navigationRequestId !== latestNavigationRequestId,
+                  stableSourceMarker ?? undefined,
+                )
+              : ({ status: 'flow-changed' } as const)
+            if (
+              navigationRequestId !== latestNavigationRequestId ||
+              intentId !== flowIntentId ||
+              getFlowMutationEpoch(id) !== flowEpoch ||
+              stabilized.status === 'cancelled'
+            ) {
+              return
+            }
+            if (
+              sourceFlowId === id &&
+              stabilized.status === 'stable' &&
+              stabilized.changed
+            ) {
+              stableSourceMarker = stabilized.marker
+              continue
+            }
+
+            useCanvasStore.setState({
+              nodes: migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
+              edges: flow.edges,
+              deletedNodeIds: [],
+              selectedNodeId: null,
+            })
+            set({
+              currentFlowId: flow.id,
+              currentFlowName: normalizeFlowName(flow.name),
+              lastSavedAt: Date.now(),
+              loading: false,
+              saving: false,
+            })
+            return
+          }
+        } catch (err) {
+          if (
+            navigationRequestId === latestNavigationRequestId &&
+            intentId === flowIntentId &&
+            getFlowMutationEpoch(id) === flowEpoch
+          ) {
+            set({
+              loading: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+          throw err
+        }
+      } finally {
+        finishNavigationRequest(navigation)
+      }
+    })()
+    return promise
   },
 
-  createFlow: async () => {
-    set({ loading: true, error: null })
-    try {
-      const flow = await flowsApi.createFlow({})
-      // 清空画布
-      useCanvasStore.setState({
-        nodes: [],
-        edges: [],
-        deletedNodeIds: [],
-        selectedNodeId: null,
-      })
-      set({
-        currentFlowId: flow.id,
-        currentFlowName: normalizeFlowName(flow.name),
-        lastSavedAt: Date.now(),
-        loading: false,
-      })
-    } catch (err) {
-      set({
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw err
-    }
+  createFlow: () => {
+    const navigationRequestId = ++latestNavigationRequestId
+    const navigation = beginNavigationRequest(navigationRequestId)
+    const sourceFlowId = get().currentFlowId
+    set({ error: null })
+    const promise = (async () => {
+      try {
+        let sourceMarker: CanvasSnapshotMarker | null | false
+        try {
+          sourceMarker = await prepareNavigationSource(
+            sourceFlowId,
+            navigationRequestId,
+          )
+        } catch (error) {
+          if (navigationRequestId === latestNavigationRequestId) {
+            set({ loading: false })
+          }
+          throw error
+        }
+        if (
+          sourceMarker === false ||
+          navigationRequestId !== latestNavigationRequestId
+        ) {
+          return
+        }
+
+        const intentId = ++flowIntentId
+        set({ loading: true, saving: false })
+        try {
+          const flow = await flowsApi.createFlow({})
+          if (
+            navigationRequestId !== latestNavigationRequestId ||
+            intentId !== flowIntentId
+          ) {
+            return
+          }
+          if (sourceFlowId) {
+            const stabilized = await stabilizeCurrentFlow(
+              sourceFlowId,
+              () => navigationRequestId !== latestNavigationRequestId,
+              sourceMarker ?? undefined,
+            )
+            if (
+              navigationRequestId !== latestNavigationRequestId ||
+              intentId !== flowIntentId ||
+              stabilized.status === 'cancelled'
+            ) {
+              return
+            }
+          }
+          // 清空画布
+          useCanvasStore.setState({
+            nodes: [],
+            edges: [],
+            deletedNodeIds: [],
+            selectedNodeId: null,
+          })
+          set({
+            currentFlowId: flow.id,
+            currentFlowName: normalizeFlowName(flow.name),
+            lastSavedAt: Date.now(),
+            loading: false,
+            saving: false,
+          })
+        } catch (err) {
+          if (
+            navigationRequestId === latestNavigationRequestId &&
+            intentId === flowIntentId
+          ) {
+            set({
+              loading: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+          throw err
+        }
+      } finally {
+        finishNavigationRequest(navigation)
+      }
+    })()
+    return promise
   },
 
-  ensureCurrentFlow: async () => {
+  ensureCurrentFlow: () => {
     const existingFlowId = get().currentFlowId
-    if (existingFlowId) return existingFlowId
-
-    set({ saving: true, error: null })
-    try {
-      const { nodes, edges, clearDeletedNodeIds } = useCanvasStore.getState()
-      const flow = await flowsApi.createFlow({
-        name: get().currentFlowName,
-      })
-      const updated = await flowsApi.updateFlow(flow.id, {
-        nodes,
-        edges,
-      })
-      clearDeletedNodeIds()
-      set({
-        currentFlowId: updated.id,
-        currentFlowName: normalizeFlowName(updated.name),
-        lastSavedAt: Date.now(),
-        saving: false,
-        loading: false,
-      })
-      return updated.id
-    } catch (err) {
-      set({
-        saving: false,
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw err
+    if (existingFlowId) return Promise.resolve(existingFlowId)
+    if (
+      ensureCurrentFlowInFlight &&
+      ensureCurrentFlowInFlight.navigationRequestId ===
+        latestNavigationRequestId &&
+      ensureCurrentFlowInFlight.intentId === flowIntentId
+    ) {
+      return ensureCurrentFlowInFlight.promise
     }
+
+    const navigationRequestId = ++latestNavigationRequestId
+    const navigation = beginNavigationRequest(navigationRequestId)
+    const intentId = ++flowIntentId
+    set({ saving: true, error: null })
+    const promise = (async () => {
+      try {
+        const { nodes, edges, deletedNodeIds } = useCanvasStore.getState()
+        const flow = await flowsApi.createFlow({
+          name: get().currentFlowName,
+        })
+        if (
+          navigationRequestId !== latestNavigationRequestId ||
+          intentId !== flowIntentId
+        ) {
+          throw new FlowIntentSupersededError()
+        }
+        const updated = await flowsApi.updateFlow(flow.id, {
+          nodes,
+          edges,
+        })
+        if (
+          navigationRequestId !== latestNavigationRequestId ||
+          intentId !== flowIntentId
+        ) {
+          throw new FlowIntentSupersededError()
+        }
+        if (deletedNodeIds.length > 0) {
+          const acknowledgedIds = new Set(deletedNodeIds)
+          useCanvasStore.setState((state) => ({
+            deletedNodeIds: state.deletedNodeIds.filter(
+              (nodeId) => !acknowledgedIds.has(nodeId),
+            ),
+          }))
+        }
+        set({
+          currentFlowId: updated.id,
+          currentFlowName: normalizeFlowName(updated.name),
+          lastSavedAt: Date.now(),
+          saving: false,
+          loading: false,
+        })
+        return updated.id
+      } catch (err) {
+        if (
+          navigationRequestId === latestNavigationRequestId &&
+          intentId === flowIntentId
+        ) {
+          set({
+            saving: false,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+        throw err
+      } finally {
+        finishNavigationRequest(navigation)
+      }
+    })()
+    ensureCurrentFlowInFlight = {
+      navigationRequestId,
+      intentId,
+      promise,
+    }
+    void promise.then(
+      () => {
+        if (ensureCurrentFlowInFlight?.promise === promise) {
+          ensureCurrentFlowInFlight = null
+        }
+      },
+      () => {
+        if (ensureCurrentFlowInFlight?.promise === promise) {
+          ensureCurrentFlowInFlight = null
+        }
+      },
+    )
+    return promise
   },
 
-  saveCurrent: async () => {
-    const { currentFlowId } = get()
-    if (!currentFlowId) return
-    set({ saving: true, error: null })
-    try {
-      const { nodes, edges, deletedNodeIds, clearDeletedNodeIds } =
-        useCanvasStore.getState()
-      const updated = await flowsApi.updateFlow(currentFlowId, {
-        nodes,
-        edges,
-        ...(deletedNodeIds.length > 0 ? { deletedNodeIds } : {}),
-      })
-      clearDeletedNodeIds()
-      set({
-        currentFlowName: updated.name,
-        lastSavedAt: Date.now(),
-        saving: false,
-      })
-    } catch (err) {
-      set({
-        saving: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      throw err
-    }
-  },
+  saveCurrent: () => saveCurrentInternal(),
 
   updateFlowName: async (name) => {
     const { currentFlowId, currentFlowName: oldName } = get()
@@ -233,8 +891,13 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     set({ error: null })
     try {
       await flowsApi.deleteFlow(id)
+      incrementFlowMutationEpoch(id)
       if (get().currentFlowId === id) {
-        set({ currentFlowId: null, currentFlowName: '无限画布' })
+        set({
+          currentFlowId: null,
+          currentFlowName: '无限画布',
+          saving: false,
+        })
         useCanvasStore.setState({
           nodes: [],
           edges: [],
@@ -250,7 +913,8 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
-}))
+  }
+})
 
 /** 便于非组件代码读取当前 flow id */
 export function getCurrentFlowId(): string | null {

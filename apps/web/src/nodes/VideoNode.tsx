@@ -126,11 +126,74 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   >('idle')
   const [fullSizeOpen, setFullSizeOpen] = useState(false)
 
+  const clickTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const lastClickTimeRef = useRef(0)
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
+
+  const handleOpenEditor = useCallback(() => {
+    clearCloseTimer()
+    setEditorMounted(true)
+    setEditorClosing(false)
+  }, [clearCloseTimer])
+
+  const handleCloseEditor = useCallback(() => {
+    if (!editorMounted || editorClosing) return
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+    setFullSizeOpen(false)
+    setEditorClosing(true)
+    clearCloseTimer()
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      setEditorMounted(false)
+      setEditorClosing(false)
+    }, EDITOR_CLOSE_ANIMATION_MS)
+  }, [clearCloseTimer, editorClosing, editorMounted])
+
+  const handleOpenFullSize = useCallback(() => {
+    const assetId = nodeData.assetIds[0]
+    if (!assetId) {
+      return
+    }
+    setFullSizeOpen(true)
+  }, [nodeData.assetIds])
+
+  const handleMediaClick = useCallback(() => {
+    const now = Date.now()
+    const timeSinceLastClick = now - lastClickTimeRef.current
+    lastClickTimeRef.current = now
+
+    if (timeSinceLastClick < 300) {
+      // 双击：直接打开播放器
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current)
+        clickTimerRef.current = null
+      }
+      handleOpenFullSize()
+    } else {
+      // 单击：延迟 300ms，若期间再次点击则判定为双击并取消
+      clickTimerRef.current = window.setTimeout(() => {
+        clickTimerRef.current = null
+        handleOpenEditor()
+      }, 300)
+    }
+  }, [handleOpenEditor, handleOpenFullSize])
+
   useEffect(() => {
     return () => {
       generationUnsubscribeRef.current?.()
       if (closeTimerRef.current !== null) {
         window.clearTimeout(closeTimerRef.current)
+      }
+      if (clickTimerRef.current !== null) {
+        window.clearTimeout(clickTimerRef.current)
       }
     }
   }, [])
@@ -182,34 +245,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     videoModelOptions,
   ])
 
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current)
-      closeTimerRef.current = null
-    }
-  }, [])
-
-  const handleOpenEditor = useCallback(() => {
-    clearCloseTimer()
-    setEditorMounted(true)
-    setEditorClosing(false)
-  }, [clearCloseTimer])
-
-  const handleCloseEditor = useCallback(() => {
-    if (!editorMounted || editorClosing) return
-    setModelMenuOpen(false)
-    setQualityMenuOpen(false)
-    setCountMenuOpen(false)
-    setFullSizeOpen(false)
-    setEditorClosing(true)
-    clearCloseTimer()
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
-      setEditorMounted(false)
-      setEditorClosing(false)
-    }, EDITOR_CLOSE_ANIMATION_MS)
-  }, [clearCloseTimer, editorClosing, editorMounted])
-
   const handleValidateVideoProvider = useCallback(async () => {
     setActionBusy(true)
     setValidationStatus('checking')
@@ -240,14 +275,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     } finally {
       setActionBusy(false)
     }
-  }, [nodeData.assetIds])
-
-  const handleOpenFullSize = useCallback(() => {
-    const assetId = nodeData.assetIds[0]
-    if (!assetId) {
-      return
-    }
-    setFullSizeOpen(true)
   }, [nodeData.assetIds])
 
   const persistPromptDraft = useCallback(
@@ -675,13 +702,12 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           <div
             className="media-display-node video-media-display nodrag nopan"
             style={VIDEO_DISPLAY_STYLE}
-            onClick={handleOpenEditor}
+            onClick={handleMediaClick}
           >
             <video
               ref={videoRef}
               src={getAssetFileUrl(firstAssetId)}
               className="nodrag nopan"
-              controls
               playsInline
               muted={videoMuted}
               draggable={false}
@@ -793,6 +819,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             open={fullSizeOpen}
             src={getAssetFileUrl(firstAssetId)}
             title={nodeData.title}
+            variant="compact"
             onClose={() => setFullSizeOpen(false)}
           />,
           document.body,

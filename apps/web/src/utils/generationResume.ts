@@ -40,7 +40,7 @@ export function resumeGenerationSubscription({
     const flowId = getCurrentFlowId()
     if (flowId) {
       try {
-        await useFlowStore.getState().loadFlow(flowId)
+        await useFlowStore.getState().loadFlow(flowId, { mode: 'refresh' })
       } catch {
         // 重新加载失败时降级：只更新状态为 error
         useCanvasStore.getState().updateNodeData(nodeId, {
