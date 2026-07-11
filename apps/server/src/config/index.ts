@@ -32,16 +32,10 @@ export function resolveOutputDir(outputDir: string): string {
  * - 若字段类型不匹配，使用默认值兜底（避免脏数据破坏运行）。
  */
 function mergeWithDefaults(raw: unknown): Settings {
-  const result: Settings = { ...DEFAULT_SETTINGS }
-  if (!raw || typeof raw !== 'object') return result
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS }
   const obj = raw as Record<string, unknown>
-
-  // 先复制所有未知字段（保证向前兼容：新增字段不会被丢弃）
-  for (const key of Object.keys(obj)) {
-    if (!(key in DEFAULT_SETTINGS)) {
-      ;(result as Record<string, unknown>)[key] = obj[key]
-    }
-  }
+  // 先保留未知字段，再用默认值重置已知字段，后续只写回通过校验的值。
+  const result: Settings = { ...obj, ...DEFAULT_SETTINGS }
 
   ;(Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).forEach((key) => {
     const value = obj[key as string]
