@@ -1,16 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { ManagedVideo } from '@jimeng-flow/shared/video'
-import { buildVideoListResponse, getFeaturedHomeVideos } from '../src/services/videos'
+import type { ManagedWork } from '@jimeng-flow/shared/video'
+import { buildWorkListResponse, getFeaturedHomeWorks } from '../src/services/videos'
 
-const videos: ManagedVideo[] = [
+const works: ManagedWork[] = [
   {
     id: 'video_1',
+    mediaType: 'video',
     title: '城市预告片',
     description: '夜色里的城市镜头',
-    videoAssetId: 'asset_video_1',
+    mediaAssetId: 'asset_video_1',
     coverAssetId: 'asset_cover_1',
-    videoUrl: '/api/assets/asset_video_1/file',
+    mediaUrl: '/api/assets/asset_video_1/file',
     coverUrl: '/api/assets/asset_cover_1/file',
     isFeatured: true,
     isPinned: false,
@@ -21,11 +22,12 @@ const videos: ManagedVideo[] = [
   },
   {
     id: 'video_2',
+    mediaType: 'video',
     title: '角色测试',
     description: '未上架内容',
-    videoAssetId: 'asset_video_2',
+    mediaAssetId: 'asset_video_2',
     coverAssetId: 'asset_cover_2',
-    videoUrl: '/api/assets/asset_video_2/file',
+    mediaUrl: '/api/assets/asset_video_2/file',
     coverUrl: '/api/assets/asset_cover_2/file',
     isFeatured: true,
     isPinned: true,
@@ -36,11 +38,12 @@ const videos: ManagedVideo[] = [
   },
   {
     id: 'video_3',
+    mediaType: 'video',
     title: '山谷短片',
     description: '精选上架',
-    videoAssetId: 'asset_video_3',
+    mediaAssetId: 'asset_video_3',
     coverAssetId: 'asset_cover_3',
-    videoUrl: '/api/assets/asset_video_3/file',
+    mediaUrl: '/api/assets/asset_video_3/file',
     coverUrl: '/api/assets/asset_cover_3/file',
     isFeatured: true,
     isPinned: true,
@@ -51,17 +54,18 @@ const videos: ManagedVideo[] = [
   },
 ]
 
-test('getFeaturedHomeVideos returns only featured published videos by sort order desc', () => {
-  const result = getFeaturedHomeVideos(videos)
+test('getFeaturedHomeWorks returns only featured published works by sort order desc', () => {
+  const result = getFeaturedHomeWorks(works)
 
   assert.deepEqual(
-    result.map((video) => video.id),
+    result.map((work) => work.id),
     ['video_3', 'video_1'],
   )
+  assert.equal(result[0]?.mediaUrl, '/api/assets/asset_video_3/file')
 })
 
-test('buildVideoListResponse filters by search and pinned state with pagination', () => {
-  const result = buildVideoListResponse(videos, {
+test('buildWorkListResponse filters by search and pinned state with pagination', () => {
+  const result = buildWorkListResponse(works, {
     page: 1,
     pageSize: 1,
     q: '角色',
@@ -72,7 +76,8 @@ test('buildVideoListResponse filters by search and pinned state with pagination'
   assert.equal(result.page, 1)
   assert.equal(result.pageSize, 1)
   assert.deepEqual(
-    result.items.map((video) => video.id),
+    result.items.map((work) => work.id),
     ['video_2'],
   )
+  assert.equal(result.items[0]?.mediaUrl, '/api/assets/asset_video_2/file')
 })
