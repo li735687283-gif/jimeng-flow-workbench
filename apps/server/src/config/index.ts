@@ -34,8 +34,13 @@ export function resolveOutputDir(outputDir: string): string {
 function mergeWithDefaults(raw: unknown): Settings {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS }
   const obj = raw as Record<string, unknown>
-  // 先保留未知字段，再用默认值重置已知字段，后续只写回通过校验的值。
-  const result: Settings = { ...obj, ...DEFAULT_SETTINGS }
+  const unknownFields: Record<string, unknown> = {}
+  for (const key of Object.keys(obj)) {
+    if (!(key in DEFAULT_SETTINGS)) {
+      unknownFields[key] = obj[key]
+    }
+  }
+  const result: Settings = { ...DEFAULT_SETTINGS, ...unknownFields }
 
   ;(Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).forEach((key) => {
     const value = obj[key as string]
