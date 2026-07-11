@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "include": [
     "src",
-    "test/localAccess.test.ts"
+    "test/localAccess.test.ts",
+    "test/appSecurity.test.ts"
   ]
 }
