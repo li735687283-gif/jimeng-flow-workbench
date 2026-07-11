@@ -1,9 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-  startImageGenerationFlow,
-  type ImageGenerationFlowCallbacks,
-} from '../src/utils/imageGenerationFlow'
+import { startImageGenerationFlow } from '../src/utils/imageGenerationFlow'
 import type {
   GenerationRequest,
   GenerationResponse,

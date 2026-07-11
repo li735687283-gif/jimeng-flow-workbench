@@ -235,12 +235,6 @@ function asString(v: unknown, fallback = '', field: string): string {
   throw new AgentError('PARSE_FAILED', `字段 ${field} 应为字符串，实际类型：${typeof v}`)
 }
 
-/** 安全读取数组字段 */
-function asStringArray(v: unknown, field: string): string[] {
-  if (!Array.isArray(v)) return []
-  return v.filter((x): x is string => typeof x === 'string')
-}
-
 /** 解析 suggestedParams */
 function parseSuggestedParams(v: unknown): AgentSuggestedParams {
   if (!v || typeof v !== 'object') return {}

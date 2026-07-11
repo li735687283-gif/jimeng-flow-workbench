@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 import { Position, type Node } from '@xyflow/react'
-import { getCardEdgePoint } from '../src/components/canvas/CutEdge.tsx'
+import { getCardEdgePoint } from '../src/components/canvas/cutEdgeGeometry'
 
 test('node handles stay vertically centered on the node card', () => {
   const wrapperSource = readFileSync(

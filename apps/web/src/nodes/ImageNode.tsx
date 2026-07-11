@@ -352,6 +352,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   }, [
     edges,
     id,
+    nodeData.assetId,
     nodeData.inputImageAssetIds,
     nodes,
     selectedModelId,

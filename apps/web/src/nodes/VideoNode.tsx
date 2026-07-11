@@ -200,7 +200,12 @@ export function VideoNode({ id, data, selected }: NodeProps) {
 
   useEffect(() => {
     const defaults = resolveVideoGenerationDefaults({
-      nodeData: rawNodeData,
+      nodeData: {
+        aspectRatio: rawNodeData.aspectRatio,
+        count: rawNodeData.count,
+        durationSeconds: rawNodeData.durationSeconds,
+        resolution: rawNodeData.resolution,
+      },
       remembered: rememberedDefaultsRef.current,
       modelOptions: [],
     })
@@ -225,7 +230,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   )
   useEffect(() => {
     const defaults = resolveVideoGenerationDefaults({
-      nodeData: rawNodeData,
+      nodeData: { model: rawNodeData.model },
       remembered: rememberedDefaultsRef.current,
       modelOptions: videoModelOptions,
     })
