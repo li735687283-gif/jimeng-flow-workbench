@@ -652,6 +652,61 @@ test('a superseded same-flow refresh failure resolves silently after newer succe
   }
 })
 
+test('a save waiting on a hung refresh follows the superseding refresh barrier', async () => {
+  const originalFetch = globalThis.fetch
+  const reloadARoute = observedRoute()
+  const updateARoute = observedRoute()
+  const runningA = createGenerationFlow('flow-a', 'Flow A running', 'running')
+  const completedA = createGenerationFlow(
+    'flow-a',
+    'Flow A completed',
+    'success',
+    'asset-completed-a',
+  )
+  resetStores()
+  setCurrentFlow('flow-a', 'Flow A running', runningA.nodes)
+  Object.assign(globalThis, {
+    fetch: installObservedFetch(
+      new Map([
+        ['GET /api/flows/flow-a', reloadARoute],
+        ['PUT /api/flows/flow-a', updateARoute],
+      ]),
+    ),
+  })
+
+  try {
+    void useFlowStore.getState().loadFlow('flow-a', { mode: 'refresh' })
+    const firstPreflushCall = await waitForCall(updateARoute, 0)
+    firstPreflushCall.response.resolve(runningA)
+    await waitForCall(reloadARoute, 0)
+
+    const waitingSave = useFlowStore.getState().saveCurrent()
+    const latestReload = useFlowStore
+      .getState()
+      .loadFlow('flow-a', { mode: 'refresh' })
+    const latestPreflushCall = await waitForCall(updateARoute, 1)
+    latestPreflushCall.response.resolve(runningA)
+    const latestReloadCall = await waitForCall(reloadARoute, 1)
+    latestReloadCall.response.resolve(completedA)
+    await latestReload
+
+    const resumedSaveCall = await waitForCall(updateARoute, 2)
+    assert.deepEqual(resumedSaveCall.body, {
+      nodes: JSON.parse(JSON.stringify(completedA.nodes)) as FlowNode[],
+      edges: completedA.edges,
+    })
+    resumedSaveCall.response.resolve(completedA)
+    await waitingSave
+
+    assert.equal(useFlowStore.getState().currentFlowId, 'flow-a')
+    assert.equal(useFlowStore.getState().saving, false)
+    assert.deepEqual(useCanvasStore.getState().nodes, completedA.nodes)
+  } finally {
+    Object.assign(globalThis, { fetch: originalFetch })
+    resetStores()
+  }
+})
+
 test('direct refresh preflushes and refetches edits made while GET is pending', async () => {
   const originalFetch = globalThis.fetch
   const updateARoute = observedRoute()

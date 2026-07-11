@@ -17,7 +17,6 @@ type RestoreAttempt = {
 
 type RestoreCoordinatorState = {
   activeAttempt: RestoreAttempt | null
-  inFlightByFlowId: Map<string, Promise<void>>
 }
 
 const restoreStateByRef = new WeakMap<
@@ -33,7 +32,6 @@ function getRestoreCoordinatorState(
 
   const created: RestoreCoordinatorState = {
     activeAttempt: null,
-    inFlightByFlowId: new Map(),
   }
   restoreStateByRef.set(activeFlowId, created)
   return created
@@ -65,21 +63,9 @@ export function startLastFlowRestore({
   state.activeAttempt = attempt
   activeFlowId.current = flowId
 
-  let inFlight = state.inFlightByFlowId.get(flowId)
-  if (!inFlight) {
-    const started = (async () => {
-      await loadFlow(flowId)
-    })()
-    inFlight = started
-    state.inFlightByFlowId.set(flowId, started)
-
-    const clearInFlight = () => {
-      if (state.inFlightByFlowId.get(flowId) === started) {
-        state.inFlightByFlowId.delete(flowId)
-      }
-    }
-    void started.then(clearInFlight, clearInFlight)
-  }
+  const inFlight = (async () => {
+    await loadFlow(flowId)
+  })()
 
   const isActiveAttempt = () => state.activeAttempt?.token === attempt.token
 

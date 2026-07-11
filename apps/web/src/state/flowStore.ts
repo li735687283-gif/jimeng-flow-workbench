@@ -17,6 +17,9 @@ interface SameFlowReload {
   flowId: string
   intentId: number
   promise: Promise<void>
+  barrier: Promise<void>
+  releaseBarrier: () => void
+  rejectBarrier: (error: unknown) => void
 }
 
 interface SaveCurrentOptions {
@@ -127,6 +130,7 @@ type StabilizeFlowResult =
   | { status: 'flow-changed' | 'cancelled' }
 
 function beginNavigationRequest(id: number): ActiveNavigationRequest {
+  activeNavigationRequest?.settle()
   let settle!: () => void
   const settled = new Promise<void>((resolve) => {
     settle = resolve
@@ -186,7 +190,7 @@ async function waitForSameFlowReload(
     ) {
       return
     }
-    await reload.promise
+    await reload.barrier
   }
 }
 
@@ -207,7 +211,7 @@ export const useFlowStore = create<FlowState>((set, get) => {
           ? { saving: true }
           : { saving: true, error: null },
       )
-      return reload.promise.then(() => saveCurrentInternal(options))
+      return reload.barrier.then(() => saveCurrentInternal(options))
     }
 
     const intentId = flowIntentId
@@ -295,6 +299,13 @@ export const useFlowStore = create<FlowState>((set, get) => {
         ? { loading: true, saving: false }
         : { loading: true, saving: false, error: null },
     )
+    let releaseBarrier!: () => void
+    let rejectBarrier!: (error: unknown) => void
+    const barrier = new Promise<void>((resolve, reject) => {
+      releaseBarrier = resolve
+      rejectBarrier = reject
+    })
+    void barrier.catch(() => undefined)
     let reload!: SameFlowReload
     const promise: Promise<void> = Promise.resolve().then(async () => {
       const isSuperseded = (): boolean =>
@@ -357,13 +368,23 @@ export const useFlowStore = create<FlowState>((set, get) => {
         throw err
       }
     })
-    reload = { flowId, intentId, promise }
+    reload = {
+      flowId,
+      intentId,
+      promise,
+      barrier,
+      releaseBarrier,
+      rejectBarrier,
+    }
+    activeSameFlowReload?.releaseBarrier()
     activeSameFlowReload = reload
     void promise.then(
       () => {
+        reload.releaseBarrier()
         if (activeSameFlowReload === reload) activeSameFlowReload = null
       },
-      () => {
+      (error) => {
+        reload.rejectBarrier(error)
         if (activeSameFlowReload === reload) activeSameFlowReload = null
       },
     )
@@ -892,6 +913,10 @@ export const useFlowStore = create<FlowState>((set, get) => {
     try {
       await flowsApi.deleteFlow(id)
       incrementFlowMutationEpoch(id)
+      if (activeSameFlowReload?.flowId === id) {
+        activeSameFlowReload.releaseBarrier()
+        activeSameFlowReload = null
+      }
       if (get().currentFlowId === id) {
         set({
           currentFlowId: null,

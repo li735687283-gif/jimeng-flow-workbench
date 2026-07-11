@@ -848,7 +848,6 @@ test('a deferred refresh waits through a superseding navigation that leaves the 
   const loadCRequest = flowRoute()
   const refreshARequest = flowRoute()
   const flowA = createFlow('flow-a', 'Flow A')
-  const flowB = createFlow('flow-b', 'Flow B')
   const flowC = createFlow('flow-c', 'Flow C')
   resetStores()
   setCurrentFlow('flow-a', 'Flow A', flowA)
@@ -864,7 +863,7 @@ test('a deferred refresh waits through a superseding navigation that leaves the 
   })
 
   try {
-    const loadB = useFlowStore.getState().loadFlow('flow-b')
+    void useFlowStore.getState().loadFlow('flow-b')
     await waitForRouteCall(updateARequest)
     updateARequest.response.resolve(flowA)
     await waitForRouteCall(loadBRequest)
@@ -883,15 +882,13 @@ test('a deferred refresh waits through a superseding navigation that leaves the 
 
     const loadC = useFlowStore.getState().loadFlow('flow-c')
     await waitForRouteCall(loadCRequest)
-    loadBRequest.response.resolve(flowB)
-    await loadB
-    await flushMicrotasks()
-    const refreshSettledAfterOlderNavigation = refreshSettled
-
     loadCRequest.response.resolve(flowC)
-    await Promise.all([loadC, refreshA])
+    await loadC
+    await flushMicrotasks()
+    const refreshSettledAfterLatestNavigation = refreshSettled
+    await refreshA
 
-    assert.equal(refreshSettledAfterOlderNavigation, false)
+    assert.equal(refreshSettledAfterLatestNavigation, true)
     assert.equal(refreshARequest.calls, 0)
     assert.equal(useFlowStore.getState().currentFlowId, 'flow-c')
     assert.deepEqual(useCanvasStore.getState().nodes, flowC.nodes)
@@ -913,7 +910,6 @@ test('a deferred refresh runs after a superseding navigation retains the flow', 
     'success',
     'asset-selected-a',
   )
-  const flowB = createFlow('flow-b', 'Flow B')
   resetStores()
   setCurrentFlow('flow-a', 'Flow A', flowA)
   Object.assign(globalThis, {
@@ -927,7 +923,7 @@ test('a deferred refresh runs after a superseding navigation retains the flow', 
   })
 
   try {
-    const loadB = useFlowStore.getState().loadFlow('flow-b')
+    void useFlowStore.getState().loadFlow('flow-b')
     await waitForRouteCall(updateARequest)
     updateARequest.response.resolve(flowA)
     await waitForRouteCall(loadBRequest)
@@ -946,20 +942,82 @@ test('a deferred refresh runs after a superseding navigation retains the flow', 
 
     const selectA = useFlowStore.getState().loadFlow('flow-a')
     await waitForRouteCall(loadARequest)
-    loadBRequest.response.resolve(flowB)
-    await loadB
-    await flushMicrotasks()
     const callsBeforeLatestNavigation = loadARequest.calls
-    const refreshSettledAfterOlderNavigation = refreshSettled
 
     loadARequest.response.resolve(selectedA)
-    await Promise.all([selectA, refreshA])
+    await selectA
+    for (let attempt = 0; attempt < 50 && loadARequest.calls < 2; attempt += 1) {
+      await Promise.resolve()
+    }
+    assert.equal(loadARequest.calls, 2)
+    await refreshA
+    const refreshSettledAfterLatestNavigation = refreshSettled
 
-    assert.equal(refreshSettledAfterOlderNavigation, false)
+    assert.equal(refreshSettledAfterLatestNavigation, true)
     assert.equal(callsBeforeLatestNavigation, 1)
     assert.equal(loadARequest.calls, 2)
     assert.equal(useFlowStore.getState().currentFlowId, 'flow-a')
     assert.deepEqual(useCanvasStore.getState().nodes, selectedA.nodes)
+  } finally {
+    Object.assign(globalThis, { fetch: originalFetch })
+    resetStores()
+  }
+})
+
+test('a deferred refresh escapes a hung superseded navigation when the latest navigation fails', async () => {
+  const originalFetch = globalThis.fetch
+  const updateARequest = flowRoute()
+  const loadBRequest = flowRoute()
+  const loadCRequest = flowRoute()
+  const refreshARequest = flowRoute()
+  const runningA = createGenerationFlow('flow-a', 'Flow A running', 'running')
+  const completedA = createGenerationFlow(
+    'flow-a',
+    'Flow A completed',
+    'success',
+    'asset-completed-a',
+  )
+  resetStores()
+  setCurrentFlow('flow-a', 'Flow A running', runningA)
+  Object.assign(globalThis, {
+    fetch: installDeferredFlowFetch(
+      new Map([
+        ['PUT /api/flows/flow-a', updateARequest],
+        ['GET /api/flows/flow-b', loadBRequest],
+        ['GET /api/flows/flow-c', loadCRequest],
+        ['GET /api/flows/flow-a', refreshARequest],
+      ]),
+    ),
+  })
+
+  try {
+    void useFlowStore.getState().loadFlow('flow-b')
+    await waitForRouteCall(updateARequest)
+    updateARequest.response.resolve(runningA)
+    await waitForRouteCall(loadBRequest)
+
+    const refreshA = useFlowStore
+      .getState()
+      .loadFlow('flow-a', { mode: 'refresh' })
+
+    const loadC = useFlowStore.getState().loadFlow('flow-c')
+    const loadCOutcome = loadC.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    await waitForRouteCall(loadCRequest)
+    const loadFailure = new Error('Flow C navigation failed')
+    loadCRequest.response.reject(loadFailure)
+    assert.equal(await loadCOutcome, loadFailure)
+
+    await waitForRouteCall(refreshARequest)
+    refreshARequest.response.resolve(completedA)
+    await refreshA
+
+    assert.equal(useFlowStore.getState().currentFlowId, 'flow-a')
+    assert.equal(useFlowStore.getState().currentFlowName, 'Flow A completed')
+    assert.equal(useFlowStore.getState().error, loadFailure.message)
+    assert.deepEqual(useCanvasStore.getState().nodes, completedA.nodes)
   } finally {
     Object.assign(globalThis, { fetch: originalFetch })
     resetStores()
