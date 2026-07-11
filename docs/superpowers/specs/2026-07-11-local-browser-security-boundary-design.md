@@ -14,6 +14,7 @@
 - 本批不修改当前正在编辑的前端页面和节点文件。
 - 不增加新的运行时依赖。
 - 安全判断必须在进入业务路由前完成，不能只依赖浏览器执行 CORS。
+- Vite 继续使用相对 `/api`，但代理目标要与 IPv4 回环监听使用同一个明确地址。
 
 ## 威胁模型
 
@@ -46,6 +47,7 @@
 该模块提供：
 
 ```ts
+export const LOCAL_SERVER_HOST = '127.0.0.1' as const
 export const LOCAL_BROWSER_ORIGINS: ReadonlySet<string>
 
 export interface LocalRequestMetadata {
@@ -80,13 +82,21 @@ export function installLocalAccessGuard(app: FastifyInstance): void
 
 ## 启动与请求流程
 
-`apps/server/src/index.ts` 的启动顺序调整为：
+后端应用的启动顺序调整为：
 
 1. 创建 Fastify 实例。
 2. 安装本机访问守卫。
 3. 注册 CORS，Origin 判定复用同一白名单。
 4. 注册 multipart 和业务路由。
 5. 监听 `127.0.0.1:8787`。
+
+`apps/web/vite.config.ts` 的 `/api` 代理目标同步从
+`http://localhost:8787` 改为 `http://127.0.0.1:8787`。当前 Windows
+环境中 Node 优先把 `localhost` 解析为 `::1`；如果后端只监听 IPv4
+回环而代理继续使用 `localhost`，开发页面可能因 IPv6 连接被拒绝而失效。
+同时设置 `strictPort: true`，使 5174 被占用时显式失败，避免 Vite 静默
+切换到未被 Origin 白名单允许的 5175。这些调整不改变浏览器端相对 URL、
+既定端口或 API 协议。
 
 数据流：
 
@@ -116,6 +126,12 @@ export function installLocalAccessGuard(app: FastifyInstance): void
 4. 拒绝未知 Origin。
 5. 即使 Origin 合法，也拒绝 `Sec-Fetch-Site: cross-site`。
 6. 拒绝请求时业务处理函数不执行。
+7. cross-site 或未知 Origin 的 OPTIONS 请求必须由守卫返回 403，不能被 CORS 预检提前短路为 204。
+
+新增应用组合测试，验证合法 Origin 的 CORS 响应、预检请求、未知 Origin
+拒绝以及无 Origin 本机客户端。另新增 Vite 配置测试，锁定 `/api` 代理使用
+`127.0.0.1:8787` 且开发端口严格固定为 5174，避免代理、监听地址和 Origin
+白名单再次漂移。
 
 测试采用红绿重构流程：先让测试因模块不存在或守卫缺失而失败，再实现最小代码使其通过。
 
@@ -123,6 +139,8 @@ export function installLocalAccessGuard(app: FastifyInstance): void
 
 - 后端只监听 `127.0.0.1`。
 - 当前 Vite 页面可以继续通过 `/api` 调用后端。
+- Vite 代理不依赖 `localhost` 的 IPv4/IPv6 解析顺序。
+- Vite 不会静默切换到 Origin 白名单以外的端口。
 - 未知网页 Origin 无法进入任何业务路由。
 - 本机无 Origin 测试和健康检查不受影响。
 - 新增安全测试全部通过。
@@ -137,4 +155,3 @@ export function installLocalAccessGuard(app: FastifyInstance): void
 2. CLI 可执行文件与输出目录从 HTTP 设置中剥离。
 3. Codex 隔离工作目录和最小沙箱权限。
 4. Provider URL、远程下载和本地输入路径策略统一化。
-
