@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "test/localAccess.test.ts"
+  ]
+}
