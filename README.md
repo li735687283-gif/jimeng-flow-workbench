@@ -36,8 +36,8 @@ npm run dev
 | `npm run typecheck` | 检查全部 workspace 的 TypeScript |
 | `npm run typecheck:server` | 只检查 Server TypeScript |
 | `npm run typecheck:web` | 只检查 Web TypeScript |
-| `npm run lint` | 使用 Oxlint 检查 `apps/` 与 `packages/` |
-| `npm test` | 依次运行全部 Server 与 Web 测试 |
+| `npm run lint` | 使用 Oxlint 检查 `apps/`、`packages/` 与 `scripts/` |
+| `npm test` | 先验证跨平台测试发现 runner，再依次运行全部 Server 与 Web 测试 |
 | `npm run test:server` | 只运行 Server 测试 |
 | `npm run test:web` | 只运行 Web 测试 |
 | `npm run check` | 依次运行类型检查、lint、测试和构建 |

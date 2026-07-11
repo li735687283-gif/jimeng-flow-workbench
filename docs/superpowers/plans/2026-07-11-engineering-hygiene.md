@@ -4,7 +4,7 @@
 
 **Goal:** 明确 npm 为唯一包管理器，为 monorepo 建立可发现的根级开发、构建、类型检查、lint 和全仓测试入口，并把根 README 设为当前运行事实的唯一文档入口。
 
-**Architecture:** 根 `package.json` 负责跨 workspace 编排和工具版本契约，各 workspace 只负责自己的类型检查；Node test runner 必须从仓库根启动，因为现有测试以仓库根为相对路径基准。根 `README.md` 记录当前命令、端口和本机安全边界，旧 PRD、M0 spec、路线图和实施计划只保留为带状态标识的历史快照。
+**Architecture:** 根 `package.json` 负责跨 workspace 编排和工具版本契约，各 workspace 只负责自己的类型检查；跨平台 Node runner 从仓库根递归枚举测试并把排序后的绝对路径显式交给 Node test runner，因为现有测试以仓库根为相对路径基准。根 `README.md` 记录当前命令、端口和本机安全边界，旧 PRD、M0 spec、路线图和实施计划只保留为带状态标识的历史快照。
 
 **Tech Stack:** npm workspaces、Node.js test runner、tsx、TypeScript 5.7/6.0、Oxlint、Vite 8、Markdown
 
@@ -25,6 +25,8 @@
 **Files:**
 
 - Modify: `package.json`
+- Create: `scripts/run-tests.mjs`
+- Create: `scripts/run-tests.test.mjs`
 - Modify: `package-lock.json`
 - Modify: `apps/server/package.json`
 - Modify: `apps/web/package.json`
@@ -35,7 +37,8 @@
 
 - Produces: 根命令 `npm run dev|build|typecheck|lint|test|test:server|test:web|check`
 - Produces: workspace 命令 `npm run typecheck --workspace <workspace>`
-- Consumes: Node test runner 对 quoted glob 的支持，最低 Node 版本由根 `engines` 保证
+- Produces: `scripts/run-tests.mjs` 支持 `server` / `web` scope，递归发现并排序 `*.test.ts` / `*.test.tsx`，未知 scope 或空集合明确失败
+- Consumes: Node 20.19 已支持的 `fs`、`child_process.spawn`、`node:test` 和 `--import` 能力；不依赖 Node test runner 的 quoted-glob 展开能力
 
 - [ ] **Step 1: 写入根包管理器、版本和脚本契约**
 
@@ -61,10 +64,10 @@
     "dev": "concurrently -n web,server -c green,blue \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "npm --workspace apps/web run dev",
     "dev:server": "npm --workspace apps/server run dev",
-    "lint": "oxlint apps packages",
-    "test": "npm run test:server && npm run test:web",
-    "test:server": "node --import tsx --test \"apps/server/test/*.test.ts\"",
-    "test:web": "node --import tsx --test \"apps/web/test/*.test.ts\" \"apps/web/test/*.test.tsx\"",
+    "lint": "oxlint apps packages scripts",
+    "test": "node --test scripts/run-tests.test.mjs && npm run test:server && npm run test:web",
+    "test:server": "node scripts/run-tests.mjs server",
+    "test:web": "node scripts/run-tests.mjs web",
     "typecheck": "npm run typecheck --workspaces",
     "typecheck:server": "npm run typecheck --workspace apps/server",
     "typecheck:web": "npm run typecheck --workspace apps/web"
@@ -77,7 +80,7 @@
 }
 ```
 
-根脚本直接运行测试，不能下沉到 workspace：部分测试读取 `apps/...` 根相对路径，npm workspace 会改变进程 cwd。
+根脚本不能依赖 quoted glob：Node 20.19 不会替 npm 脚本展开这些参数。`scripts/run-tests.mjs` 必须从仓库根递归枚举并排序测试文件，把显式绝对路径传给 `process.execPath --import tsx --test`，保持仓库根 cwd 并原样传播子进程退出码；测试不能下沉到 workspace，因为部分测试读取 `apps/...` 根相对路径。
 
 - [ ] **Step 2: 为三个 workspace 增加明确的依赖和类型检查入口**
 
@@ -123,7 +126,7 @@
 "rootDir": "./src"
 ```
 
-该字段消除 package self-subpath export 导致的 `TS2209` 根目录歧义，不改变当前源码导出方式或生成产物。
+该字段消除 package self-subpath export 导致的 `TS2209` 根目录歧义；不改变当前源码和运行时导出；未来启用 emit 时 dist 布局从 `dist/src/*` 变为 `dist/*`。
 
 - [ ] **Step 3: 用指定 npm 更新锁文件**
 
@@ -144,10 +147,11 @@ Run:
 npm run typecheck:server
 npm run typecheck --workspace packages/shared
 npm run lint
+node --test scripts/run-tests.test.mjs
 npm run test:server
 ```
 
-Expected: 四条命令退出 0；Server 测试为 78/78。Lint 可以报告当前 warning，但不得出现 error 或非零退出。
+Expected: 五条命令退出 0；runner 单测通过，Server 测试为 78/78。Lint 可以报告当前 warning，但不得出现 error 或非零退出。
 
 - [ ] **Step 5: 验证全仓入口没有掩盖既有失败**
 
@@ -161,7 +165,7 @@ npm test
 npm run check
 ```
 
-Expected: 命令保持真实非零退出。`test:web` 必须发现全部 161 项 Web 测试并报告既有 12 项失败；`npm test` 必须先通过 Server 78 项，再进入 Web 测试并报告同一失败集合。`typecheck:web` 必须报告当前 Web 源码错误，不能因配置或脚本范围变窄而退出 0。
+Expected: 命令保持真实非零退出。`test:web` 必须发现全部 161 项 Web 测试并报告既有 12 项失败；`npm test` 必须先通过 runner 单测和 Server 78 项，再进入 Web 测试并报告同一失败集合。`typecheck:web` 必须报告当前 Web 源码错误，不能因配置或脚本范围变窄而退出 0。
 
 - [ ] **Step 6: 验证干净安装可复现且不改锁文件**
 
@@ -183,13 +187,13 @@ Expected: `npm ci` 退出 0；安装前后的 `package-lock.json` SHA-256 完全
 Run:
 
 ```powershell
-git add package.json package-lock.json apps/server/package.json apps/web/package.json packages/shared/package.json packages/shared/tsconfig.json
+git add package.json scripts/run-tests.mjs scripts/run-tests.test.mjs package-lock.json apps/server/package.json apps/web/package.json packages/shared/package.json packages/shared/tsconfig.json
 git diff --cached --check
 git diff --cached --name-only
 git commit -m "chore: standardize npm engineering scripts"
 ```
 
-Expected: 缓存只包含上述 6 个文件。
+Expected: 缓存只包含上述 8 个文件。
 
 ---
 
@@ -367,9 +371,10 @@ Expected: 缓存只包含上述 10 个文件。
 - [ ] `npm ci` 退出 0，且安装后 manifest/lockfile 无新增漂移。
 - [ ] `npm run lint` 退出 0；现有 warning 如实显示。
 - [ ] `npm run typecheck:server` 与 shared typecheck 退出 0。
+- [ ] `node --test scripts/run-tests.test.mjs` 退出 0，且验证 package scripts、递归过滤、排序、未知 scope 和空集合失败。
 - [ ] `npm run test:server` 为 78/78。
 - [ ] `npm run test:web` 与 `npm run typecheck:web` 仍以已记录的既有前端问题非零退出，失败范围没有增加。
-- [ ] `npm test` 确实覆盖 Server 与 Web，而不是只跑绿色子集。
+- [ ] `npm test` 先运行 runner 单测，再覆盖 Server 与 Web，而不是只跑绿色子集。
 - [ ] `README.md` 中的 npm 命令、端口、目录和安全说明都能在 manifest/代码中找到对应事实。
 - [ ] `git diff --check` 无输出；实现工作树干净。
 - [ ] 与 `f344d0e` 比较，改动不包含 6 个用户前端文件。
