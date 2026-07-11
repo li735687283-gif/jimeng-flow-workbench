@@ -29,3 +29,4 @@ yarn-error.log*
 # 临时文件
 .cache/
 .tmp/
+.worktrees/
