@@ -1,5 +1,7 @@
 # Tasks
 
+> 历史 M0 任务快照；当前运行方式和端口见根 README。
+
 - [x] Task 1: 搭建项目骨架
   - [x] SubTask 1.1: 创建 monorepo 结构（apps/web 前端 + apps/server 后端 + 共享 types 包）
   - [x] SubTask 1.2: 初始化前端（Vite + React + TypeScript + React Flow + Zustand + TanStack Query + lucide-react）

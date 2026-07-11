@@ -1,5 +1,7 @@
 # 本机浏览器安全边界 Implementation Plan
 
+> 已完成的历史实施计划；其中 RED/GREEN 基线和命令输出只描述当时状态，当前命令见根 README。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把 Fastify 后端限制为只监听本机回环地址，并在业务路由执行前拒绝未知网页 Origin 和 cross-site 浏览器请求，同时保持当前 Vite `/api` 调用、本机无 Origin 工具和健康检查可用。

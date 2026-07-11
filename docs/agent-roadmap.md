@@ -1,5 +1,7 @@
 # 即梦 Flow 画布 Agent 功能升级路线图
 
+> 历史规划快照（2026-07-05），不作为当前能力清单。
+
 > 基于竞品调研（即梦AI、Dify、n8n、Flowise、Langflow、ChatGPT Canvas）整理，结合项目现有技术栈制定。
 
 ---

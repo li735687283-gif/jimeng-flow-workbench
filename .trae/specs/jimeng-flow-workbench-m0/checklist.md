@@ -1,5 +1,7 @@
 # M0 验收检查清单
 
+> 历史 M0 验收快照；当前运行方式和端口见根 README。
+
 ## 项目骨架
 - [x] 前端可访问 http://localhost:5173
 - [x] 后端监听 http://localhost:8787
