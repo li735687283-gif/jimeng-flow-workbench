@@ -15,7 +15,7 @@
 - [ ] 不升级现有业务依赖，不运行 `npm audit fix`，不新增 CI、发布或部署能力。
 - [ ] 不修改用户当前尚未提交的 6 个前端文件：`apps/web/src/App.css`、`apps/web/src/components/VideoPlayerModal.tsx`、`apps/web/src/nodes/ImageNode.tsx`、`apps/web/src/nodes/VideoNode.tsx`、`apps/web/src/nodes/registry.ts`、`apps/web/src/state/flowStore.ts`。
 - [ ] 不删除、跳过、重命名或收窄现有测试来制造绿色；根测试入口必须覆盖 `apps/server/test` 和 `apps/web/test` 的全部 73 个 `*.test.ts` / `*.test.tsx` 文件。
-- [ ] 当前基线必须如实保留：Server 78/78 通过；全仓 239 项中 227 通过、12 个前端测试失败；Web 类型检查存在既有错误。脚本正确性的标准是执行正确范围并保留真实退出码，不是掩盖既有前端债务。
+- [ ] 当前基线必须如实保留：Server 78/78 通过；全仓共有 239 项业务测试，另有 1 项 runner 单测；Web 161 项中 149 通过、12 个前端测试失败；Web 类型检查存在既有错误。脚本正确性的标准是执行正确范围并保留真实退出码，不是掩盖既有前端债务。
 - [ ] 不把历史 RED/GREEN 命令结果改写成当前 runbook；根 `README.md` 是当前运行入口，旧文档只增加明确的历史状态和指针。
 
 ---
@@ -260,8 +260,8 @@ npm run dev
 | `npm run typecheck` | 检查全部 workspace 的 TypeScript |
 | `npm run typecheck:server` | 只检查 Server TypeScript |
 | `npm run typecheck:web` | 只检查 Web TypeScript |
-| `npm run lint` | 使用 Oxlint 检查 `apps/` 与 `packages/` |
-| `npm test` | 依次运行全部 Server 与 Web 测试 |
+| `npm run lint` | 使用 Oxlint 检查 `apps/`、`packages/` 与 `scripts/` |
+| `npm test` | 先验证跨平台测试发现 runner，再依次运行全部 Server 与 Web 测试 |
 | `npm run test:server` | 只运行 Server 测试 |
 | `npm run test:web` | 只运行 Web 测试 |
 | `npm run check` | 依次运行类型检查、lint、测试和构建 |
