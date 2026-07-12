@@ -45,7 +45,7 @@
   overflow-y: auto;
   background-color: #111111;
   color: var(--text);
-  cursor: url('/cursor.png') 0 0, auto;
+  cursor: url('/cursor-white.png') 0 0, auto;
 }
 
 .home-particle-field {
