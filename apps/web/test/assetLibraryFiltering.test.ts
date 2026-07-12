@@ -17,6 +17,7 @@ const assets: Asset[] = [
     path: 'workspace/outputs/generated.png',
     prompt: 'Neon forest',
     provider: 'codex',
+    params: { flowId: 'flow_current' },
     createdAt: '2026-07-07T10:00:00.000Z',
   },
   {
@@ -25,6 +26,7 @@ const assets: Asset[] = [
     path: 'workspace/outputs/generated.mp4',
     prompt: 'Forest camera move',
     provider: 'dreamina',
+    params: { flowId: 'flow_other' },
     createdAt: '2026-07-07T11:00:00.000Z',
   },
 ]
@@ -46,7 +48,32 @@ test('history mode keeps all generated image and video assets', () => {
       filter: '全部',
       query: '',
       mode: 'history',
+      projectId: 'flow_current',
     }).map((asset) => asset.id),
-    ['asset_generated_image', 'asset_generated_video'],
+    ['asset_generated_image'],
+  )
+})
+
+test('history mode can include legacy generated assets referenced by this project', () => {
+  assert.deepEqual(
+    filterAssetLibraryAssets(
+      [
+        {
+          id: 'legacy_generated',
+          type: 'image',
+          path: 'workspace/outputs/legacy.png',
+          provider: 'codex',
+          createdAt: '2026-07-07T10:00:00.000Z',
+        },
+      ],
+      {
+        filter: '全部',
+        query: '',
+        mode: 'history',
+        projectId: 'flow_current',
+        projectAssetIds: new Set(['legacy_generated']),
+      },
+    ).map((asset) => asset.id),
+    ['legacy_generated'],
   )
 })

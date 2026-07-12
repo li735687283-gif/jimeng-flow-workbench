@@ -15,12 +15,23 @@ export function filterAssetLibraryAssets(
     filter: AssetFilter
     query: string
     mode: AssetLibraryMode
+    projectId?: string | null
+    projectAssetIds?: ReadonlySet<string>
   },
 ): Asset[] {
   const query = options.query.trim().toLocaleLowerCase()
+  const projectId = options.projectId?.trim()
 
   return assets.filter((asset) => {
-    if (options.mode === 'history' && !asset.provider?.trim()) return false
+    if (options.mode === 'history') {
+      if (!asset.provider?.trim()) return false
+      const assetProjectId =
+        typeof asset.params?.flowId === 'string' ? asset.params.flowId.trim() : ''
+      const belongsToProject =
+        Boolean(projectId && assetProjectId === projectId) ||
+        Boolean(options.projectAssetIds?.has(asset.id))
+      if (!belongsToProject) return false
+    }
     if (options.filter === '图片' && asset.type !== 'image') return false
     if (options.filter === '视频' && asset.type !== 'video') return false
     if (!query) return true

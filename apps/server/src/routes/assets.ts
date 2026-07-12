@@ -108,6 +108,7 @@ async function saveUpscaleResult(
   result: GenerationResult,
   sourceAssetId: string,
   resolutionType: string,
+  flowId?: string,
 ) {
   if (result.localPath) {
     const ext = extname(result.localPath) || '.png'
@@ -119,6 +120,7 @@ async function saveUpscaleResult(
       inputAssetIds: [sourceAssetId],
       provider: 'dreamina',
       params: {
+        flowId: flowId ?? null,
         operation: 'image_upscale',
         resolutionType,
         localPath: result.localPath,
@@ -138,6 +140,7 @@ async function saveUpscaleResult(
     inputAssetIds: [sourceAssetId],
     provider: 'dreamina',
     params: {
+      flowId: flowId ?? null,
       operation: 'image_upscale',
       resolutionType,
       remoteUrl,
@@ -407,7 +410,14 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           message: 'dreamina 未返回高清结果',
         })
       }
-      const asset = await saveUpscaleResult(first, req.params.assetId, resolutionType)
+      const sourceFlowId =
+        typeof sourceAsset.params?.flowId === 'string' ? sourceAsset.params.flowId : undefined
+      const asset = await saveUpscaleResult(
+        first,
+        req.params.assetId,
+        resolutionType,
+        sourceFlowId,
+      )
       return reply.code(201).send(asset)
     } catch (err) {
       app.log.error({ err }, '[assets/upscale] 调用失败')

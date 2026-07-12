@@ -137,6 +137,7 @@ test('generation history shows generated image and video assets only', async () 
           path: 'workspace/outputs/generated.png',
           prompt: 'generated still',
           provider: 'codex',
+          params: { flowId: 'flow_current' },
           createdAt: '2026-07-07T10:00:00.000Z',
         },
         {
@@ -145,14 +146,16 @@ test('generation history shows generated image and video assets only', async () 
           path: 'workspace/outputs/generated.mp4',
           prompt: 'generated motion',
           provider: 'dreamina',
+          params: { flowId: 'flow_current' },
           createdAt: '2026-07-07T11:00:00.000Z',
         },
       ]}
+      projectId="flow_current"
     />,
   )
 
   assert.equal(html.includes('历史记录'), true)
-  assert.equal(html.includes('aria-label="搜索历史记录"'), true)
+  assert.equal(html.includes('搜索历史记录'), false)
   assert.equal(html.includes('/api/assets/asset_generated_image/file'), true)
   assert.equal(html.includes('/api/assets/asset_generated_video/file'), true)
   assert.equal(html.includes('/api/assets/asset_imported/file'), false)

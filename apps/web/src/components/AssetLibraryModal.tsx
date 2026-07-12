@@ -17,6 +17,8 @@ interface AssetLibraryModalProps {
   initialAssets?: Asset[]
   initialFilter?: AssetFilter
   mode?: AssetLibraryMode
+  projectId?: string | null
+  projectAssetIds?: ReadonlySet<string>
 }
 
 export function AssetLibraryModal({
@@ -26,6 +28,8 @@ export function AssetLibraryModal({
   initialAssets,
   initialFilter = '全部',
   mode = 'library',
+  projectId,
+  projectAssetIds,
 }: AssetLibraryModalProps) {
   const [assets, setAssets] = useState<Asset[]>(initialAssets ?? [])
   const [activeFilter, setActiveFilter] = useState<AssetFilter>(initialFilter)
@@ -58,11 +62,12 @@ export function AssetLibraryModal({
 
   const isHistory = mode === 'history'
   const title = isHistory ? '历史记录' : '素材库'
-  const searchLabel = isHistory ? '搜索历史记录' : '搜索素材'
   const filteredAssets = filterAssetLibraryAssets(assets, {
     filter: activeFilter,
     query,
     mode,
+    projectId,
+    projectAssetIds,
   })
 
   return (
@@ -81,16 +86,18 @@ export function AssetLibraryModal({
         </header>
 
         <div className="asset-library-filterbar">
-          <label className="asset-library-search">
-            <Search size={17} strokeWidth={1.8} aria-hidden="true" />
-            <input
-              type="search"
-              value={query}
-              placeholder={searchLabel}
-              aria-label={searchLabel}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
+          {!isHistory && (
+            <label className="asset-library-search">
+              <Search size={17} strokeWidth={1.8} aria-hidden="true" />
+              <input
+                type="search"
+                value={query}
+                placeholder="搜索素材"
+                aria-label="搜索素材"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+          )}
           <div className="asset-filter-tabs" aria-label="素材类型">
             {ASSET_LIBRARY_FILTERS.map((filter) => (
               <button

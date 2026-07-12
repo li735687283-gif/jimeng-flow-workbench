@@ -60,6 +60,32 @@ function setLastFlowId(id: string | null) {
   }
 }
 
+function collectProjectAssetIds(
+  nodes: ReadonlyArray<{ data?: unknown }>,
+): Set<string> {
+  const assetIds = new Set<string>()
+  const assetKeys = new Set(['assetId', 'assetIds', 'outputAssetIds', 'generationRuns'])
+
+  const visit = (value: unknown, key?: string): void => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, key))
+      return
+    }
+    if (!value || typeof value !== 'object') {
+      if (assetKeys.has(key ?? '') && typeof value === 'string' && value.startsWith('asset_')) {
+        assetIds.add(value)
+      }
+      return
+    }
+    Object.entries(value).forEach(([childKey, childValue]) => {
+      visit(childValue, childKey)
+    })
+  }
+
+  nodes.forEach((node) => visit(node.data))
+  return assetIds
+}
+
 function resolveHomeMokHeroImage(path: string | undefined): string {
   const trimmed = path?.trim()
   return trimmed || defaultMokHeroUrl
@@ -124,6 +150,7 @@ function AppInner() {
   const centeredFlowIdRef = useRef<string | null>(null)
   const restoringFlowIdRef = useRef<string | null>(null)
   const lastSavedFlowIdRef = useRef<string | null>(currentFlowId)
+  const projectAssetIds = collectProjectAssetIds(nodes)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
   // 恢复上次画布期间先禁用，避免与恢复逻辑冲突。
@@ -457,6 +484,8 @@ function AppInner() {
       <AssetLibraryModal
         open={generationHistoryOpen}
         mode="history"
+        projectId={currentFlowId}
+        projectAssetIds={projectAssetIds}
         onClose={() => setGenerationHistoryOpen(false)}
         onSelectAsset={view === 'canvas' ? handleSelectAsset : undefined}
       />

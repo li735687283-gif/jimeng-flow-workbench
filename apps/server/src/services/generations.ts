@@ -620,6 +620,7 @@ async function saveImageGenerationResult(
       inputAssetIds: req.inputImages,
       provider,
       params: {
+        flowId: req.flowId ?? null,
         model: req.model,
         width: req.width,
         height: req.height,
@@ -647,6 +648,7 @@ async function saveImageGenerationResult(
       inputAssetIds: req.inputImages,
       provider,
       params: {
+        flowId: req.flowId ?? null,
         model: req.model,
         width: req.width,
         height: req.height,
@@ -677,6 +679,7 @@ async function saveImageGenerationResult(
     inputAssetIds: req.inputImages,
     provider,
     params: {
+      flowId: req.flowId ?? null,
       model: req.model,
       width: req.width,
       height: req.height,
@@ -783,6 +786,7 @@ async function saveVideoGenerationResult(
       inputAssetIds: req.inputImages,
       provider,
       params: {
+        flowId: req.flowId,
         model: req.model,
         mode: req.mode,
         aspectRatio: req.aspectRatio,
@@ -816,6 +820,7 @@ async function saveVideoGenerationResult(
     inputAssetIds: req.inputImages,
     provider,
     params: {
+      flowId: req.flowId,
       model: req.model,
       mode: req.mode,
       aspectRatio: req.aspectRatio,
