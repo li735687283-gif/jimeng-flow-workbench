@@ -7,7 +7,7 @@
 // - data 字段：title, status, assetId?, assetPath?, asReference?
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent } from 'react'
+import type { CSSProperties, PointerEvent, SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { NodeProps } from '@xyflow/react'
 import {
@@ -69,6 +69,7 @@ import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
+import { getImageDimensionsToPersist } from '../utils/imageDimensions'
 import {
   chooseFloatingMenuDirection,
   type FloatingMenuDirection,
@@ -395,6 +396,23 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     : (nodeData as unknown as { outputAssetIds?: string[] }).outputAssetIds?.[0]
       ? getAssetFileUrl((nodeData as unknown as { outputAssetIds: string[] }).outputAssetIds[0])
       : nodeData.localPreviewUrl
+  const handleImageLoad = useCallback(
+    (event: SyntheticEvent<HTMLImageElement>) => {
+      const latestNode = useCanvasStore
+        .getState()
+        .nodes.find((node) => node.id === id)
+      if (!latestNode) return
+
+      const dimensions = getImageDimensionsToPersist(
+        event.currentTarget,
+        latestNode.data as ImageNodeData,
+      )
+      if (dimensions) {
+        updateNodeData(id, dimensions as unknown as Partial<BaseNodeData>)
+      }
+    },
+    [id, updateNodeData],
+  )
   const hasImage = !!imageSrc && !imgError
   const generationProgress = getImageGenerationProgressState(
     nodeData.status,
@@ -1252,6 +1270,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             <img
               src={imageSrc}
               alt={nodeData.title}
+              onLoad={handleImageLoad}
               onError={() => setImgError(true)}
               style={MEDIA_IMG_STYLE}
               draggable={false}
