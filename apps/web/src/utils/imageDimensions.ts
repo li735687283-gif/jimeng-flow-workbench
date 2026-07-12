@@ -14,6 +14,13 @@ export interface ImageDimensions {
   height: number
 }
 
+export function getImageFrameSize(
+  savedSize: ImageDimensions | null,
+  selectedSize: ImageDimensions,
+): ImageDimensions {
+  return savedSize ?? selectedSize
+}
+
 export function getImageDimensionsToPersist(
   image: LoadedImage,
   current: ImageNodeDimensionState,

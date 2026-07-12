@@ -69,7 +69,10 @@ import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
-import { getImageDimensionsToPersist } from '../utils/imageDimensions'
+import {
+  getImageDimensionsToPersist,
+  getImageFrameSize,
+} from '../utils/imageDimensions'
 import {
   chooseFloatingMenuDirection,
   type FloatingMenuDirection,
@@ -531,7 +534,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     typeof nodeData.width === 'number' && typeof nodeData.height === 'number'
       ? { width: nodeData.width, height: nodeData.height }
       : null
-  const frameSize = editorMounted || !savedSize ? selectedSize : savedSize
+  const frameSize = getImageFrameSize(savedSize, selectedSize)
   const frameStyle = getDisplayFrameStyle(frameSize)
   const mediaDisplayStyle = {
     ...MEDIA_DISPLAY_STYLE,
