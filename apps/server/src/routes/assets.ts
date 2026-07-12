@@ -16,6 +16,10 @@ import { basename, extname, resolve } from 'node:path'
 import type { GenerationResult } from '@jimeng-flow/shared/generateNode'
 import { getProjectRoot } from '../config'
 import { saveUploadFile, getAsset, listAssets, getAssetFilePath } from '../services/assets'
+import {
+  createAssetContentHash,
+  findDuplicateImportedImage,
+} from '../services/assetDedup'
 import { JimengError, upscaleImage } from '../services/jimeng'
 
 interface UploadBody {
@@ -48,6 +52,20 @@ const MIME_BY_EXT: Record<string, string> = {
 
 function mimeForFile(absPath: string, fallback: string): string {
   return MIME_BY_EXT[extname(absPath).toLowerCase()] ?? fallback
+}
+
+function isImageUpload(fileName: string, mimeType: string): boolean {
+  return (
+    mimeType.toLowerCase().startsWith('image/') ||
+    MIME_BY_EXT[extname(fileName).toLowerCase()]?.startsWith('image/') === true
+  )
+}
+
+async function findDuplicateUpload(fileBuffer: Buffer, fileName: string, mimeType: string) {
+  if (!isImageUpload(fileName, mimeType)) return null
+  const contentHash = createAssetContentHash(fileBuffer)
+  const duplicate = findDuplicateImportedImage(await listAssets(), contentHash)
+  return { duplicate, contentHash }
 }
 
 function errorPayload(err: unknown) {
@@ -158,10 +176,18 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       data.mimetype ||
       (MIME_BY_EXT[extname(fileName).toLowerCase()] ?? 'application/octet-stream')
 
+    const duplicateUpload = await findDuplicateUpload(fileBuffer, fileName, effectiveMime)
+    if (duplicateUpload?.duplicate) {
+      return reply.code(200).send(duplicateUpload.duplicate)
+    }
+
     const asset = await saveUploadFile({
       fileBuffer,
       originalName: fileName,
       mimeType: effectiveMime,
+      params: duplicateUpload
+        ? { origin: 'upload', contentHash: duplicateUpload.contentHash }
+        : undefined,
     })
     return reply.code(201).send(asset)
   })
@@ -227,6 +253,13 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           ? mimeType
           : MIME_BY_EXT[extname(fileName).toLowerCase()] ?? 'application/octet-stream'
 
+      const duplicateUpload = body.provider
+        ? null
+        : await findDuplicateUpload(fileBuffer, fileName, effectiveMime)
+      if (duplicateUpload?.duplicate) {
+        return reply.code(200).send(duplicateUpload.duplicate)
+      }
+
       const asset = await saveUploadFile({
         fileBuffer,
         originalName: fileName,
@@ -235,7 +268,13 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         sourceNodeId: body.sourceNodeId,
         inputAssetIds: body.inputAssetIds,
         provider: body.provider,
-        params: body.params,
+        params: duplicateUpload
+          ? {
+              ...body.params,
+              origin: 'upload',
+              contentHash: duplicateUpload.contentHash,
+            }
+          : body.params,
       })
       return reply.code(201).send(asset)
     },

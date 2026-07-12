@@ -95,8 +95,9 @@ function AppInner() {
   const [restoringView, setRestoringView] = useState(() => getLastView() === 'canvas')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [openModalOpen, setOpenModalOpen] = useState(false)
-  const [agentOpen, setAgentOpen] = useState(true)
+  const [agentOpen, setAgentOpen] = useState(false)
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
+  const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false)
   const [videoAdminOpen, setVideoAdminOpen] = useState(false)
   const [videoPlayer, setVideoPlayer] = useState<{ src: string; title?: string } | null>(null)
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
@@ -150,6 +151,7 @@ function AppInner() {
 
   useEffect(() => {
     setLastView(view)
+    if (view !== 'canvas') setAgentOpen(false)
   }, [view])
 
   useEffect(() => {
@@ -345,6 +347,7 @@ function AppInner() {
 
         setSelectedNode(sourceNodeId)
         setAssetLibraryOpen(false)
+        setGenerationHistoryOpen(false)
         void fitView({
           nodes: [{ id: sourceNodeId }],
           padding: 0.45,
@@ -358,6 +361,7 @@ function AppInner() {
       const patch = buildAssetInsertPatch(asset)
       if (nodeId && patch) updateNodeData(nodeId, patch)
       setAssetLibraryOpen(false)
+      setGenerationHistoryOpen(false)
       if (nodeId) {
         void fitView({
           nodes: [{ id: nodeId }],
@@ -416,7 +420,7 @@ function AppInner() {
           <CanvasBottomToolbar
             onAddNode={() => handleSelectFromLibrary('text')}
             onOpenAssetLibrary={() => setAssetLibraryOpen(true)}
-            onOpenHistory={() => setOpenModalOpen(true)}
+            onOpenHistory={() => setGenerationHistoryOpen(true)}
             onLocateNodes={handleLocateNodes}
             onOpenSettings={() => setSettingsOpen(true)}
           />
@@ -447,6 +451,13 @@ function AppInner() {
       <AssetLibraryModal
         open={assetLibraryOpen}
         onClose={() => setAssetLibraryOpen(false)}
+        onSelectAsset={view === 'canvas' ? handleSelectAsset : undefined}
+      />
+
+      <AssetLibraryModal
+        open={generationHistoryOpen}
+        mode="history"
+        onClose={() => setGenerationHistoryOpen(false)}
         onSelectAsset={view === 'canvas' ? handleSelectAsset : undefined}
       />
 
