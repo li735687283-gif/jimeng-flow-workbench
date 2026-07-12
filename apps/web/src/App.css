@@ -931,16 +931,16 @@
   position: relative;
   background: var(--bg-base);
   min-width: 0;
-  cursor: url('/cursor.png') 0 0, auto;
+  cursor: url('/cursor-white.png') 0 0, auto;
 }
 
 .canvas-container .react-flow__pane,
 .canvas-container .react-flow__renderer,
-.canvas-container .react-flow__selectionpane,
-.canvas-container .react-flow__nodes,
-.canvas-container .react-flow__edges,
-.canvas-container .react-flow__background {
-  cursor: url('/cursor.png') 0 0, auto !important;
+  .canvas-container .react-flow__selectionpane,
+  .canvas-container .react-flow__nodes,
+  .canvas-container .react-flow__edges,
+  .canvas-container .react-flow__background {
+  cursor: url('/cursor-white.png') 0 0, auto !important;
 }
 
 .canvas-container.file-drag-active::after {
@@ -7551,4 +7551,3 @@ select.settings-dropdown-control {
   color: #e6e6e6;
   font-size: 10px;
 }
-
