@@ -39,6 +39,7 @@ import {
   type ReferenceNodeMenuState,
 } from '../menus/ReferenceNodeMenu'
 import { SelectionToolbar } from './SelectionToolbar'
+import { NODE_HANDLE_OFFSET_FLOW } from '../../utils/nodeHandleGeometry'
 
 const edgeTypes = { cut: CutEdge }
 const REFERENCE_MENU_WIDTH = 330
@@ -46,7 +47,6 @@ const REFERENCE_MENU_HEIGHT = 356
 const MENU_VIEWPORT_PADDING = 12
 const FALLBACK_NODE_WIDTH = 200
 const FALLBACK_NODE_HEIGHT = 150
-const INTERACTION_HANDLE_OFFSET = 8
 const UPLOAD_STAGGER = 34
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'])
@@ -181,8 +181,8 @@ function getInteractionHandlePoint(
     x:
       edgePoint.x +
       (position === Position.Left
-        ? -INTERACTION_HANDLE_OFFSET
-        : INTERACTION_HANDLE_OFFSET),
+        ? -NODE_HANDLE_OFFSET_FLOW
+        : NODE_HANDLE_OFFSET_FLOW),
     y: edgePoint.y,
   }
 }

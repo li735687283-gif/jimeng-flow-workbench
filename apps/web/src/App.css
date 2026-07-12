@@ -3535,8 +3535,8 @@
 /* 连接点 */
 .node-handle-zone {
   position: absolute;
-  width: 52px;
-  height: 52px;
+  width: var(--node-handle-zone-size, 88px);
+  height: var(--node-handle-zone-size, 88px);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -3639,8 +3639,8 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: var(--magnet-radius, 30px);
-  height: var(--magnet-radius, 30px);
+  width: var(--magnet-radius, 42px);
+  height: var(--magnet-radius, 42px);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
@@ -3651,13 +3651,13 @@
 }
 
 .node-handle-left {
-  left: -34px;
+  left: var(--node-handle-zone-inset, -66px);
   top: 50%;
   transform: translate(0, -50%) scale(0.82);
 }
 
 .node-handle-right {
-  right: -34px;
+  right: var(--node-handle-zone-inset, -66px);
   top: 50%;
   transform: translate(0, -50%) scale(0.82);
 }

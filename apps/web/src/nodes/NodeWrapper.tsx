@@ -10,6 +10,12 @@ import {
 import { Handle, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
 import type { LucideIcon } from 'lucide-react'
 import type { NodeStatus } from '../types/nodeTypes'
+import {
+  NODE_HANDLE_ZONE_INSET_FLOW,
+  NODE_HANDLE_ZONE_SIZE_FLOW,
+  getNodeHandleMagnetPull,
+  getNodeHandleMagnetRadius,
+} from '../utils/nodeHandleGeometry'
 
 interface NodeWrapperProps {
   icon: LucideIcon
@@ -28,13 +34,6 @@ interface MagneticHandleProps {
   position: Position
   className: string
   nodeId?: string
-}
-
-const MAGNET_RADIUS_FLOW = 30
-const MAGNET_PULL_FLOW = 10
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value))
 }
 
 function MagneticHandle({ type, position, className, nodeId }: MagneticHandleProps) {
@@ -69,14 +68,14 @@ function MagneticHandle({ type, position, className, nodeId }: MagneticHandlePro
     const dx = clientX - centerX
     const dy = clientY - centerY
     const distance = Math.hypot(dx, dy)
-    const radius = clamp(MAGNET_RADIUS_FLOW * zoom, 24, 86)
+    const radius = getNodeHandleMagnetRadius(zoom)
 
     if (distance > radius && !keepAttached) {
       reset()
       return
     }
 
-    const maxPull = clamp(MAGNET_PULL_FLOW * zoom, 9, 26)
+    const maxPull = getNodeHandleMagnetPull(zoom)
     const pull = distance === 0 ? 0 : Math.min(distance, maxPull)
     const strength = Math.max(0, 1 - distance / radius)
     const easedPull = pull * (0.55 + strength * 0.45)
@@ -138,7 +137,9 @@ function MagneticHandle({ type, position, className, nodeId }: MagneticHandlePro
         {
           '--magnet-x': `${offset.x}px`,
           '--magnet-y': `${offset.y}px`,
-          '--magnet-radius': `${clamp(MAGNET_RADIUS_FLOW * zoom, 24, 86)}px`,
+          '--magnet-radius': `${getNodeHandleMagnetRadius(zoom)}px`,
+          '--node-handle-zone-size': `${NODE_HANDLE_ZONE_SIZE_FLOW}px`,
+          '--node-handle-zone-inset': `${NODE_HANDLE_ZONE_INSET_FLOW}px`,
         } as CSSProperties
       }
     >
