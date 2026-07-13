@@ -20,7 +20,7 @@ test('text image and video nodes share a selected highlight ring', () => {
   assert.match(css, /pointer-events:\s*none;/)
   assert.match(
     css,
-    /\.node-wrapper:has\(\.image-editor-panel\)\s+\.node-card::after\s*\{[\s\S]*z-index:\s*0;/,
+    /\.node-wrapper:has\(\.image-editor-panel\)\s+\.node-card::after(?:,\s*\.node-wrapper:has\(\.text-editor-panel\)\s+\.node-card::after)?\s*\{[\s\S]*z-index:\s*0;/,
   )
   assert.match(css, /\.video-generation-panel/)
   assert.equal(css.includes('inset: -5px;'), false)

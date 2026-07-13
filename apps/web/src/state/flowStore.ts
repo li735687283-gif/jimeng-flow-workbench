@@ -8,6 +8,7 @@ import { create } from 'zustand'
 import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import * as flowsApi from '../api/flows'
 import { useCanvasStore } from './canvasStore'
+import { syncAllTextNodeImageRefs } from '../utils/syncTextNodeImageRefs'
 
 interface LoadFlowOptions {
   mode?: 'navigate' | 'refresh'
@@ -657,7 +658,10 @@ export const useFlowStore = create<FlowState>((set, get) => {
             }
 
             useCanvasStore.setState({
-              nodes: migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
+              nodes: syncAllTextNodeImageRefs(
+                migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
+                flow.edges,
+              ),
               edges: flow.edges,
               deletedNodeIds: [],
               selectedNodeId: null,

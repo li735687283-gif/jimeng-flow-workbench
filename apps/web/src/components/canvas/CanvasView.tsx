@@ -9,7 +9,6 @@ import {
   ReactFlow,
   Background,
   BackgroundVariant,
-  Controls,
   Position,
   getBezierPath,
   useReactFlow,
@@ -22,6 +21,7 @@ import type {
   Connection,
   OnConnectEnd,
   OnConnectStart,
+  OnNodeDrag,
   Viewport,
 } from '@xyflow/react'
 import { Plus } from 'lucide-react'
@@ -31,7 +31,14 @@ import { useFlowStore } from '../../state/flowStore'
 import { uploadAsset } from '../../api/assets'
 import { nodeTypes } from '../../nodes/registry'
 import type { BaseNodeData, FlowNodeType } from '../../types/nodeTypes'
+import {
+  computeHelperLines,
+  getSnapThreshold,
+  type HelperLinesState,
+} from '../../utils/helperLines'
 import { CutEdge } from './CutEdge'
+import { CanvasZoomControls } from './CanvasZoomControls'
+import { HelperLines } from './HelperLines'
 import { ContextMenu, type ContextMenuState } from '../menus/ContextMenu'
 import { AddNodeMenu, type AddNodeMenuState } from '../menus/AddNodeMenu'
 import {
@@ -51,6 +58,27 @@ const UPLOAD_STAGGER = 34
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'])
 const VIEWPORT_STORAGE_PREFIX = 'jimeng-flow:viewport:'
+const SNAP_ALIGN_STORAGE_KEY = 'jimeng-flow:canvas-snap-align'
+
+function readSnapAlignEnabled(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    const raw = window.localStorage.getItem(SNAP_ALIGN_STORAGE_KEY)
+    if (raw === null) return true
+    return raw === '1' || raw === 'true'
+  } catch {
+    return true
+  }
+}
+
+function writeSnapAlignEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(SNAP_ALIGN_STORAGE_KEY, enabled ? '1' : '0')
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 function getViewportStorageKey(flowId: string | null): string | null {
   if (!flowId) return null
@@ -261,6 +289,8 @@ export function CanvasView() {
     useState<ReferenceNodeMenuState | null>(null)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [fileDragActive, setFileDragActive] = useState(false)
+  const [helperLines, setHelperLines] = useState<HelperLinesState | null>(null)
+  const [snapAlignEnabled, setSnapAlignEnabled] = useState(readSnapAlignEnabled)
   const lastRestoredFlowIdRef = useRef<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -302,6 +332,64 @@ export function CanvasView() {
     },
     [],
   )
+
+  const toggleSnapAlign = useCallback(() => {
+    setSnapAlignEnabled((current) => {
+      const next = !current
+      writeSnapAlignEnabled(next)
+      if (!next) setHelperLines(null)
+      return next
+    })
+  }, [])
+
+  /**
+   * 单节点拖动：与其它卡片边对齐时出现虚线并吸附（可在左下角控件开关）。
+   */
+  const handleNodeDrag: OnNodeDrag = useCallback(
+    (_event, node) => {
+      if (!snapAlignEnabled) {
+        setHelperLines(null)
+        return
+      }
+
+      const allNodes = useCanvasStore.getState().nodes as Node[]
+      const selectedCount = allNodes.filter((item) => item.selected).length
+      // 多选整体拖动时不吸附，避免成员相对位置被拆散
+      if (selectedCount > 1) {
+        setHelperLines(null)
+        return
+      }
+
+      const threshold = getSnapThreshold(zoom)
+      const result = computeHelperLines(node, allNodes, threshold)
+      const hasLine =
+        result.verticals.length > 0 || result.horizontals.length > 0
+      setHelperLines(
+        hasLine
+          ? {
+              verticals: result.verticals,
+              horizontals: result.horizontals,
+            }
+          : null,
+      )
+
+      if (!result.snapped) return
+
+      useCanvasStore.getState().onNodesChange([
+        {
+          type: 'position',
+          id: node.id,
+          position: result.position,
+          dragging: true,
+        },
+      ])
+    },
+    [snapAlignEnabled, zoom],
+  )
+
+  const handleNodeDragStop: OnNodeDrag = useCallback(() => {
+    setHelperLines(null)
+  }, [])
 
   const handlePaneContextMenu = useCallback(
     (event: ReactMouseEvent | MouseEvent) => {
@@ -601,6 +689,8 @@ export function CanvasView() {
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
         onNodeClick={handleNodeClick}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
         onPaneClick={handlePaneClick}
         onPaneContextMenu={handlePaneContextMenu}
         onSelectionChange={handleSelectionChange}
@@ -619,13 +709,20 @@ export function CanvasView() {
         proOptions={{ hideAttribution: true }}
       >
         <Background
+          id="canvas-dots"
           variant={BackgroundVariant.Dots}
           gap={22}
           size={1.5}
           color="#2a2a2a"
+          bgColor="#0f0f0f"
         />
-        <Controls showInteractive={false} />
+        <CanvasZoomControls
+          snapAlignEnabled={snapAlignEnabled}
+          onToggleSnapAlign={toggleSnapAlign}
+        />
       </ReactFlow>
+      {/* 放在 ReactFlow 外、同容器内，避免超大 SVG 污染 viewport 变换层 */}
+      <HelperLines lines={helperLines} />
 
       {nodes.length === 0 && (
         <div className="canvas-empty-state" aria-hidden="true">

@@ -14,6 +14,7 @@ import { VideoPlayerModal } from './components/VideoPlayerModal'
 import { useCanvasStore } from './state/canvasStore'
 import { useFlowStore } from './state/flowStore'
 import { useSettingsStore } from './state/settingsStore'
+import { useVideoPlayerStore } from './state/videoPlayerStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
@@ -125,7 +126,8 @@ function AppInner() {
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false)
   const [videoAdminOpen, setVideoAdminOpen] = useState(false)
-  const [videoPlayer, setVideoPlayer] = useState<{ src: string; title?: string } | null>(null)
+  const videoPlayer = useVideoPlayerStore((s) => s.player)
+  const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
   const [showcaseAssets, setShowcaseAssets] = useState<Asset[]>([])
   const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
@@ -332,9 +334,12 @@ function AppInner() {
     setView('home')
   }, [])
 
-  const handlePlayVideo = useCallback((src: string, title?: string) => {
-    setVideoPlayer({ src, title })
-  }, [])
+  const handlePlayVideo = useCallback(
+    (src: string, title?: string) => {
+      openVideoPlayer(src, title)
+    },
+    [openVideoPlayer],
+  )
 
   const handleRenameFlow = useCallback(
     async (id: string, name: string) => {
@@ -505,7 +510,10 @@ function AppInner() {
         open={!!videoPlayer}
         src={videoPlayer?.src ?? ''}
         title={videoPlayer?.title}
-        onClose={() => setVideoPlayer(null)}
+        onClose={() => {
+          // 直接关全局 store，避免引用失效导致关不掉
+          useVideoPlayerStore.getState().closePlayer()
+        }}
       />
 
       <FlowsHistoryModal

@@ -7,8 +7,8 @@ import { createGeneration, subscribeGeneration } from '../api/generations'
 import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
-import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
+import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
@@ -21,7 +21,12 @@ import {
   shouldCloseFloatingMenuOnPointerDown,
 } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
-import { getImageGenerationInputImages } from '../utils/imageGenerationInputs'
+import {
+  getImageGenerationInputImages,
+  getUpstreamTextReferences,
+  joinUpstreamTextPrompts,
+  resolveImageGenerationPrompt,
+} from '../utils/imageGenerationInputs'
 import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
@@ -29,7 +34,6 @@ import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
-  persistInitialVideoGenerationResponse,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
 } from '../utils/videoGenerationState'
@@ -124,67 +128,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
-  const [fullSizeOpen, setFullSizeOpen] = useState(false)
-
-  const clickTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-  const lastClickTimeRef = useRef(0)
-
-  const clearCloseTimer = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current)
-      closeTimerRef.current = null
-    }
-  }, [])
-
-  const handleOpenEditor = useCallback(() => {
-    clearCloseTimer()
-    setEditorMounted(true)
-    setEditorClosing(false)
-  }, [clearCloseTimer])
-
-  const handleCloseEditor = useCallback(() => {
-    if (!editorMounted || editorClosing) return
-    setModelMenuOpen(false)
-    setQualityMenuOpen(false)
-    setCountMenuOpen(false)
-    setFullSizeOpen(false)
-    setEditorClosing(true)
-    clearCloseTimer()
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
-      setEditorMounted(false)
-      setEditorClosing(false)
-    }, EDITOR_CLOSE_ANIMATION_MS)
-  }, [clearCloseTimer, editorClosing, editorMounted])
-
-  const handleOpenFullSize = useCallback(() => {
-    const assetId = nodeData.assetIds[0]
-    if (!assetId) {
-      return
-    }
-    setFullSizeOpen(true)
-  }, [nodeData.assetIds])
-
-  const handleMediaClick = useCallback(() => {
-    const now = Date.now()
-    const timeSinceLastClick = now - lastClickTimeRef.current
-    lastClickTimeRef.current = now
-
-    if (timeSinceLastClick < 300) {
-      // 双击：直接打开播放器
-      if (clickTimerRef.current !== null) {
-        window.clearTimeout(clickTimerRef.current)
-        clickTimerRef.current = null
-      }
-      handleOpenFullSize()
-    } else {
-      // 单击：延迟 300ms，若期间再次点击则判定为双击并取消
-      clickTimerRef.current = window.setTimeout(() => {
-        clickTimerRef.current = null
-        handleOpenEditor()
-      }, 300)
-    }
-  }, [handleOpenEditor, handleOpenFullSize])
+  /** 画布内直接挂首页同款 VideoPlayerModal */
+  const [playerOpen, setPlayerOpen] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -192,20 +137,12 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       if (closeTimerRef.current !== null) {
         window.clearTimeout(closeTimerRef.current)
       }
-      if (clickTimerRef.current !== null) {
-        window.clearTimeout(clickTimerRef.current)
-      }
     }
   }, [])
 
   useEffect(() => {
     const defaults = resolveVideoGenerationDefaults({
-      nodeData: {
-        aspectRatio: rawNodeData.aspectRatio,
-        count: rawNodeData.count,
-        durationSeconds: rawNodeData.durationSeconds,
-        resolution: rawNodeData.resolution,
-      },
+      nodeData: rawNodeData,
       remembered: rememberedDefaultsRef.current,
       modelOptions: [],
     })
@@ -230,7 +167,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   )
   useEffect(() => {
     const defaults = resolveVideoGenerationDefaults({
-      nodeData: { model: rawNodeData.model },
+      nodeData: rawNodeData,
       remembered: rememberedDefaultsRef.current,
       modelOptions: videoModelOptions,
     })
@@ -249,6 +186,33 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     rawNodeData.model,
     videoModelOptions,
   ])
+
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
+
+  const handleOpenEditor = useCallback(() => {
+    clearCloseTimer()
+    setEditorMounted(true)
+    setEditorClosing(false)
+  }, [clearCloseTimer])
+
+  const handleCloseEditor = useCallback(() => {
+    if (!editorMounted || editorClosing) return
+    setModelMenuOpen(false)
+    setQualityMenuOpen(false)
+    setCountMenuOpen(false)
+    setEditorClosing(true)
+    clearCloseTimer()
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      setEditorMounted(false)
+      setEditorClosing(false)
+    }, EDITOR_CLOSE_ANIMATION_MS)
+  }, [clearCloseTimer, editorClosing, editorMounted])
 
   const handleValidateVideoProvider = useCallback(async () => {
     setActionBusy(true)
@@ -281,6 +245,46 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       setActionBusy(false)
     }
   }, [nodeData.assetIds])
+
+  /** 退出节点上可能触发的浏览器原生全屏（双击 video 常见） */
+  const exitNativeVideoFullscreen = useCallback(() => {
+    const video = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitDisplayingFullscreen?: boolean
+          webkitExitFullscreen?: () => void
+        })
+      | null
+    try {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.().catch(() => undefined)
+      }
+      if (video?.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+        video.webkitExitFullscreen()
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  /**
+   * 打开一级小播放器（非全屏）。
+   * 入口：工具条放大、双击节点/视频。
+   * 全屏仅在播放器内再点全屏按钮。
+   */
+  const handleOpenFullSize = useCallback(
+    (event?: {
+      preventDefault?: () => void
+      stopPropagation?: () => void
+    }) => {
+      event?.preventDefault?.()
+      event?.stopPropagation?.()
+      // 先干掉原生全屏，再开我们的弹层小播放器
+      exitNativeVideoFullscreen()
+      if (!nodeData.assetIds[0]) return
+      setPlayerOpen(true)
+    },
+    [exitNativeVideoFullscreen, nodeData.assetIds],
+  )
 
   const persistPromptDraft = useCallback(
     (value: string) => {
@@ -422,6 +426,31 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       })),
     [referenceAssetIds],
   )
+  /** 上游文本节点：可作为视频提示词，无需在视频节点重复填写 */
+  const upstreamTextRefs = useMemo(
+    () =>
+      getUpstreamTextReferences({
+        nodeId: id,
+        nodes,
+        edges,
+      }),
+    [edges, id, nodes],
+  )
+  const upstreamTextPrompt = useMemo(
+    () => joinUpstreamTextPrompts(upstreamTextRefs),
+    [upstreamTextRefs],
+  )
+  const upstreamTextBrief = useMemo(() => {
+    const text = upstreamTextPrompt.replace(/\s+/g, ' ').trim()
+    if (!text) return ''
+    return `${text.slice(0, 16)}…`
+  }, [upstreamTextPrompt])
+
+  useEffect(() => {
+    if (!upstreamTextPrompt || !sendError) return
+    if (sendError.includes('提示词')) setSendError('')
+  }, [sendError, upstreamTextPrompt])
+
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
       removeIncomingImageReference(id, assetId)
@@ -543,9 +572,21 @@ export function VideoNode({ id, data, selected }: NodeProps) {
 
   const handleSend = async () => {
     if (running) return
-    const trimmedPrompt = prompt.trim()
+    // 发送时取最新画布，本地提示词为空则回退上游文本节点
+    const canvasSnapshot = useCanvasStore.getState()
+    const resolved = resolveImageGenerationPrompt({
+      localPrompt: prompt,
+      nodeId: id,
+      nodes: canvasSnapshot.nodes,
+      edges: canvasSnapshot.edges,
+    })
+    const trimmedPrompt = resolved.prompt
     if (!trimmedPrompt) {
-      setSendError('请输入视频提示词')
+      setSendError(
+        resolved.upstreamRefs.length > 0
+          ? '上游文本节点暂无可用内容，请先在文本节点填写'
+          : '请输入视频提示词，或连接带内容的文本节点',
+      )
       return
     }
     if (!selectedModel) {
@@ -560,6 +601,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       setSendError(unsupportedModelMessage)
       return
     }
+    setSendError('')
 
     const inputImages = referenceAssetIds
     const effectiveMode = resolveVideoModeForInputImages(
@@ -602,18 +644,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     try {
       await useFlowStore.getState().saveCurrent()
       const response = await createGeneration(request)
-      try {
-        await persistInitialVideoGenerationResponse(response, {
-          applyResponse: (next) => handleGenerationResponse(next, request),
-          saveCurrent: () => useFlowStore.getState().saveCurrent(),
-        })
-      } catch (saveError) {
-        setSendError(
-          `视频任务已创建，但保存任务状态失败：${
-            saveError instanceof Error ? saveError.message : String(saveError)
-          }`,
-        )
-      }
+      handleGenerationResponse(response, request)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       updateNodeData(id, {
@@ -674,6 +705,49 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     })
   }, [])
 
+  const playerSrc = firstAssetId ? getAssetFileUrl(firstAssetId) : ''
+
+  // 捕获阶段拦截双击：阻止 Chromium 等视频控件的原生全屏
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !firstAssetId) return
+
+    const onDblClickCapture = (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      exitNativeVideoFullscreen()
+      if (!nodeData.assetIds[0]) return
+      // 只开一级小播放器，绝不进系统全屏
+      setPlayerOpen(true)
+    }
+
+    const onFullscreenChange = () => {
+      // 节点内 video 被原生全屏时立刻退出（全屏只允许播放器内按钮）
+      if (
+        document.fullscreenElement === video ||
+        (video as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean })
+          .webkitDisplayingFullscreen
+      ) {
+        exitNativeVideoFullscreen()
+      }
+    }
+
+    video.addEventListener('dblclick', onDblClickCapture, true)
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    video.addEventListener(
+      'webkitbeginfullscreen',
+      exitNativeVideoFullscreen as EventListener,
+    )
+    return () => {
+      video.removeEventListener('dblclick', onDblClickCapture, true)
+      document.removeEventListener('fullscreenchange', onFullscreenChange)
+      video.removeEventListener(
+        'webkitbeginfullscreen',
+        exitNativeVideoFullscreen as EventListener,
+      )
+    }
+  }, [exitNativeVideoFullscreen, firstAssetId, nodeData.assetIds])
+
   return (
     <>
     <NodeWrapper
@@ -699,23 +773,28 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             }
             onValidate={() => void handleValidateVideoProvider()}
             onDownload={handleDownloadVideo}
-            onOpenFullSize={handleOpenFullSize}
+            onOpenFullSize={() => handleOpenFullSize()}
           />
         )}
 
         {firstAssetId ? (
           <div
-            className="media-display-node video-media-display nodrag nopan"
+            className="media-display-node video-media-display"
             style={VIDEO_DISPLAY_STYLE}
-            onClick={handleMediaClick}
+            onClick={handleOpenEditor}
+            onDoubleClick={(event) => handleOpenFullSize(event)}
           >
             <video
               ref={videoRef}
-              src={getAssetFileUrl(firstAssetId)}
-              className="nodrag nopan"
+              src={playerSrc}
+              controls
+              // 去掉原生全屏入口，避免与双击/工具条逻辑冲突
+              controlsList="nofullscreen nodownload noremoteplayback"
+              disablePictureInPicture
               playsInline
               muted={videoMuted}
               draggable={false}
+              onDoubleClick={(event) => handleOpenFullSize(event)}
               onLoadedMetadata={(event) => {
                 event.currentTarget.muted = videoMuted
                 if (!videoMuted) event.currentTarget.volume = 1
@@ -747,17 +826,20 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           </div>
         ) : (
           <div
-            className="image-node-container video-node-container nodrag nopan"
+            className="image-node-container video-node-container"
             onClick={handleOpenEditor}
             style={EMPTY_VIDEO_FRAME_STYLE}
           >
-            <div className="node-preview-area image-node-preview">
-              <Video
-                size={64}
-                strokeWidth={1.8}
-                className="node-placeholder-icon video-placeholder-icon"
-              />
-            </div>
+            {/* 生成中只显示进度，隐藏摄像机占位图标 */}
+            {!running ? (
+              <div className="node-preview-area image-node-preview">
+                <Video
+                  size={64}
+                  strokeWidth={1.8}
+                  className="node-placeholder-icon video-placeholder-icon"
+                />
+              </div>
+            ) : null}
             {videoGenerationProgressOverlay}
           </div>
         )}
@@ -768,6 +850,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             prompt={prompt}
             referenceAssetIds={referenceAssetIds}
             mentionImages={mentionImages}
+            upstreamTextBrief={upstreamTextBrief}
+            upstreamTextFull={upstreamTextPrompt}
             modelOptions={videoModelOptions}
             selectedModelId={selectedModel?.id ?? ''}
             modelMenuOpen={modelMenuOpen}
@@ -818,14 +902,15 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         ) : null}
       </>
     </NodeWrapper>
-    {fullSizeOpen && firstAssetId && typeof document !== 'undefined'
+
+    {/* 首页同一个 VideoPlayerModal，直接挂到 body */}
+    {typeof document !== 'undefined'
       ? createPortal(
           <VideoPlayerModal
-            open={fullSizeOpen}
-            src={getAssetFileUrl(firstAssetId)}
-            title={nodeData.title}
-            variant="compact"
-            onClose={() => setFullSizeOpen(false)}
+            open={playerOpen && Boolean(playerSrc)}
+            src={playerSrc}
+            title={nodeData.title || '视频预览'}
+            onClose={() => setPlayerOpen(false)}
           />,
           document.body,
         )

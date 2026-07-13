@@ -1,11 +1,18 @@
 import { Maximize2 } from 'lucide-react'
-import { useCallback, useEffect, useState, type WheelEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type WheelEvent,
+} from 'react'
 import { createPortal } from 'react-dom'
 
 interface PromptEditorProps {
   value: string
   placeholder: string
   disabled?: boolean
+  autoFocus?: boolean
   onChange: (value: string) => void
 }
 
@@ -13,13 +20,27 @@ export function PromptEditor({
   value,
   placeholder,
   disabled = false,
+  autoFocus = false,
   onChange,
 }: PromptEditorProps) {
   const [expanded, setExpanded] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const handleWheel = useCallback((event: WheelEvent<HTMLTextAreaElement>) => {
     event.stopPropagation()
   }, [])
+
+  useEffect(() => {
+    if (!autoFocus || disabled || expanded) return
+    const frame = window.requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [autoFocus, disabled, expanded])
 
   useEffect(() => {
     if (!expanded) return
@@ -34,10 +55,13 @@ export function PromptEditor({
 
   const textarea = (
     <textarea
-      className="image-editor-prompt"
+      ref={textareaRef}
+      className="image-editor-prompt nodrag nopan nowheel"
       value={value}
       onChange={(event) => onChange(event.target.value)}
       onWheelCapture={handleWheel}
+      onKeyDown={(event) => event.stopPropagation()}
+      onPaste={(event) => event.stopPropagation()}
       placeholder={placeholder}
       disabled={disabled}
     />
@@ -45,11 +69,11 @@ export function PromptEditor({
 
   return (
     <>
-      <div className="prompt-editor-shell">
+      <div className="prompt-editor-shell nodrag nopan">
         {textarea}
         <button
           type="button"
-          className="prompt-editor-expand"
+          className="prompt-editor-expand nodrag nopan"
           onClick={() => setExpanded(true)}
           aria-label="放大提示词"
           title="放大提示词"

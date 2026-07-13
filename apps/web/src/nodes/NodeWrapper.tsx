@@ -26,6 +26,8 @@ interface NodeWrapperProps {
   nodeType?: string
   mediaDisplay?: boolean
   hideTitle?: boolean
+  /** 透传到外层 wrapper，便于节点设置 CSS 变量（如文本框颜色） */
+  style?: CSSProperties
   children?: ReactNode
 }
 
@@ -159,6 +161,7 @@ export function NodeWrapper({
   nodeType,
   mediaDisplay = false,
   hideTitle = false,
+  style,
   children,
 }: NodeWrapperProps) {
   return (
@@ -166,16 +169,12 @@ export function NodeWrapper({
       className={`node-wrapper status-${status}${selected ? ' selected' : ''}${mediaDisplay ? ' media-display' : ''}`}
       data-flow-node-id={nodeId}
       data-flow-node-type={nodeType}
+      style={style}
     >
       {!hideTitle && (
         <div className="node-title">
-          {!(nodeType === 'video' && (status === 'running' || status === 'queued')) && (
-            <Icon size={12} strokeWidth={1.8} />
-          )}
+          <Icon size={12} strokeWidth={1.8} />
           <span>{title}</span>
-          {!mediaDisplay && status === 'running' && (
-            <span className="node-status-spinner" />
-          )}
           {!mediaDisplay && status === 'success' && (
             <span className="node-status-dot success" />
           )}
