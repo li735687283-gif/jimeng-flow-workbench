@@ -140,7 +140,7 @@ const SUMMARY_STYLE = (isJson: boolean): CSSProperties => ({
   border: isJson ? `1px solid ${COLORS.border}` : 'none',
   borderRadius: isJson ? 8 : 0,
   padding: isJson ? '12px 14px' : 0,
-  fontFamily: isJson ? 'ui-monospace, "SF Mono", Menlo, monospace' : 'inherit',
+  fontFamily: 'inherit',
   boxSizing: 'border-box',
 })
 

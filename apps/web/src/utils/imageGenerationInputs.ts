@@ -1,6 +1,4 @@
 interface ImageGenerationInputOptions {
-  assetId?: string | null
-  modelId: string
   nodeId?: string | null
   nodes?: ImageGenerationInputNode[]
   edges?: ImageGenerationInputEdge[]
@@ -161,7 +159,6 @@ export function resolveImageGenerationPrompt({
 }
 
 export function getImageGenerationInputImages({
-  assetId,
   nodeId,
   nodes,
   edges,
@@ -175,7 +172,6 @@ export function getImageGenerationInputImages({
     inputImages.push(imageAssetId)
   }
 
-  pushUnique(assetId)
   for (const upstreamAssetId of collectUpstreamImageAssetIds({ nodeId, nodes, edges })) {
     pushUnique(upstreamAssetId)
   }

@@ -7,18 +7,27 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Clapperboard,
   Image as ImageIcon,
+  LayoutTemplate,
   LocateFixed,
   Loader2,
+  Mountain,
+  PanelsTopLeft,
+  PenTool,
   Plus,
   RefreshCw,
+  Scissors,
   Sparkles,
+  UserRound,
+  Video,
   Wand2,
   X,
   Film,
   History,
   Blocks,
   MousePointer2,
+  type LucideIcon,
 } from 'lucide-react'
 import type {
   PromptOptimizeRequest,
@@ -26,6 +35,7 @@ import type {
   StoryboardData,
   AgentRole,
   AgentConversationTurn,
+  AgentTemplate,
 } from '@jimeng-flow/shared/agentMessage'
 import { AGENT_ROLES, AGENT_TEMPLATES } from '@jimeng-flow/shared/agentMessage'
 import {
@@ -49,6 +59,7 @@ import {
 import { optimizePrompt } from '../api/agent'
 import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
 import { AgentConversationHistory } from './AgentConversationHistory'
+import { SecondaryMenuSelect } from './menus/SecondaryMenuSelect'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore } from '../state/generateStore'
@@ -85,7 +96,7 @@ import {
   getUnsupportedVideoModelMessage,
   videoModelNeedsJimeng,
 } from '../utils/videoModels'
-import { getCurrentFlowId } from '../state/flowStore'
+import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getConfiguredChatModels } from '../utils/chatModels'
 import {
@@ -99,6 +110,7 @@ import {
   type AgentImageResolution,
   type AgentVideoGenerationParams,
 } from '../utils/agentGenerationPlan'
+import { prepareAgentImagePrompt } from '../utils/agentImagePrompt'
 import {
   AGENT_SKILLS,
   AGENT_SKILL_CATEGORIES,
@@ -113,6 +125,21 @@ import {
 } from '../utils/agentSkills'
 
 const MIN_PANEL_WIDTH = 360
+const MAX_PANEL_WIDTH_RATIO = 2 / 3
+const AGENT_ROLE_ICONS: Record<AgentRole, LucideIcon> = {
+  general: Sparkles,
+  director: Clapperboard,
+  visual: PenTool,
+  editor: Scissors,
+}
+const AGENT_TEMPLATE_ICONS: Record<string, LucideIcon> = {
+  product_poster: ImageIcon,
+  storyboard: PanelsTopLeft,
+  character_design: UserRound,
+  social_cover: LayoutTemplate,
+  product_video: Video,
+  scene_concept: Mountain,
+}
 
 interface AgentPanelProps {
   onClose?: () => void
@@ -190,8 +217,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const appendAssistant = useAgentStore((s) => s.appendAssistant)
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
-  const conversationContext = useAgentStore((s) => s.conversationContext)
-  const setConversationContext = useAgentStore((s) => s.setConversationContext)
   const generationResults = useAgentStore((s) => s.generationResults)
   const addGenerationResult = useAgentStore((s) => s.addGenerationResult)
   const clearGenerationResults = useAgentStore((s) => s.clearGenerationResults)
@@ -200,6 +225,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const newConversation = useAgentStore((s) => s.newConversation)
   const openConversation = useAgentStore((s) => s.openConversation)
   const deleteConversation = useAgentStore((s) => s.deleteConversation)
+  const setActiveProject = useAgentStore((s) => s.setActiveProject)
+  const currentFlowId = useFlowStore((s) => s.currentFlowId)
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
@@ -236,6 +263,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
@@ -251,6 +279,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       resolution: '2K',
       count: 1,
     })
+  const [openImageParamMenu, setOpenImageParamMenu] =
+    useState<'model' | 'ratio' | 'resolution' | 'count' | null>(null)
+  const selectedAgentImageModel = imageModelOptions.find(
+    (model) => model.id === imageGenerationParams.model,
+  )
   const activeAgentImageModelNeedsJimeng =
     shouldRequireJimengCliForImageModel(imageGenerationParams.model)
   const [imageGenerationStatus, setImageGenerationStatus] = useState('')
@@ -280,6 +313,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'edit' | 'done'>('idle')
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [voiceStatus, setVoiceStatus] = useState('')
+  const selectedTemplate = AGENT_TEMPLATES.find(
+    (template) => template.id === selectedTemplateId,
+  )
 
   const resetConversationUi = useCallback(() => {
     setDraft('')
@@ -288,6 +324,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     setPendingVideoRequest(null)
     setPendingEditRequest(null)
     setImageGenerationStatus('')
+    setOpenImageParamMenu(null)
     setVideoGenerationStatus('')
     setEditGenerationStatus('')
     setSkillStep('idle')
@@ -295,10 +332,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     setVoiceStatus('')
     setRolePickerOpen(false)
     setTemplatePickerOpen(false)
+    setSelectedTemplateId(null)
     setModelOpen(false)
     setSkillPickerOpen(false)
     setPickingCanvasNode(false)
   }, [])
+
+  useEffect(() => {
+    setActiveProject(currentFlowId)
+    resetConversationUi()
+    setHistoryOpen(false)
+  }, [currentFlowId, resetConversationUi, setActiveProject])
 
   const configuredCurrentModel = settings?.llmModel || ''
   const preferredModels = useMemo(() => {
@@ -315,8 +359,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const mentionQuery = getMentionQuery(draft)
   const maxPanelWidth =
     typeof window === 'undefined'
-      ? 560
-      : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth / 3))
+      ? 1120
+      : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth * MAX_PANEL_WIDTH_RATIO))
 
   useEffect(() => {
     setModels(preferredModels)
@@ -366,6 +410,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [rolePickerOpen])
+
+  useEffect(() => {
+    if (!modelOpen) return
+    const closeModel = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('.agent-model-picker')) {
+        setModelOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', closeModel)
+    return () => document.removeEventListener('mousedown', closeModel)
+  }, [modelOpen])
 
   useEffect(() => {
     if (!historyOpen) return
@@ -570,21 +626,25 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         ? [selectedNodeId]
         : []
 
-  const appendUserMessage = (userIdea: string, contextNodeIds: string[]) => {
+  const appendUserMessage = (
+    message: string,
+    contextNodeIds: string[],
+    requestIdea = message,
+  ) => {
     useAgentStore.setState((state) => ({
       messages: [
         ...state.messages,
         {
           id: `agent_msg_${Date.now()}_${state.messages.length}`,
           role: 'user' as const,
-          content: userIdea,
+          content: message,
           contextNodeIds,
           selectedNodeId: selectedNodeId ?? undefined,
           createdAt: new Date().toISOString(),
         },
       ],
       lastRequest: {
-        userIdea,
+        userIdea: requestIdea,
         contextNodeIds,
         selectedNodeId: selectedNodeId ?? undefined,
       },
@@ -637,6 +697,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const startAgentImageGeneration = async (generate = true) => {
     if (!pendingImageRequest) return
+    if (!selectedAgentImageModel) {
+      setImageGenerationStatus('请先在设置中添加并选择图片生成模型')
+      return
+    }
     if (generate && activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
       setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
@@ -653,17 +717,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const inputImageAssetIds = imageContextNodes
       .map((node) => (node.data as { assetId?: string }).assetId)
       .filter((assetId): assetId is string => !!assetId)
-    const referenceAssetId = useAgentStore.getState().conversationContext.referenceAssetId
-    if (referenceAssetId && !inputImageAssetIds.includes(referenceAssetId)) {
-      inputImageAssetIds.push(referenceAssetId)
-    }
     const skillHint =
       activeSkills.length > 0
         ? `\n\n技能要求：${activeSkills
             .map((skill) => `${skill.label}：${skill.instruction}`)
             .join('；')}`
         : ''
-    const prompt = `${pendingImageRequest.prompt}${skillHint}`
+    const prompt = prepareAgentImagePrompt(`${pendingImageRequest.prompt}${skillHint}`)
 
     const dropPosition = getCanvasDropPosition()
     const imageNodeId = addNode('image', dropPosition)
@@ -766,7 +826,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           })
           if (outputAssetIds.length > 0) {
             useAgentStore.getState().setConversationContext({
-              referenceAssetId: outputAssetIds[0],
               lastGeneratedAssetIds: outputAssetIds,
             })
           }
@@ -1091,10 +1150,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         addGenerationResult({ assetId, type: 'image', prompt: pendingEditRequest.prompt })
       })
 
-      // 自动将第一张图设为参考图（风格一致性锁定）
       if (outputAssetIds.length > 0) {
         useAgentStore.getState().setConversationContext({
-          referenceAssetId: outputAssetIds[0],
           lastGeneratedAssetIds: outputAssetIds,
         })
       }
@@ -1163,10 +1220,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       const currentImageNodeId = imageNodeIds[i]
       if (!currentImageNodeId) continue
 
-      const inputImages = (() => {
-        const refId = useAgentStore.getState().conversationContext.referenceAssetId
-        return refId ? [refId] : []
-      })()
+      const inputImages: string[] = []
 
       const request: GenerationRequest = {
         flowId: resolveGenerationFlowId(getCurrentFlowId()),
@@ -1486,6 +1540,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const retryLastRequest = async (modelOverride?: string) => {
     const lastReq = useAgentStore.getState().lastRequest
     if (!lastReq) return
+    const requestProjectId = useAgentStore.getState().activeProjectId
 
     const model = modelOverride || currentModel
 
@@ -1512,6 +1567,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       }
 
       const response = await optimizePrompt(request)
+      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
       appendAssistant(response)
 
       const intent = response.intent
@@ -1578,14 +1634,26 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         setSkillStep('done')
       }
     } catch (err) {
+      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
       setSkillStep('idle')
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
   const submit = async (overrideDraft?: string) => {
-    const userIdea = (overrideDraft ?? draft).trim()
+    const userSupplement = (overrideDraft ?? draft).trim()
+    const userIdea = selectedTemplate
+      ? `${selectedTemplate.prompt}${
+          userSupplement ? `\n\n用户补充要求：${userSupplement}` : ''
+        }`
+      : userSupplement
     if (!userIdea || loading) return
+    const visibleUserIdea = selectedTemplate
+      ? `使用「${selectedTemplate.name}」${
+          userSupplement ? `：${userSupplement}` : ''
+        }`
+      : userIdea
+    const requestProjectId = useAgentStore.getState().activeProjectId
 
     if (activeSkillInputIssue) {
       setError(activeSkillInputIssue)
@@ -1594,8 +1662,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
     const contextNodeIds = currentContextNodeIds()
 
-    appendUserMessage(userIdea, contextNodeIds)
+    appendUserMessage(visibleUserIdea, contextNodeIds, userIdea)
     setDraft('')
+    setSelectedTemplateId(null)
     setMentionedNodeIds([])
     setVoiceStatus('')
     setSkillStep('idle')
@@ -1652,7 +1721,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     // 先走 LLM 优化，由 LLM 判断意图
     const request: PromptOptimizeRequest = {
       userIdea,
-      conversationHistory: conversationHistoryForRequest(userIdea),
+      conversationHistory: conversationHistoryForRequest(visibleUserIdea),
       contextNodeIds,
       selectedNodeId: selectedNodeId ?? undefined,
       model: currentModel,
@@ -1666,6 +1735,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     try {
       const response = await optimizePrompt(request)
+      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
       appendAssistant(response)
 
       // 根据后端返回的 intent 决定加载哪种技能
@@ -1736,9 +1806,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         setSkillStep('done')
       }
     } catch (err) {
+      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
       setSkillStep('idle')
       setError(err instanceof Error ? err.message : String(err))
     }
+  }
+
+  const applyTemplate = (template: AgentTemplate) => {
+    if (loading || !currentModel) return
+    setTemplatePickerOpen(false)
+    if (template.defaultRole) setRole(template.defaultRole)
+    setSelectedTemplateId(template.id)
+    setVoiceStatus(`已选择「${template.name}」，可继续选择画布素材`)
+    setError(undefined)
   }
 
   const changeModel = (model: string) => {
@@ -1772,6 +1852,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     if (deletingActiveConversation) resetConversationUi()
   }
 
+  const activeRole = AGENT_ROLES.find((item) => item.id === role)
+  const ActiveRoleIcon = AGENT_ROLE_ICONS[role]
   return (
     <aside className="agent-chat-panel" style={{ width: panelWidth }}>
       <div
@@ -1794,32 +1876,35 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             aria-haspopup="menu"
             title="切换 Agent 角色"
           >
-            <span style={{ fontSize: 13 }}>{AGENT_ROLES.find((r) => r.id === role)?.icon}</span>
-            <span>{AGENT_ROLES.find((r) => r.id === role)?.name}</span>
+            <ActiveRoleIcon className="agent-role-pill-icon" size={13} strokeWidth={1.8} />
+            <span>{activeRole?.name}</span>
             <ChevronDown size={10} />
           </button>
           {rolePickerOpen && (
             <div className="agent-role-dropdown" role="menu">
-              {AGENT_ROLES.map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => {
-                    setRole(r.id as AgentRole)
-                    setRolePickerOpen(false)
-                  }}
-                  className={`agent-role-option${role === r.id ? ' selected' : ''}`}
-                  role="menuitemradio"
-                  aria-checked={role === r.id}
-                >
-                  <span className="agent-role-option-icon">{r.icon}</span>
-                  <div className="agent-role-option-copy">
-                    <div className="agent-role-option-label">{r.name}</div>
-                    <div className="agent-role-option-description">{r.description}</div>
-                  </div>
-                  {role === r.id && <Check size={12} style={{ color: '#f2f2f2', flexShrink: 0 }} />}
-                </button>
-              ))}
+              {AGENT_ROLES.map((r) => {
+                const RoleIcon = AGENT_ROLE_ICONS[r.id]
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      setRole(r.id)
+                      setRolePickerOpen(false)
+                    }}
+                    className={`agent-role-option${role === r.id ? ' selected' : ''}`}
+                    role="menuitemradio"
+                    aria-checked={role === r.id}
+                  >
+                    <span className="agent-role-option-icon"><RoleIcon size={16} strokeWidth={1.7} /></span>
+                    <div className="agent-role-option-copy">
+                      <div className="agent-role-option-label">{r.name}</div>
+                      <div className="agent-role-option-description">{r.description}</div>
+                    </div>
+                    {role === r.id && <Check size={12} style={{ color: '#f2f2f2', flexShrink: 0 }} />}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1987,18 +2072,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     >
                       <Sparkles size={12} /> 生成更多图片
                     </button>
-                    <button
-                      type="button"
-                      className="agent-msg-action-btn"
-                      onClick={() => {
-                        const lastAssetId = useAgentStore.getState().conversationContext.lastGeneratedAssetIds?.[0]
-                        if (lastAssetId) {
-                          useAgentStore.getState().setConversationContext({ referenceAssetId: lastAssetId })
-                        }
-                      }}
-                    >
-                      <ImageIcon size={12} /> 锁定参考风格
-                    </button>
                   </>
                 )}
                 {message.intent === 'video' && (
@@ -2104,7 +2177,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                   void retryLastRequest(nextModel)
                 }}
               >
-                <Wand2 size={12} /> 换个模型
+                <Wand2 size={12} /> 切换 Agent 模型
               </button>
             </div>
           </div>
@@ -2163,105 +2236,110 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               <span>Agent 推荐的图片计划</span>
             </div>
             <p className="agent-card-desc">
-              已根据用途预选参数。你可以修改后只发送节点，也可以直接开始生成。
+              Agent 模型负责理解任务；图片生成模型负责实际出图。你可以修改参数后再生成。
             </p>
-            <div className="agent-video-params agent-image-params">
-              <span className="agent-video-param-tag">
-                <strong>模型</strong> {imageModelOptions.find((model) => model.id === imageGenerationParams.model)?.label ?? imageGenerationParams.model}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>比例</strong> {imageGenerationParams.aspectRatio}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>清晰度</strong> {imageGenerationParams.resolution}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>数量</strong> {imageGenerationParams.count}
-              </span>
+            <div className="agent-image-params" aria-label="图片生成参数">
+              <SecondaryMenuSelect
+                className="agent-image-model-select"
+                label="图片模型"
+                value={imageGenerationParams.model}
+                options={
+                  imageModelOptions.length > 0
+                    ? imageModelOptions.map((model) => ({
+                        value: model.id,
+                        label: model.label,
+                      }))
+                    : [{
+                        value: '',
+                        label: '未配置图片生成模型',
+                        disabled: true,
+                      }]
+                }
+                open={openImageParamMenu === 'model'}
+                disabled={imageModelOptions.length === 0}
+                onOpenChange={(open) =>
+                  setOpenImageParamMenu(open ? 'model' : null)
+                }
+                onChange={(model) =>
+                  setImageGenerationParams((params) =>
+                    resolveAgentImageGenerationParams(
+                      params,
+                      { model },
+                      imageModelOptions.map((option) => option.id),
+                    ),
+                  )
+                }
+              />
+
+              <SecondaryMenuSelect
+                className="agent-image-ratio-select"
+                label="画面比例"
+                value={imageGenerationParams.aspectRatio}
+                options={AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => ({
+                  value: ratio,
+                  label: ratio,
+                }))}
+                open={openImageParamMenu === 'ratio'}
+                onOpenChange={(open) =>
+                  setOpenImageParamMenu(open ? 'ratio' : null)
+                }
+                onChange={(aspectRatio) =>
+                  setImageGenerationParams((params) => ({
+                    ...params,
+                    aspectRatio: aspectRatio as AgentImageAspectRatio,
+                  }))
+                }
+              />
+
+              <SecondaryMenuSelect
+                className="agent-image-resolution-select"
+                label="清晰度"
+                value={imageGenerationParams.resolution}
+                options={getAgentImageResolutionOptions(
+                  imageGenerationParams.model,
+                ).map((resolution) => ({
+                  value: resolution,
+                  label: resolution,
+                }))}
+                open={openImageParamMenu === 'resolution'}
+                onOpenChange={(open) =>
+                  setOpenImageParamMenu(open ? 'resolution' : null)
+                }
+                onChange={(resolution) =>
+                  setImageGenerationParams((params) => ({
+                    ...params,
+                    resolution: resolution as AgentImageResolution,
+                  }))
+                }
+              />
+
+              <SecondaryMenuSelect
+                className="agent-image-count-select"
+                label="生成数量"
+                value={String(imageGenerationParams.count)}
+                options={IMAGE_COUNTS.map((count) => ({
+                  value: String(count),
+                  label: String(count),
+                }))}
+                open={openImageParamMenu === 'count'}
+                align="end"
+                onOpenChange={(open) =>
+                  setOpenImageParamMenu(open ? 'count' : null)
+                }
+                onChange={(count) =>
+                  setImageGenerationParams((params) => ({
+                    ...params,
+                    count: Number(count),
+                  }))
+                }
+              />
             </div>
 
-            <div className="agent-image-fields">
-              <label>
-                <span>模型</span>
-                <select
-                  value={imageGenerationParams.model}
-                  onChange={(event) =>
-                    setImageGenerationParams((params) => ({
-                      ...params,
-                      model: event.target.value,
-                    }))
-                  }
-                >
-                  {imageModelOptions.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>画面比例</span>
-                <select
-                  value={imageGenerationParams.aspectRatio}
-                  onChange={(event) =>
-                    setImageGenerationParams((params) => ({
-                      ...params,
-                      aspectRatio: event.target.value as AgentImageAspectRatio,
-                    }))
-                  }
-                >
-                  {AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => (
-                    <option key={ratio} value={ratio}>
-                      {ratio}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>清晰度 / 大小</span>
-                <select
-                  value={imageGenerationParams.resolution}
-                  onChange={(event) =>
-                    setImageGenerationParams((params) => ({
-                      ...params,
-                      resolution: event.target.value as AgentImageResolution,
-                    }))
-                  }
-                >
-                  {getAgentImageResolutionOptions(imageGenerationParams.model).map((resolution) => (
-                    <option key={resolution} value={resolution}>
-                      {resolution}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="agent-count-field">
-                <span>数量</span>
-                <div>
-                  {IMAGE_COUNTS.map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      className={
-                        imageGenerationParams.count === count ? 'active' : ''
-                      }
-                      onClick={() =>
-                        setImageGenerationParams((params) => ({
-                          ...params,
-                          count,
-                        }))
-                      }
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
+            {!selectedAgentImageModel && (
+              <div className="agent-skill-plan-warning">
+                尚未配置图片生成模型。请先在设置中添加 GPT Image（OpenAI CLI）或即梦 5.0 Pro。
               </div>
-            </div>
-
+            )}
             {pendingImageRequest.contextNodeIds.length > 0 && (
               <div className="agent-card-context">
                 已引用 {pendingImageRequest.contextNodeIds.length} 个画布节点
@@ -2284,6 +2362,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 type="button"
                 className="agent-card-secondary"
                 onClick={() => void startAgentImageGeneration(false)}
+                disabled={!selectedAgentImageModel}
               >
                 发送至画布
               </button>
@@ -2291,9 +2370,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                 type="button"
                 className="agent-card-primary"
                 onClick={() => void startAgentImageGeneration(true)}
-                disabled={activeAgentImageModelNeedsJimeng && !isJimengConfigured}
+                disabled={
+                  !selectedAgentImageModel ||
+                  (activeAgentImageModelNeedsJimeng && !isJimengConfigured)
+                }
                 title={
-                  activeAgentImageModelNeedsJimeng && !isJimengConfigured
+                  !selectedAgentImageModel
+                    ? '请先选择图片生成模型'
+                    : activeAgentImageModelNeedsJimeng && !isJimengConfigured
                     ? '未配置 dreamina CLI'
                     : '发送并生成'
                 }
@@ -2577,19 +2661,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
         )}
 
-        {conversationContext.referenceAssetId && (
-          <div className="agent-reference-lock">
-            <ImageIcon size={11} />
-            <span>已锁定参考风格</span>
-            <button
-              type="button"
-              onClick={() => setConversationContext({ referenceAssetId: undefined })}
-            >
-              <X size={11} /> 解除
-            </button>
-          </div>
-        )}
-
         {selectedMentionNodes.length > 0 && (
           <div className="mention-chips">
             {selectedMentionNodes.map((node) => (
@@ -2625,6 +2696,41 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
         )}
 
+        {selectedTemplate && (
+          <div className="agent-active-template">
+            <span className="agent-active-template-icon">
+              {(() => {
+                const TemplateIcon =
+                  AGENT_TEMPLATE_ICONS[selectedTemplate.id] ?? LayoutTemplate
+                return <TemplateIcon size={15} strokeWidth={1.7} />
+              })()}
+            </span>
+            <span className="agent-active-template-copy">
+              <strong>{selectedTemplate.name}</strong>
+              <small>已启用 · 可选择图片或文本，也可补充要求</small>
+            </span>
+            <button
+              type="button"
+              className="agent-active-template-remove"
+              onClick={() => {
+                setSelectedTemplateId(null)
+                setVoiceStatus('')
+              }}
+              aria-label={`取消${selectedTemplate.name}`}
+            >
+              <X size={12} />
+            </button>
+            <button
+              type="button"
+              className="agent-template-start"
+              onClick={() => void submit()}
+              disabled={loading || !currentModel || !!activeSkillInputIssue}
+            >
+              开始创作
+            </button>
+          </div>
+        )}
+
         <textarea
           className="agent-input"
           value={draft}
@@ -2635,7 +2741,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               void submit()
             }
           }}
-          placeholder="描述操作使用 @ 引用..."
+          placeholder={
+            selectedTemplate ? '补充创作要求（可选），使用 @ 引用画布节点...' : '描述操作使用 @ 引用...'
+          }
           disabled={loading}
         />
 
@@ -2757,9 +2865,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               className="agent-model-btn"
               onClick={() => setModelOpen((open) => !open)}
               disabled={models.length === 0}
-              title={models.length === 0 ? '请先在设置中添加大语言模型' : '切换模型'}
+              title={models.length === 0 ? '请先在设置中添加大语言模型' : '切换 Agent 模型'}
             >
-              {currentModel || '未配置模型'}
+              {currentModel ? `Agent · ${currentModel}` : '未配置 Agent 模型'}
               <ChevronDown size={13} />
             </button>
             {modelOpen && models.length > 0 && (
@@ -2782,66 +2890,39 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <span className="voice-status">{voiceStatus}</span>
           <button
             type="button"
-            className={`agent-round-btn ${templatePickerOpen ? 'active' : ''}`}
+            className={`agent-round-btn agent-template-btn ${templatePickerOpen ? 'active' : ''}`}
             onClick={() => setTemplatePickerOpen((open) => !open)}
             title="创作模板"
+            aria-label="创作模板"
+            aria-expanded={templatePickerOpen}
+            aria-haspopup="menu"
           >
             <Wand2 size={14} />
           </button>
           {templatePickerOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 'calc(100% + 8px)',
-                right: 0,
-                zIndex: 50,
-                width: 260,
-                background: '#202020',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 10,
-                padding: 8,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-              }}
-            >
-              <div style={{ fontSize: 11, color: '#a3a3a3', padding: '4px 8px 8px', fontWeight: 600 }}>
-                创作模板
-              </div>
-              {AGENT_TEMPLATES.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setTemplatePickerOpen(false)
-                    if (t.defaultRole) {
-                      setRole(t.defaultRole)
-                    }
-                    setDraft(t.prompt)
-                    setTimeout(() => submit(t.prompt), 80)
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#e6e6e6',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <span style={{ fontSize: 18, width: 22, textAlign: 'center', flexShrink: 0 }}>{t.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{t.name}</div>
-                    <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 2 }}>{t.description}</div>
-                  </div>
-                </button>
-              ))}
+            <div className="agent-template-dropdown" role="menu" aria-label="创作模板">
+              <div className="agent-template-title">创作模板</div>
+              {AGENT_TEMPLATES.map((template) => {
+                const TemplateIcon = AGENT_TEMPLATE_ICONS[template.id] ?? LayoutTemplate
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className="agent-template-option"
+                    role="menuitem"
+                    disabled={loading || !currentModel}
+                    onClick={() => applyTemplate(template)}
+                  >
+                    <span className="agent-template-option-icon">
+                      <TemplateIcon size={16} strokeWidth={1.7} />
+                    </span>
+                    <span className="agent-template-option-copy">
+                      <strong>{template.name}</strong>
+                      <small>{template.description}</small>
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           )}
 
@@ -2849,7 +2930,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             type="button"
             className="agent-send-btn"
             onClick={() => void submit()}
-            disabled={!draft.trim() || loading || !currentModel || !!activeSkillInputIssue}
+            disabled={
+              (!draft.trim() && !selectedTemplate) ||
+              loading ||
+              !currentModel ||
+              !!activeSkillInputIssue
+            }
             title={
               activeSkillInputIssue ??
               (currentModel ? '发送' : '请先在设置中添加大语言模型')

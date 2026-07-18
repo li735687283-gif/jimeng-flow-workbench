@@ -8,21 +8,23 @@ import {
   resolveImageGenerationPrompt,
 } from '../src/utils/imageGenerationInputs'
 
-test('image generation includes the current image asset for third-party image models', () => {
+test('image regeneration ignores the current node asset without an incoming image edge', () => {
   assert.deepEqual(
     getImageGenerationInputImages({
-      assetId: 'asset_current',
-      modelId: 'gpt-image-2-official',
+      nodeId: 'target',
+      nodes: [{ id: 'target', type: 'image', data: { assetId: 'asset_current' } }],
+      edges: [],
     }),
-    ['asset_current'],
+    [],
   )
 })
 
 test('image generation keeps blank image nodes text-to-image', () => {
   assert.deepEqual(
     getImageGenerationInputImages({
-      assetId: undefined,
-      modelId: 'gpt-image-2-official',
+      nodeId: 'blank',
+      nodes: [{ id: 'blank', type: 'image', data: {} }],
+      edges: [],
     }),
     [],
   )
@@ -31,8 +33,6 @@ test('image generation keeps blank image nodes text-to-image', () => {
 test('image generation includes only direct upstream image assets after the current image', () => {
   assert.deepEqual(
     getImageGenerationInputImages({
-      assetId: 'asset_current',
-      modelId: 'gpt-image-2-official',
       nodeId: 'target',
       nodes: [
         { id: 'root', type: 'image', data: { assetId: 'asset_root' } },
@@ -45,15 +45,13 @@ test('image generation includes only direct upstream image assets after the curr
       ],
     }),
     // 仅直接上游一层：middle → target，不含 root
-    ['asset_current', 'asset_middle'],
+    ['asset_middle'],
   )
 })
 
 test('image generation deduplicates connected refs and ignores invalid upstream nodes', () => {
   assert.deepEqual(
     getImageGenerationInputImages({
-      assetId: ' asset_current ',
-      modelId: 'gpt-image-2-official',
       nodeId: 'target',
       nodes: [
         { id: 'same', type: 'image', data: { assetId: 'asset_current' } },

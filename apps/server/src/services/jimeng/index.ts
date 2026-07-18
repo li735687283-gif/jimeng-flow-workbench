@@ -28,6 +28,25 @@ import { getAsset, getAssetFilePath } from '../assets'
 const execFileAsync = promisify(execFile)
 const CLI_MAX_BUFFER = 10 * 1024 * 1024
 const QUERY_INTERVAL_MS = 5_000
+const IMAGE_GENERATION_BASE_TIMEOUT_MS = 10 * 60_000
+const IMAGE_GENERATION_PER_EXTRA_IMAGE_TIMEOUT_MS = 3 * 60_000
+const IMAGE_GENERATION_MAX_TIMEOUT_MS = 30 * 60_000
+
+export function getImageGenerationTimeoutMs(count = 1): number {
+  const normalizedCount = Number.isFinite(count)
+    ? Math.max(1, Math.min(Math.floor(count), 10))
+    : 1
+  return Math.min(
+    IMAGE_GENERATION_MAX_TIMEOUT_MS,
+    IMAGE_GENERATION_BASE_TIMEOUT_MS +
+      (normalizedCount - 1) * IMAGE_GENERATION_PER_EXTRA_IMAGE_TIMEOUT_MS,
+  )
+}
+
+export function getRemainingGenerationTimeoutMs(totalTimeoutMs: number, elapsedMs: number): number {
+  const normalizedElapsedMs = Math.max(0, elapsedMs)
+  return Math.max(totalTimeoutMs - normalizedElapsedMs, 30_000)
+}
 
 /** jimeng client 错误码（前端可据此区分配置错误与调用错误） */
 export type JimengErrorCode =
@@ -380,6 +399,7 @@ async function submitAndCollect(
   timeoutMs: number,
 ): Promise<GenerationResult[]> {
   const settings = await getSettings()
+  const startedAt = Date.now()
   const downloadDir = await mkdtemp(join(tmpdir(), 'dreamina-flow-'))
   const submit = await runDreamina([...args, '--poll=0'], 60_000, settings)
   const output = `${submit.stdout}\n${submit.stderr}`
@@ -401,7 +421,7 @@ async function submitAndCollect(
     submitId,
     mediaType,
     downloadDir,
-    Math.max(timeoutMs - 60_000, 30_000),
+    getRemainingGenerationTimeoutMs(timeoutMs, Date.now() - startedAt),
     settings,
   )
 }
@@ -425,7 +445,7 @@ export async function generateImage(
     args.push(`--images=${inputPaths.join(',')}`)
   }
 
-  return submitAndCollect(args, 'image', params.timeoutMs ?? 300_000)
+  return submitAndCollect(args, 'image', params.timeoutMs ?? getImageGenerationTimeoutMs(params.count))
 }
 
 export async function generateVideo(

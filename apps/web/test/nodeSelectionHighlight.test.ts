@@ -30,3 +30,9 @@ test('text image and video nodes share a selected highlight ring', () => {
     false,
   )
 })
+
+test('canvas node cards use a fifty percent larger corner radius', () => {
+  const css = readFileSync('apps/web/src/App.css', 'utf8')
+
+  assert.match(css, /\.node-card\s*\{[^}]*border-radius:\s*22\.5px;/)
+})

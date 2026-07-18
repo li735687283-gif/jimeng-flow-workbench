@@ -403,13 +403,11 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const upstreamImageAssetIds = useMemo(
     () =>
       getImageGenerationInputImages({
-        assetId: undefined,
-        modelId: selectedModelId,
         nodeId: id,
         nodes,
         edges,
       }),
-    [edges, id, nodes, selectedModelId],
+    [edges, id, nodes],
   )
   const referenceAssetIds = useMemo(
     () =>

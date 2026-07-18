@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -73,6 +74,25 @@ test('SettingsModal exposes Codex CLI setup commands', async () => {
     false,
   )
   assert.equal(html.includes('codex'), true)
+})
+
+test('SettingsModal lists the current Codex CLI chat model family', () => {
+  const source = readFileSync('apps/web/src/components/SettingsModal.tsx', 'utf8')
+
+  for (const modelId of [
+    'codex:gpt-5.6-sol',
+    'codex:gpt-5.6-terra',
+    'codex:gpt-5.6-luna',
+    'codex:gpt-5.5',
+  ]) {
+    assert.match(source, new RegExp(`id: '${modelId.replace('.', '\\.')}'`))
+  }
+})
+
+test('selected model rows only show the display name', () => {
+  const source = readFileSync('apps/web/src/components/SettingsModal.tsx', 'utf8')
+
+  assert.doesNotMatch(source, /settings-model-list-selected-id/)
 })
 
 test('shared picker exposes a Codex model with the unified menu surface', async () => {

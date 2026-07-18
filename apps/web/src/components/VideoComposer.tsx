@@ -179,7 +179,6 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const submitLabel = getVideoSubmitLabel(running, d.assetIds.length > 0)
   const upstreamPrompt = findUpstreamPrompt(nodeId, nodes, edges)
   const upstreamImageAssetIds = getImageGenerationInputImages({
-    modelId: activeVideoModelId,
     nodeId,
     nodes,
     edges,

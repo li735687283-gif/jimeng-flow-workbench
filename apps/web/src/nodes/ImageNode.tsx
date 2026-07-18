@@ -189,7 +189,6 @@ interface ImageGenerationSubmitOptions {
   ratio?: (typeof RATIO_OPTIONS)[number]
   resolution?: (typeof RESOLUTION_OPTIONS)[number]
   count?: (typeof COUNT_OPTIONS)[number]
-  inputImageAssetIds?: string[]
 }
 
 function getSizeFromRatio(ratio: string, resolution: string) {
@@ -355,12 +354,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const referenceAssetIds = useMemo(() => {
     const selfAssetId = nodeData.assetId
     const references = new Set<string>()
-    for (const assetId of nodeData.inputImageAssetIds ?? []) {
-      if (assetId && assetId !== selfAssetId) references.add(assetId)
-    }
     for (const assetId of getImageGenerationInputImages({
-      assetId: undefined,
-      modelId: selectedModelId,
       nodeId: id,
       nodes,
       edges,
@@ -372,9 +366,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     edges,
     id,
     nodeData.assetId,
-    nodeData.inputImageAssetIds,
     nodes,
-    selectedModelId,
   ])
   /** 上游文本节点引用：可作为生图提示词，无需在图片节点重复填写 */
   const upstreamTextRefs = useMemo(
@@ -1027,27 +1019,18 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setIsGenerating(true)
     const store = canvasSnapshot
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
-    const upstreamInputImages =
-      options.inputImageAssetIds ??
-      getImageGenerationInputImages({
-        assetId: undefined,
-        modelId: effectiveModel.id,
-        nodeId: id,
-        nodes: store.nodes,
-        edges: store.edges,
-      })
-    const selfAssetId =
-      typeof nodeData.assetId === 'string' ? nodeData.assetId.trim() : ''
-    const requestInputImages = selfAssetId
-      ? [selfAssetId, ...upstreamInputImages.filter((a) => a !== selfAssetId)]
-      : upstreamInputImages
+    const upstreamInputImages = getImageGenerationInputImages({
+      nodeId: id,
+      nodes: store.nodes,
+      edges: store.edges,
+    })
     const inputImageAssetIds = upstreamInputImages
     const request: GenerationRequest = {
       flowId: startedFlowId ?? 'local',
       nodeId: id,
       mediaType: 'image',
       prompt: trimmedPrompt,
-      inputImages: requestInputImages,
+      inputImages: upstreamInputImages,
       model: effectiveModel.id,
       width: size.width,
       height: size.height,

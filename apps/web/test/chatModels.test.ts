@@ -11,6 +11,11 @@ test('configured chat models show exactly the selected chat model ids', () => {
       provider: 'openai-compatible',
       capabilities: ['chat'],
     },
+    {
+      id: 'codex:gpt-5.5',
+      provider: 'codex',
+      capabilities: ['chat', 'image'],
+    },
     { id: 'gpt-image-2', provider: 'codex', capabilities: ['image'] },
     { id: 'veo3-fast', provider: 'openai-compatible', capabilities: ['video'] },
   ]
@@ -21,7 +26,18 @@ test('configured chat models show exactly the selected chat model ids', () => {
       'gpt-4o-mini',
       modelConfigs,
     ),
-    ['legacy-chat', 'gpt-4o-mini'],
+    ['legacy-chat', 'codex:gpt-5.5', 'gpt-4o-mini'],
+  )
+})
+
+test('explicit Codex CLI chat selections remain available to the Agent picker', () => {
+  assert.deepEqual(
+    getConfiguredChatModels(
+      ['codex:gpt-5.6-sol', 'codex:gpt-5.6-terra', 'codex:gpt-5.6-luna'],
+      'codex:gpt-5.6-sol',
+      [],
+    ),
+    ['codex:gpt-5.6-sol', 'codex:gpt-5.6-terra', 'codex:gpt-5.6-luna'],
   )
 })
 

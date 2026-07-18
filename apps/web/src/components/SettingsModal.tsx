@@ -101,9 +101,24 @@ const CODEX_IMAGE_MODEL_ID = 'codex:gpt-5.5'
 
 const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
   {
+    id: 'codex:gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    description: '旗舰 Codex CLI 模型，适合复杂创作、研究和高难度 Agent 任务',
+  },
+  {
+    id: 'codex:gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    description: '均衡 Codex CLI 模型，适合日常 Agent 工作',
+  },
+  {
+    id: 'codex:gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    description: '快速经济的 Codex CLI 模型，适合明确和重复性任务',
+  },
+  {
     id: 'codex:gpt-5.5',
-    label: 'codex:gpt-5.5',
-    description: 'Codex chat 模型走本机 ChatGPT 登录态',
+    label: 'GPT-5.5',
+    description: '上一代 Codex CLI 旗舰模型，保留兼容',
   },
 ]
 
@@ -708,9 +723,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 >
                   <span className="settings-model-list-selected-copy">
                     <span className="settings-model-list-selected-label">{label}</span>
-                    {label !== modelId && (
-                      <span className="settings-model-list-selected-id">{modelId}</span>
-                    )}
                   </span>
                   <ChevronDown size={14} aria-hidden="true" />
                 </button>

@@ -1,6 +1,7 @@
 @import '@xyflow/react/dist/style.css';
 
 :root {
+  --font-ui: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --bg-base: #0f0f0f;
   --bg-panel: #191919;
   --bg-card: #222222;
@@ -21,7 +22,7 @@
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   --shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.45);
 
-  font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font: 13px/1.5 var(--font-ui);
   letter-spacing: 0.1px;
   color-scheme: dark;
   color: var(--text);
@@ -48,6 +49,13 @@ body,
 
 body {
   background: var(--bg-base);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: var(--font-ui);
 }
 
 /* React Flow 暗色覆盖 */

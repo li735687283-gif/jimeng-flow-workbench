@@ -36,11 +36,14 @@ function filterChatModelIds(
   )
 
   return uniqueModels(modelIds).filter((modelId) => {
-    if (isOpenAiCliImageModel(modelId)) return false
     const config = configs.get(modelId)
     if (config) {
       return config.enabled !== false && config.capabilities.includes('chat')
     }
+    // llmModels is an explicit chat selection. Legacy settings may not yet
+    // have capability metadata, so Codex CLI model ids remain valid here.
+    if (modelId.trim().toLowerCase().startsWith('codex:')) return true
+    if (isOpenAiCliImageModel(modelId)) return false
     // Older settings may not have a structured config for every model. In
     // that case, hide IDs that clearly belong to image/video capabilities.
     return !isLikelyImageModelId(modelId) && !isLikelyVideoModelId(modelId)

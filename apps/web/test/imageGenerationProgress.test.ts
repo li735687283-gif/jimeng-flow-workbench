@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   getImageGenerationProgressState,
   shouldShowImagePlaceholderIcon,
@@ -20,6 +21,7 @@ test('image generation progress shows while the node is queued or running', () =
 
 test('image generation progress also shows during an in-flight local request', () => {
   assert.equal(getImageGenerationProgressState('idle', true).visible, true)
+  assert.equal(getImageGenerationProgressState('success', true).visible, true)
 })
 
 test('image generation progress hides after success or error', () => {
@@ -33,4 +35,21 @@ test('image placeholder icon hides while generation progress is visible', () => 
   assert.equal(shouldShowImagePlaceholderIcon(true, true), false)
   assert.equal(shouldShowImagePlaceholderIcon(false, false), true)
   assert.equal(shouldShowImagePlaceholderIcon(false, true), true)
+})
+
+test('the scanning animation follows the progress overlay and stays clipped', () => {
+  const styles = readFileSync('apps/web/src/App.css', 'utf8')
+  const sweepRules = styles.slice(
+    styles.indexOf('.image-generation-progress-overlay::after'),
+    styles.indexOf('.node-wrapper.status-success'),
+  )
+  assert.match(sweepRules, /animation: image-card-sweep/)
+  assert.match(
+    styles,
+    /\.image-generation-progress-overlay\s*\{[\s\S]*?overflow:\s*hidden;/,
+  )
+  assert.doesNotMatch(
+    styles,
+    /status-(?:queued|running)\s+\.(?:image-node-container|media-display-node)::after/,
+  )
 })

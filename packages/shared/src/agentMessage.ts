@@ -10,16 +10,15 @@ export interface AgentRoleInfo {
   id: AgentRole
   name: string
   description: string
-  icon: string
   color: string
 }
 
 /** 所有可用角色信息 */
 export const AGENT_ROLES: AgentRoleInfo[] = [
-  { id: 'general', name: '通用助手', description: '全能型 AI 助手，涵盖创意、视觉、剪辑等多种能力', icon: '✨', color: '#d8d8d8' },
-  { id: 'director', name: '创意导演', description: '擅长故事策划、分镜设计、脚本撰写和创意构思', icon: '🎬', color: '#c2c2c2' },
-  { id: 'visual', name: '视觉设计师', description: '专注于图片生成、风格优化、构图设计和图像编辑', icon: '🎨', color: '#a8a8a8' },
-  { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', icon: '✂️', color: '#8f8f8f' },
+  { id: 'general', name: '通用助手', description: '全能型 AI 助手，涵盖创意、视觉、剪辑等多种能力', color: '#d8d8d8' },
+  { id: 'director', name: '创意导演', description: '擅长故事策划、分镜设计、脚本撰写和创意构思', color: '#c2c2c2' },
+  { id: 'visual', name: '视觉设计师', description: '专注于图片生成、风格优化、构图设计和图像编辑', color: '#a8a8a8' },
+  { id: 'editor', name: '剪辑师', description: '专注于视频生成、转场设计、节奏控制和后期编辑', color: '#8f8f8f' },
 ]
 
 /** Agent 创作模板 */
@@ -27,7 +26,6 @@ export interface AgentTemplate {
   id: string
   name: string
   description: string
-  icon: string
   prompt: string
   /** 推荐角色模式 */
   defaultRole?: AgentRole
@@ -38,49 +36,43 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: 'product_poster',
     name: '产品海报',
-    description: '生成产品宣传海报，突出核心卖点，现代简约风格',
-    icon: '📢',
-    prompt: '帮我设计一个产品宣传海报，需要突出产品的核心卖点，使用现代简约风格，画面干净、有冲击力，适合商业推广',
+    description: '生成商业产品海报，突出卖点、材质与品牌气质',
+    prompt: '请策划一张商业产品海报。优先使用当前画布中已引用的产品素材；若没有素材，则用可替换的通用产品完成概念。明确核心卖点、目标受众、主视觉构图、品牌色、文案层级、光影和材质表现，输出可直接用于图片生成的完整提示词，并推荐合适的画幅。',
     defaultRole: 'visual',
   },
   {
     id: 'storyboard',
     name: '故事分镜',
-    description: '写短视频脚本并拆分4-6个镜头分镜',
-    icon: '🎬',
-    prompt: '帮我写一个30秒的短视频脚本，并拆分成4-6个镜头分镜，每个镜头包含详细的画面描述和提示词',
+    description: '创作短片脚本，并拆成可生成的 4–6 个镜头',
+    prompt: '请创作一个约30秒的短片方案，并拆分为4–6个连续镜头。为每个镜头写清景别、主体动作、环境、镜头运动、光影、时长和衔接关系，同时提供可直接生成画面的提示词。整体人物、场景和视觉风格必须连续一致，并以故事分镜形式输出。',
     defaultRole: 'director',
   },
   {
     id: 'character_design',
     name: '角色设计',
-    description: '设计独特角色形象，含外貌、服装、性格标签',
-    icon: '👤',
-    prompt: '帮我设计一个独特的角色形象，包括外貌特征、服装搭配、性格标签和背景故事，生成角色卡',
+    description: '生成完整角色设定，统一外貌、服装与性格特征',
+    prompt: '请设计一个具有辨识度的原创角色。定义角色身份、年龄感、体型、五官、发型、服装、配饰、主色、材质、性格标签和简短背景故事；同时规划正面主视图与关键细节，输出角色卡文案和可直接用于图片生成的完整提示词。',
     defaultRole: 'visual',
   },
   {
     id: 'social_cover',
     name: '社交封面',
-    description: '生成社交媒体封面图，适合小红书/Instagram',
-    icon: '📱',
-    prompt: '帮我生成一张社交媒体封面图，适合放在小红书或Instagram，风格时尚、色彩鲜明、有吸引力',
+    description: '生成适合小红书或 Instagram 的高识别度封面',
+    prompt: '请设计一张适合小红书或Instagram发布的社交封面。突出一个清晰主题和强视觉焦点，兼顾缩略图识别度、标题安全区、色彩对比和移动端阅读；画面时尚但不过度堆叠。输出封面文案建议、构图说明和可直接用于图片生成的完整提示词。',
     defaultRole: 'visual',
   },
   {
     id: 'product_video',
-    name: '产品视频',
-    description: '生成产品展示短视频，含动态镜头和转场',
-    icon: '🎥',
-    prompt: '帮我做一个产品展示短视频，包含动态镜头、产品细节特写和流畅的转场效果，时长5-10秒',
+    name: '产品视频概念',
+    description: '生成 5–10 秒产品短片概念、镜头与转场方案',
+    prompt: '请策划一个5–10秒的产品展示视频概念。优先使用当前画布中已引用的产品素材；若没有素材，则用可替换的通用产品完成概念。设计开场吸引点、产品运动、材质细节特写、镜头运动、光影变化、节奏和自然转场，输出可直接用于视频生成的完整提示词，并推荐画幅与时长。',
     defaultRole: 'editor',
   },
   {
     id: 'scene_concept',
-    name: '场景概念',
-    description: '生成场景概念图，含光影、构图和氛围设计',
-    icon: '🏞️',
-    prompt: '帮我生成一个场景概念图，包含精心设计的光影效果、构图布局和氛围营造，适合作为电影或游戏场景参考',
+    name: '产品场景概念',
+    description: '将产品放入真实场景，设计环境、构图与氛围',
+    prompt: '请为产品设计一张场景概念图。优先使用当前画布中已引用的产品素材；若没有素材，则用可替换的通用产品完成概念。让产品自然融入具有用途和故事感的环境，明确空间层次、主体比例、构图、机位、光线方向、色彩氛围、材质互动和品牌气质，输出可直接用于图片生成的完整提示词。',
     defaultRole: 'visual',
   },
 ]

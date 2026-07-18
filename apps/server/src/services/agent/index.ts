@@ -36,7 +36,7 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 
   "reasoning": "简要说明你为什么这样优化（1-2 句话，给用户看）",
   "thinking": "详细的思考过程：先分析用户意图（生成图片、生成视频、纯文本对话、故事分镜），然后分析画面元素、风格、镜头等，最后给出优化策略（3-5 句话，可折叠展示给用户）",
   "intent": "image 或 video 或 text 或 image_then_video 或 story_mode 或 edit",
-  "optimizedPrompt": "优化后的完整提示词，包含主体、场景、风格、镜头、光线、材质、构图等要素，使用英文或中文均可，要具体可执行",
+  "optimizedPrompt": "可直接发送给生成模型的纯视觉提示词，包含主体、场景、风格、镜头、光线、材质、构图等要素，不含角色卡或解释，图片意图最多 800 字符",
   "negativePrompt": "需要避免的内容，用逗号分隔，例如：多手指, 脸部变形, 低清晰度",
   "suggestedParams": {
     "model": "从当前可用模型中选择",
@@ -71,14 +71,13 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 
         "shotNumber": 1,
         "shotDescription": "镜头描述（给用户看）",
         "prompt": "详细的图片生成提示词"
-      },
-      ...
+      }
     ]
   },
-  "optimizedPrompt": "...",
-  "negativePrompt": "...",
-  "suggestedParams": { ... },
-  "proposedActions": [ ... ]
+  "optimizedPrompt": "整组分镜的统一生成提示词",
+  "negativePrompt": "低清晰度, 人物不一致",
+  "suggestedParams": {},
+  "proposedActions": []
 }
 
 通用要求：
@@ -93,7 +92,11 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 
 9. 竖屏短视频/社交故事优先 9:16，横屏视频优先 16:9，头像/图标优先 1:1；不要只机械返回 1:1
 10. 当 intent 为 "edit" 时，suggestedParams 中必须包含 editType 字段：style_transfer/modify/remove_bg
 11. proposedActions 至少给一个建议动作
-12. 只返回 JSON，不要有任何其他文字。`
+12. 只返回 JSON，不要有任何其他文字。
+13. 当 intent 包含图片生成时，optimizedPrompt 只写可直接出图的视觉提示词，不要输出角色卡、背景故事、标题、解释或 Markdown，最多 800 字符
+14. 图片提示词必须符合主流生成平台的安全要求；将露骨性暗示、裸露和色情化服装改写为成年、非露骨、完整着装的时尚角色设计表达，同时保留人物辨识度和视觉风格。`
+
+const PROMPT_LANGUAGE_REQUIREMENT = `输出语言要求（优先级最高）：optimizedPrompt、negativePrompt、storyboard.style、storyboard.items[].shotDescription 和 storyboard.items[].prompt 必须使用简体中文。即使用户输入英文，也要将这些提示词字段转换为中文；模型 id、品牌名、镜头缩写和无法准确翻译的专有名词可以保留原文。`
 
 const ROLE_PROMPTS: Record<AgentRole, string> = {
   general: `你是一位全能型 AI 创作助手，服务于一个节点式创作工作台（即梦 Flow）。
@@ -161,13 +164,35 @@ function getSystemPrompt(role: AgentRole = 'general'): string {
   return ROLE_PROMPTS[role] || ROLE_PROMPTS.general
 }
 
+export function buildAgentSystemPrompt(
+  role: AgentRole = 'general',
+  capabilityContext = '',
+  skillContext = '',
+): string {
+  return `${getSystemPrompt(role)}\n\n${capabilityContext}${skillContext ? `\n\n${skillContext}` : ''}\n\n${PROMPT_LANGUAGE_REQUIREMENT}`
+}
+
+function isLikelyStringEnd(candidate: string, quoteIndex: number): boolean {
+  let nextIndex = quoteIndex + 1
+  while (/\s/.test(candidate[nextIndex] ?? '')) nextIndex += 1
+  const next = candidate[nextIndex]
+  if (!next || next === ':' || next === '}' || next === ']') return true
+  if (next !== ',') return false
+
+  let followingIndex = nextIndex + 1
+  while (/\s/.test(candidate[followingIndex] ?? '')) followingIndex += 1
+  const following = candidate[followingIndex]
+  return !following || /["{}[\]0-9tfn-]/.test(following)
+}
+
 function normalizeJsonCandidate(candidate: string): string {
+  const source = candidate.replace(/[“”]/g, '"')
   let output = ''
   let inString = false
   let escaped = false
 
-  for (let index = 0; index < candidate.length; index += 1) {
-    const char = candidate[index]
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]
     if (inString) {
       if (escaped) {
         output += char
@@ -176,8 +201,12 @@ function normalizeJsonCandidate(candidate: string): string {
         output += char
         escaped = true
       } else if (char === '"') {
-        output += char
-        inString = false
+        if (isLikelyStringEnd(source, index)) {
+          output += char
+          inString = false
+        } else {
+          output += '\\"'
+        }
       } else if (char === '\n') {
         output += '\\n'
       } else if (char === '\r') {
@@ -198,8 +227,8 @@ function normalizeJsonCandidate(candidate: string): string {
 
     if (char === ',') {
       let nextIndex = index + 1
-      while (/\s/.test(candidate[nextIndex] ?? '')) nextIndex += 1
-      if (candidate[nextIndex] === '}' || candidate[nextIndex] === ']') continue
+      while (/\s/.test(source[nextIndex] ?? '')) nextIndex += 1
+      if (source[nextIndex] === '}' || source[nextIndex] === ']') continue
     }
     output += char
   }
@@ -207,16 +236,61 @@ function normalizeJsonCandidate(candidate: string): string {
   return output
 }
 
-function parseJsonCandidate(candidate: string): unknown | undefined {
+function parseDirectJson(candidate: string): unknown | undefined {
   const value = candidate.trim().replace(/^\uFEFF/, '')
   for (const attempt of [value, normalizeJsonCandidate(value)]) {
     try {
       return JSON.parse(attempt)
     } catch {
-      // 继续尝试下一个候选
+      // 继续尝试规范化后的候选
     }
   }
   return undefined
+}
+
+const AGENT_PAYLOAD_KEYS = new Set([
+  'intent',
+  'optimizedPrompt',
+  'optimized_prompt',
+  'negativePrompt',
+  'negative_prompt',
+  'storyboard',
+])
+const WRAPPER_KEYS = ['content', 'text', 'message', 'result', 'data', 'output', 'response']
+
+function hasAgentPayloadShape(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return Object.keys(value).some((key) => AGENT_PAYLOAD_KEYS.has(key))
+}
+
+function unwrapJsonPayload(value: unknown, depth = 0): unknown {
+  if (depth >= 6) return value
+  if (typeof value === 'string') {
+    const parsed = parseDirectJson(value)
+    return parsed === undefined ? value : unwrapJsonPayload(parsed, depth + 1)
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const unwrapped = unwrapJsonPayload(item, depth + 1)
+      if (hasAgentPayloadShape(unwrapped)) return unwrapped
+    }
+    return value
+  }
+  if (!value || typeof value !== 'object') return value
+  if (hasAgentPayloadShape(value)) return value
+
+  const obj = value as Record<string, unknown>
+  for (const key of WRAPPER_KEYS) {
+    if (!(key in obj)) continue
+    const unwrapped = unwrapJsonPayload(obj[key], depth + 1)
+    if (hasAgentPayloadShape(unwrapped)) return unwrapped
+  }
+  return value
+}
+
+function parseJsonCandidate(candidate: string): unknown | undefined {
+  const parsed = parseDirectJson(candidate)
+  return parsed === undefined ? undefined : unwrapJsonPayload(parsed)
 }
 
 function findBalancedJsonObjects(content: string): string[] {
@@ -376,6 +450,41 @@ export function buildAgentSkillContext(
   return `用户已启用以下技能链，必须严格按顺序执行，并在 thinking 中说明每个技能如何影响最终方案：\n${lines.join('\n')}`
 }
 
+function firstDefined(obj: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null) return obj[key]
+  }
+  return undefined
+}
+
+export function parseAgentResponse(
+  parsed: unknown,
+  usedContextNodeIds: string[] = [],
+  rawLlmResponse = '',
+): PromptOptimizeResponse {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new AgentError('PARSE_FAILED', 'LLM 返回内容不是 JSON 对象')
+  }
+  const obj = parsed as Record<string, unknown>
+  const response: PromptOptimizeResponse = {
+    reasoning: asString(firstDefined(obj, ['reasoning', 'reason']), '', 'reasoning'),
+    thinking: asString(firstDefined(obj, ['thinking', 'analysis']), '', 'thinking'),
+    intent: parseIntent(firstDefined(obj, ['intent', 'type'])),
+    storyboard: parseStoryboard(firstDefined(obj, ['storyboard', 'story_board'])),
+    optimizedPrompt: asString(firstDefined(obj, ['optimizedPrompt', 'optimized_prompt', 'prompt']), '', 'optimizedPrompt'),
+    negativePrompt: asString(firstDefined(obj, ['negativePrompt', 'negative_prompt']), '', 'negativePrompt'),
+    suggestedParams: parseSuggestedParams(firstDefined(obj, ['suggestedParams', 'suggested_params'])),
+    proposedActions: parseProposedActions(firstDefined(obj, ['proposedActions', 'proposed_actions'])),
+    usedContextNodeIds,
+    rawLlmResponse,
+  }
+
+  if (!response.optimizedPrompt) {
+    throw new AgentError('PARSE_FAILED', 'LLM 返回的 optimizedPrompt 为空')
+  }
+  return response
+}
+
 /**
  * 优化 Prompt：组装上下文 → 调用 LLM → 解析结构化 JSON。
  * 参考 PRD 8.7、9.4、10.5。
@@ -427,8 +536,7 @@ export async function optimizePrompt(
 - 视频比例：Auto、16:9、9:16、4:3、3:4、1:1、21:9
 - 视频分辨率：480P、720P、1080P、4K；时长 4-15 秒`
   const skillContext = buildAgentSkillContext(req.skills)
-  const systemPrompt = `${getSystemPrompt(req.role)}\n\n${capabilityContext}${
-    skillContext ? `\n\n${skillContext}` : ''}`
+  const systemPrompt = buildAgentSystemPrompt(req.role, capabilityContext, skillContext)
   try {
     result = await generateAgentReply(model, systemPrompt, userMessage, {
       outputFormat: 'json',
@@ -440,30 +548,7 @@ export async function optimizePrompt(
   }
 
   // 解析结构化 JSON
-  const parsed = extractJson(result.content)
-  if (!parsed || typeof parsed !== 'object') {
-    throw new AgentError('PARSE_FAILED', 'LLM 返回内容不是 JSON 对象')
-  }
-  const obj = parsed as Record<string, unknown>
-
-const response: PromptOptimizeResponse = {
-    reasoning: asString(obj.reasoning, '', 'reasoning'),
-    thinking: asString(obj.thinking, '', 'thinking'),
-    intent: parseIntent(obj.intent),
-    storyboard: parseStoryboard(obj.storyboard),
-    optimizedPrompt: asString(obj.optimizedPrompt, '', 'optimizedPrompt'),
-    negativePrompt: asString(obj.negativePrompt, '', 'negativePrompt'),
-    suggestedParams: parseSuggestedParams(obj.suggestedParams),
-    proposedActions: parseProposedActions(obj.proposedActions),
-    usedContextNodeIds,
-    rawLlmResponse: result.content,
-  }
-
-  if (!response.optimizedPrompt) {
-    throw new AgentError('PARSE_FAILED', 'LLM 返回的 optimizedPrompt 为空')
-  }
-
-  return response
+  return parseAgentResponse(extractJson(result.content), usedContextNodeIds, result.content)
 }
 
 /**

@@ -19,8 +19,6 @@ export interface AgentConversationContext {
   lastPrompt?: string
   /** 最近一次使用的参数 */
   lastParams?: Record<string, unknown>
-  /** 已锁定的参考图 assetId（用于风格一致性） */
-  referenceAssetId?: string
 }
 
 export interface AgentGenerationResult {
@@ -53,6 +51,8 @@ export interface AgentConversation {
 }
 
 interface AgentStore {
+  activeProjectId: string | null
+  setActiveProject: (projectId: string | null) => void
   activeConversationId: string
   conversations: AgentConversation[]
   newConversation: () => string
@@ -99,8 +99,15 @@ interface AgentStore {
   reset: () => void
 }
 
-const CONVERSATION_STORAGE_KEY = 'jimeng-flow-agent-conversations-v1'
+const CONVERSATION_STORAGE_KEY = 'jimeng-flow-agent-conversations-v2'
 const DEFAULT_CONVERSATION_TITLE = '新对话'
+
+interface ProjectConversationState {
+  activeConversationId: string
+  conversations: AgentConversation[]
+}
+
+const projectConversationCache = new Map<string, ProjectConversationState>()
 
 let msgSeq = 0
 function nextId(): string {
@@ -132,87 +139,123 @@ function titleFromMessages(messages: AgentMessage[]): string {
   return content.length > 24 ? content.slice(0, 24) + '…' : content
 }
 
-function loadConversations(): {
-  activeConversationId: string
-  conversations: AgentConversation[]
-} | null {
+function isConversation(item: unknown): item is AgentConversation {
+  if (!item || typeof item !== 'object') return false
+  const candidate = item as Partial<AgentConversation>
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.title === 'string' &&
+    typeof candidate.createdAt === 'string' &&
+    typeof candidate.updatedAt === 'string' &&
+    Array.isArray(candidate.messages) &&
+    Array.isArray(candidate.generationResults) &&
+    !!candidate.conversationContext &&
+    typeof candidate.conversationContext === 'object'
+  )
+}
+
+function normalizeProjectState(value: unknown): ProjectConversationState | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<ProjectConversationState>
+  if (
+    typeof candidate.activeConversationId !== 'string' ||
+    !Array.isArray(candidate.conversations)
+  ) {
+    return null
+  }
+  const conversations = candidate.conversations.filter(isConversation)
+  if (!conversations.some((item) => item.id === candidate.activeConversationId)) {
+    return null
+  }
+  return { activeConversationId: candidate.activeConversationId, conversations }
+}
+
+function loadProjectConversations(projectId: string): ProjectConversationState | null {
+  const cached = projectConversationCache.get(projectId)
+  if (cached) return cached
   if (typeof window === 'undefined') return null
   try {
     const raw = localStorage.getItem(CONVERSATION_STORAGE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as {
-      activeConversationId?: unknown
-      conversations?: unknown
-    }
-    if (
-      typeof parsed.activeConversationId !== 'string' ||
-      !Array.isArray(parsed.conversations)
-    ) {
-      return null
-    }
-    const conversations = parsed.conversations.filter(
-      (item): item is AgentConversation => {
-        if (!item || typeof item !== 'object') return false
-        const candidate = item as Partial<AgentConversation>
-        return (
-          typeof candidate.id === 'string' &&
-          typeof candidate.title === 'string' &&
-          typeof candidate.createdAt === 'string' &&
-          typeof candidate.updatedAt === 'string' &&
-          Array.isArray(candidate.messages) &&
-          Array.isArray(candidate.generationResults) &&
-          !!candidate.conversationContext &&
-          typeof candidate.conversationContext === 'object'
-        )
-      },
-    )
-    if (!conversations.some((item) => item.id === parsed.activeConversationId)) {
-      return null
-    }
-    return { activeConversationId: parsed.activeConversationId, conversations }
+    const parsed = JSON.parse(raw) as { projects?: Record<string, unknown> }
+    const projectState = normalizeProjectState(parsed.projects?.[projectId])
+    if (projectState) projectConversationCache.set(projectId, projectState)
+    return projectState
   } catch {
     return null
   }
 }
 
-function persistConversations(
+function persistProjectConversations(
+  projectId: string,
   activeConversationId: string,
   conversations: AgentConversation[],
 ): void {
+  const projectState = { activeConversationId, conversations }
+  projectConversationCache.set(projectId, projectState)
   if (typeof window === 'undefined') return
   try {
+    const raw = localStorage.getItem(CONVERSATION_STORAGE_KEY)
+    const parsed = raw
+      ? (JSON.parse(raw) as { projects?: Record<string, ProjectConversationState> })
+      : {}
     localStorage.setItem(
       CONVERSATION_STORAGE_KEY,
-      JSON.stringify({ activeConversationId, conversations }),
+      JSON.stringify({
+        projects: {
+          ...(parsed.projects ?? {}),
+          [projectId]: projectState,
+        },
+      }),
     )
   } catch {
-    // 浏览器存储不可用时仍允许在当前页面内使用多会话。
+    // 浏览器存储不可用时仍允许在当前页面内按项目隔离会话。
   }
 }
 
-const restoredConversationState = loadConversations()
 const fallbackConversation = createConversation()
-const initialConversations = restoredConversationState?.conversations ?? [fallbackConversation]
-const initialActiveConversationId =
-  restoredConversationState?.activeConversationId ?? fallbackConversation.id
-const initialConversation =
-  initialConversations.find((item) => item.id === initialActiveConversationId) ??
-  fallbackConversation
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
-  activeConversationId: initialActiveConversationId,
-  conversations: initialConversations,
-  messages: initialConversation.messages,
+  activeProjectId: null,
+  setActiveProject: (projectId) => {
+    const normalizedProjectId = projectId?.trim() || null
+    if (normalizedProjectId === get().activeProjectId) return
+
+    const fallback = createConversation()
+    const projectState = normalizedProjectId
+      ? loadProjectConversations(normalizedProjectId)
+      : null
+    const conversations = projectState?.conversations ?? [fallback]
+    const activeConversationId = projectState?.activeConversationId ?? fallback.id
+    const activeConversation =
+      conversations.find((item) => item.id === activeConversationId) ?? fallback
+
+    set({
+      activeProjectId: normalizedProjectId,
+      activeConversationId,
+      conversations,
+      messages: activeConversation.messages,
+      loading: false,
+      error: undefined,
+      lastResponse: activeConversation.lastResponse,
+      lastRequest: activeConversation.lastRequest,
+      conversationContext: activeConversation.conversationContext,
+      generationResults: activeConversation.generationResults,
+    })
+  },
+  activeConversationId: fallbackConversation.id,
+  conversations: [fallbackConversation],
+  messages: [],
   loading: false,
   error: undefined,
-  lastResponse: initialConversation.lastResponse,
-  lastRequest: initialConversation.lastRequest,
+  lastResponse: undefined,
+  lastRequest: undefined,
   role:
     (typeof window !== 'undefined' &&
       (localStorage.getItem('agentRole') as AgentRole)) ||
     'general',
-  conversationContext: initialConversation.conversationContext,
-  generationResults: initialConversation.generationResults,
+  conversationContext: {},
+  generationResults: [],
 
   newConversation: () => {
     const conversation = createConversation()
@@ -377,6 +420,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
 let syncingConversation = false
 useAgentStore.subscribe((state, previousState) => {
+  const projectChanged = state.activeProjectId !== previousState.activeProjectId
   const conversationChanged =
     state.messages !== previousState.messages ||
     state.lastResponse !== previousState.lastResponse ||
@@ -384,7 +428,7 @@ useAgentStore.subscribe((state, previousState) => {
     state.conversationContext !== previousState.conversationContext ||
     state.generationResults !== previousState.generationResults
 
-  if (conversationChanged && !syncingConversation) {
+  if (!projectChanged && conversationChanged && !syncingConversation) {
     const current = state.conversations.find(
       (item) => item.id === state.activeConversationId,
     )
@@ -414,10 +458,16 @@ useAgentStore.subscribe((state, previousState) => {
   }
 
   if (
-    state.activeConversationId !== previousState.activeConversationId ||
-    state.conversations !== previousState.conversations
+    state.activeProjectId &&
+    (projectChanged ||
+      state.activeConversationId !== previousState.activeConversationId ||
+      state.conversations !== previousState.conversations)
   ) {
-    persistConversations(state.activeConversationId, state.conversations)
+    persistProjectConversations(
+      state.activeProjectId,
+      state.activeConversationId,
+      state.conversations,
+    )
   }
 })
 
