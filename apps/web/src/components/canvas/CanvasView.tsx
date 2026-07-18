@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react'
 import type {
   MouseEvent as ReactMouseEvent,
   ChangeEvent,
@@ -299,7 +306,11 @@ function PendingReferenceLine({
   )
 }
 
-export function CanvasView() {
+export interface CanvasViewHandle {
+  openUploadAtCenter: () => void
+}
+
+export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, ref) {
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
   const onNodesChange = useCanvasStore((s) => s.onNodesChange)
@@ -481,6 +492,23 @@ export function CanvasView() {
       fileInputRef.current?.click()
     },
     [],
+  )
+
+  const openUploadAtCenter = useCallback(() => {
+    const rect = containerRef.current?.getBoundingClientRect()
+    const position = rect
+      ? screenToFlowPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        })
+      : { x: 400, y: 300 }
+    triggerUpload(position)
+  }, [screenToFlowPosition, triggerUpload])
+
+  useImperativeHandle(
+    ref,
+    () => ({ openUploadAtCenter }),
+    [openUploadAtCenter],
   )
 
   const createUploadedNode = useCallback(
@@ -885,4 +913,4 @@ export function CanvasView() {
       )}
     </div>
   )
-}
+})

@@ -11,11 +11,12 @@ import {
 import type { ModelConfig } from '@jimeng-flow/shared/settings'
 
 test('configured image models show exactly the selected image model ids', () => {
-  const models = getConfiguredImageModels(['jimeng', 'gpt-image-1'])
+  const models = getConfiguredImageModels(['jimeng-5.0-pro', 'jimeng', 'gpt-image-1'])
 
-  assert.deepEqual(models.map((model) => model.id), ['jimeng', 'gpt-image-1'])
-  assert.equal(models[0].label, '即梦（默认）')
-  assert.equal(models[1].label, 'gpt-image-1')
+  assert.deepEqual(models.map((model) => model.id), ['jimeng-5.0-pro', 'jimeng', 'gpt-image-1'])
+  assert.equal(models[0].label, '即梦 5.0 Pro')
+  assert.equal(models[1].label, '即梦（默认）')
+  assert.equal(models[2].label, 'gpt-image-1')
 })
 
 test('image model picker never infers models from the LLM list', () => {

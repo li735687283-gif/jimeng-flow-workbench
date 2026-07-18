@@ -88,50 +88,53 @@ export function SelectionToolbar({
           align-items: center;
           gap: 6px;
           padding: 6px 12px;
-          background: var(--bg-card);
-          color: var(--text);
-          border: 1px solid var(--border-light);
-          border-radius: 8px;
-          box-shadow: var(--shadow-strong);
+          background: var(--menu-control-bg);
+          color: var(--menu-item-text);
+          border: 1px solid var(--menu-control-border);
+          border-radius: var(--menu-item-radius);
+          box-shadow: var(--menu-surface-shadow);
           cursor: pointer;
           font-size: 12px;
           font-family: inherit;
           transition: background 0.12s, color 0.12s;
         }
         .selection-toolbar-trigger:hover {
-          background: var(--bg-card-hover);
-          color: var(--text-h);
+          background: #303030;
+          color: #fff;
         }
         .selection-toolbar-menu {
           display: flex;
           flex-direction: column;
           gap: 2px;
-          padding: 4px;
-          background: var(--bg-card);
-          border: 1px solid var(--border-light);
-          border-radius: 8px;
-          box-shadow: var(--shadow-strong);
+          padding: var(--menu-surface-padding);
+          background: var(--menu-surface-bg);
+          border: 1px solid var(--menu-surface-border);
+          border-radius: var(--menu-surface-radius);
+          box-shadow: var(--menu-surface-shadow);
+          backdrop-filter: var(--menu-surface-blur);
           min-width: 140px;
         }
         .selection-toolbar-item {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 7px 10px;
+          min-height: var(--menu-item-min-height);
+          padding: var(--menu-item-padding);
           background: transparent;
-          color: var(--text);
+          color: var(--menu-item-text);
           border: none;
-          border-radius: 4px;
+          border-radius: var(--menu-item-radius);
           cursor: pointer;
-          font-size: 12px;
+          font-size: 12.5px;
           font-family: inherit;
           width: 100%;
           text-align: left;
           transition: background 0.12s, color 0.12s;
         }
         .selection-toolbar-item:hover {
-          background: var(--bg-card-hover);
-          color: var(--text-h);
+          background: var(--menu-item-hover-bg);
+          color: #fff;
+          transform: translateX(2px);
         }
       `}</style>
       <div

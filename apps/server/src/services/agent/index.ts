@@ -39,9 +39,15 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 
   "optimizedPrompt": "优化后的完整提示词，包含主体、场景、风格、镜头、光线、材质、构图等要素，使用英文或中文均可，要具体可执行",
   "negativePrompt": "需要避免的内容，用逗号分隔，例如：多手指, 脸部变形, 低清晰度",
   "suggestedParams": {
+    "model": "从当前可用模型中选择",
+    "aspectRatio": "1:1 或 16:9 或 9:16 等",
+    "resolution": "图片使用 1K/2K/4K，视频使用 480P/720P/1080P/4K",
+    "count": 2,
+    "mode": "视频可用 text_to_video/image_to_video/all_reference/action_mimic/first_last_frame/image_reference",
+    "durationSeconds": 5,
+    "quality": "standard 或 high",
     "width": 1024,
-    "height": 1024,
-    "count": 2
+    "height": 1024
   },
   "proposedActions": [
     {
@@ -82,10 +88,12 @@ const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 
 4. thinking 字段要详细展示分析过程，包括意图识别、画面拆解、优化策略
 5. optimizedPrompt 要具体、可执行、细节丰富，包含主体、场景、风格、镜头、光线、材质、构图等
 6. negativePrompt 列出常见需要避免的内容
-7. suggestedParams 给出合理的尺寸和数量建议（width/height 用 1024 或 1280，count 用 1-4）
-   当 intent 为 "edit" 时，suggestedParams 中必须包含 editType 字段：style_transfer/modify/remove_bg
-8. proposedActions 至少给一个建议动作
-9. 只返回 JSON，不要有任何其他文字。`
+7. suggestedParams 必须结合用户用途给出合理预选值。图片优先返回 model、aspectRatio、resolution、count；视频优先返回 model、mode、aspectRatio、resolution、durationSeconds、count、quality
+8. model 必须从“当前工作台能力”列出的模型 id 中选择；拿不准时不要返回 model，让前端使用默认值
+9. 竖屏短视频/社交故事优先 9:16，横屏视频优先 16:9，头像/图标优先 1:1；不要只机械返回 1:1
+10. 当 intent 为 "edit" 时，suggestedParams 中必须包含 editType 字段：style_transfer/modify/remove_bg
+11. proposedActions 至少给一个建议动作
+12. 只返回 JSON，不要有任何其他文字。`
 
 const ROLE_PROMPTS: Record<AgentRole, string> = {
   general: `你是一位全能型 AI 创作助手，服务于一个节点式创作工作台（即梦 Flow）。
@@ -153,39 +161,111 @@ function getSystemPrompt(role: AgentRole = 'general'): string {
   return ROLE_PROMPTS[role] || ROLE_PROMPTS.general
 }
 
+function normalizeJsonCandidate(candidate: string): string {
+  let output = ''
+  let inString = false
+  let escaped = false
+
+  for (let index = 0; index < candidate.length; index += 1) {
+    const char = candidate[index]
+    if (inString) {
+      if (escaped) {
+        output += char
+        escaped = false
+      } else if (char === '\\') {
+        output += char
+        escaped = true
+      } else if (char === '"') {
+        output += char
+        inString = false
+      } else if (char === '\n') {
+        output += '\\n'
+      } else if (char === '\r') {
+        output += '\\r'
+      } else if (char === '\t') {
+        output += '\\t'
+      } else {
+        output += char
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+      output += char
+      continue
+    }
+
+    if (char === ',') {
+      let nextIndex = index + 1
+      while (/\s/.test(candidate[nextIndex] ?? '')) nextIndex += 1
+      if (candidate[nextIndex] === '}' || candidate[nextIndex] === ']') continue
+    }
+    output += char
+  }
+
+  return output
+}
+
+function parseJsonCandidate(candidate: string): unknown | undefined {
+  const value = candidate.trim().replace(/^\uFEFF/, '')
+  for (const attempt of [value, normalizeJsonCandidate(value)]) {
+    try {
+      return JSON.parse(attempt)
+    } catch {
+      // 继续尝试下一个候选
+    }
+  }
+  return undefined
+}
+
+function findBalancedJsonObjects(content: string): string[] {
+  const candidates: string[] = []
+  for (let start = 0; start < content.length; start += 1) {
+    if (content[start] !== '{') continue
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let index = start; index < content.length; index += 1) {
+      const char = content[index]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') inString = false
+        continue
+      }
+      if (char === '"') inString = true
+      else if (char === '{') depth += 1
+      else if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          candidates.push(content.slice(start, index + 1))
+          start = index
+          break
+        }
+      }
+    }
+  }
+  return candidates
+}
+
 /**
  * 从 LLM 返回内容中提取 JSON 对象。
- * 处理常见情况：直接 JSON、被 markdown 代码块包裹、前后有杂音。
+ * 处理常见情况：直接 JSON、markdown 代码块、前后杂音、字符串内裸换行和尾逗号。
  */
-function extractJson(content: string): unknown {
+export function extractJson(content: string): unknown {
   const trimmed = content.trim()
-  // 直接尝试解析
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    // 继续
-  }
-  // 尝试去掉 markdown 代码块标记
+  const candidates = [trimmed]
   const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
-  if (codeBlockMatch) {
-    try {
-      return JSON.parse(codeBlockMatch[1].trim())
-    } catch {
-      // 继续
-    }
+  if (codeBlockMatch?.[1]) candidates.push(codeBlockMatch[1])
+  candidates.push(...findBalancedJsonObjects(trimmed))
+
+  for (const candidate of candidates) {
+    const parsed = parseJsonCandidate(candidate)
+    if (parsed !== undefined) return parsed
   }
-  // 尝试提取第一个 { ... } 块
-  const firstBrace = trimmed.indexOf('{')
-  const lastBrace = trimmed.lastIndexOf('}')
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    const slice = trimmed.slice(firstBrace, lastBrace + 1)
-    try {
-      return JSON.parse(slice)
-    } catch {
-      // 继续
-    }
-  }
-  throw new AgentError('PARSE_FAILED', `无法从 LLM 输出中解析 JSON：${trimmed.slice(0, 200)}`)
+
+  throw new AgentError('PARSE_FAILED', '模型返回格式异常，请重试或切换模型。')
 }
 
 /** 安全读取 intent 字段 */
@@ -270,6 +350,32 @@ function parseProposedActions(v: unknown): AgentProposedAction[] {
     }))
 }
 
+export function buildAgentSkillContext(
+  skills: PromptOptimizeRequest['skills'],
+): string {
+  if (!Array.isArray(skills)) return ''
+  const validSkills = skills
+    .filter((skill) =>
+      skill &&
+      typeof skill.id === 'string' &&
+      typeof skill.label === 'string' &&
+      typeof skill.instruction === 'string',
+    )
+    .slice(0, 3)
+  if (validSkills.length === 0) return ''
+
+  const lines = validSkills.map((skill, index) => {
+    const steps = Array.isArray(skill.steps)
+      ? skill.steps.filter((step): step is string => typeof step === 'string').join(' → ')
+      : ''
+    const io = skill.input && skill.output
+      ? `输入 ${skill.input}，输出 ${skill.output}`
+      : ''
+    return `${index + 1}. ${skill.label}：${skill.instruction}${steps ? `；步骤：${steps}` : ''}${io ? `；${io}` : ''}`
+  })
+  return `用户已启用以下技能链，必须严格按顺序执行，并在 thinking 中说明每个技能如何影响最终方案：\n${lines.join('\n')}`
+}
+
 /**
  * 优化 Prompt：组装上下文 → 调用 LLM → 解析结构化 JSON。
  * 参考 PRD 8.7、9.4、10.5。
@@ -297,11 +403,32 @@ export async function optimizePrompt(
     ? req.contextNodeIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
     : []
 
-  const userMessage = buildUserMessage(req.userIdea, usedContextNodeIds, req.selectedNodeId)
+  const userMessage = buildUserMessage(
+    req.userIdea,
+    usedContextNodeIds,
+    req.selectedNodeId,
+    req.conversationHistory,
+  )
 
   // 调用 LLM provider（根据角色选择对应的系统提示词，强制 json 输出格式，便于解析）
   let result
-  const systemPrompt = getSystemPrompt(req.role)
+  const imageModels = settings.imageModels?.length > 0
+    ? settings.imageModels.join(', ')
+    : 'jimeng'
+  const videoModels = settings.videoModels?.length > 0
+    ? settings.videoModels.join(', ')
+    : 'seedance-2.0'
+  const capabilityContext = `当前工作台能力：
+- 可用图片模型 id：${imageModels}
+- 图片比例：1:1、16:9、9:16、4:3、3:4、3:2、2:3、21:9
+- 图片清晰度：即梦 5.0 Pro 支持 1K/2K/4K；其他即梦图片模型支持 2K/4K
+- 可用视频模型 id：${videoModels}
+- 视频模式：text_to_video、image_to_video、all_reference、action_mimic、first_last_frame、image_reference
+- 视频比例：Auto、16:9、9:16、4:3、3:4、1:1、21:9
+- 视频分辨率：480P、720P、1080P、4K；时长 4-15 秒`
+  const skillContext = buildAgentSkillContext(req.skills)
+  const systemPrompt = `${getSystemPrompt(req.role)}\n\n${capabilityContext}${
+    skillContext ? `\n\n${skillContext}` : ''}`
   try {
     result = await generateAgentReply(model, systemPrompt, userMessage, {
       outputFormat: 'json',
@@ -343,12 +470,35 @@ const response: PromptOptimizeResponse = {
  * 组装用户消息。
  * M0 简化：只透传 userIdea，附加节点上下文信息（仅 id，不读 data）。
  */
-function buildUserMessage(
+export function buildUserMessage(
   userIdea: string,
   contextNodeIds: string[],
   selectedNodeId?: string,
+  conversationHistory?: PromptOptimizeRequest['conversationHistory'],
 ): string {
-  const lines: string[] = [userIdea]
+  const lines: string[] = []
+  const history = Array.isArray(conversationHistory)
+    ? conversationHistory
+        .filter(
+          (turn) =>
+            (turn?.role === 'user' || turn?.role === 'assistant') &&
+            typeof turn.content === 'string' &&
+            turn.content.trim().length > 0,
+        )
+        .slice(-12)
+    : []
+  if (history.length > 0) {
+    lines.push(
+      '同一对话的最近上下文：\n' +
+        history
+          .map((turn) => {
+            const speaker = turn.role === 'user' ? '用户' : '助手'
+            return speaker + '：' + turn.content.trim().slice(0, 1200)
+          })
+          .join('\n'),
+    )
+  }
+  lines.push(userIdea)
   if (selectedNodeId) {
     lines.push(`（当前选中节点：${selectedNodeId}）`)
   }

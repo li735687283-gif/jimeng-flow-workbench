@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -13,6 +14,7 @@ test('canvas bottom toolbar shows the requested icon actions only', async () => 
   const html = renderToStaticMarkup(
     <CanvasBottomToolbar
       onAddNode={() => undefined}
+      onUpload={() => undefined}
       onOpenAssetLibrary={() => undefined}
       onOpenHistory={() => undefined}
       onLocateNodes={() => undefined}
@@ -29,6 +31,18 @@ test('canvas bottom toolbar shows the requested icon actions only', async () => 
   ]) {
     assert.equal(html.includes(`aria-label="${label}"`), true)
   }
+
+  assert.equal(html.includes('aria-haspopup="menu"'), true)
+  assert.equal(html.includes('aria-expanded="false"'), true)
+
+  const source = readFileSync(
+    'apps/web/src/components/canvas/CanvasBottomToolbar.tsx',
+    'utf8',
+  )
+  assert.match(source, /onMouseEnter=\{\(\) => setAddMenuOpen\(true\)\}/)
+  assert.match(source, /onMouseLeave=\{\(\) => setAddMenuOpen\(false\)\}/)
+  assert.match(source, /AddNodeMenuContent/)
+  assert.doesNotMatch(source, /onClick=\{onAddNode\}/)
 
   for (const removedLabel of ['新建工作流', '保存', '打开']) {
     assert.equal(html.includes(removedLabel), false)

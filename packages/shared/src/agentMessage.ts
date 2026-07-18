@@ -179,6 +179,25 @@ export interface AgentProposedAction {
 /** Agent 消息角色 */
 export type AgentMessageRole = 'user' | 'assistant' | 'system'
 
+/** 用户在发送前选择的 Agent 技能。技能按数组顺序执行。 */
+export interface AgentSkillSelection {
+  id: string
+  label: string
+  instruction: string
+  /** 技能需要的主要输入，用于执行前校验和解释 */
+  input?: 'text' | 'image' | 'video'
+  /** 技能完成后预期产物 */
+  output?: 'prompt' | 'image' | 'video' | 'storyboard'
+  /** 展示给用户和 Agent 的简短执行步骤 */
+  steps?: string[]
+}
+
+/** 发送给 Agent 的同一对话精简历史，只包含模型继续理解所需的可见内容。 */
+export interface AgentConversationTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 /**
  * POST /api/agent/prompt-optimize 请求体。
  * 参考 PRD 8.7、10.5。
@@ -198,6 +217,10 @@ export interface PromptOptimizeRequest {
   model?: string
   /** Agent 角色模式（可选，默认 'general'） */
   role?: AgentRole
+  /** 当前对话最近的可见消息；新对话不携带此字段 */
+  conversationHistory?: AgentConversationTurn[]
+  /** 用户启用的技能链，按数组顺序执行 */
+  skills?: AgentSkillSelection[]
 }
 
 /**

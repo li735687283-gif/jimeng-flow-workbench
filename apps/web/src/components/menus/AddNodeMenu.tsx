@@ -26,19 +26,37 @@ export function AddNodeMenu({
       <div
         className="add-node-menu"
         style={{ left: state.x, top: state.y }}
+        role="menu"
+        aria-label="添加节点"
       >
-        <div className="add-node-menu-title">添加节点</div>
-        <div className="add-node-menu-list">
-          {NODE_MENU_ITEMS.map((item) => (
-            <AddNodeMenuButton
-              key={item.key}
-              item={item}
-              onSelect={onSelect}
-              onUpload={onUpload}
-              onClose={onClose}
-            />
-          ))}
-        </div>
+        <AddNodeMenuContent
+          onSelect={onSelect}
+          onUpload={onUpload}
+          onClose={onClose}
+        />
+      </div>
+    </>
+  )
+}
+
+export function AddNodeMenuContent({
+  onSelect,
+  onUpload,
+  onClose,
+}: Omit<AddNodeMenuProps, 'state'>) {
+  return (
+    <>
+      <div className="add-node-menu-title">添加节点</div>
+      <div className="add-node-menu-list">
+        {NODE_MENU_ITEMS.map((item) => (
+          <AddNodeMenuButton
+            key={item.key}
+            item={item}
+            onSelect={onSelect}
+            onUpload={onUpload}
+            onClose={onClose}
+          />
+        ))}
       </div>
     </>
   )
@@ -61,6 +79,7 @@ function AddNodeMenuButton({
     <button
       type="button"
       className="add-node-menu-item"
+      role="menuitem"
       disabled={item.disabled}
       onClick={() => {
         if (item.action === 'upload') {

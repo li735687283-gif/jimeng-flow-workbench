@@ -16,12 +16,20 @@ import {
   Wand2,
   X,
   Film,
+  History,
+  Blocks,
+  MousePointer2,
 } from 'lucide-react'
-import type { PromptOptimizeRequest, AgentMessage, StoryboardData, AgentRole } from '@jimeng-flow/shared/agentMessage'
+import type {
+  PromptOptimizeRequest,
+  AgentMessage,
+  StoryboardData,
+  AgentRole,
+  AgentConversationTurn,
+} from '@jimeng-flow/shared/agentMessage'
 import { AGENT_ROLES, AGENT_TEMPLATES } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
-  IMAGE_SIZES,
   type GenerationRequest,
   type GenerationResult,
   type GenerationResponse,
@@ -40,6 +48,7 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import { optimizePrompt } from '../api/agent'
 import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
+import { AgentConversationHistory } from './AgentConversationHistory'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore } from '../state/generateStore'
@@ -79,6 +88,29 @@ import {
 import { getCurrentFlowId } from '../state/flowStore'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { getConfiguredChatModels } from '../utils/chatModels'
+import {
+  AGENT_IMAGE_ASPECT_RATIOS,
+  getAgentImageDimensions,
+  getAgentImageResolutionOptions,
+  resolveAgentImageGenerationParams,
+  resolveAgentVideoGenerationParams,
+  type AgentImageAspectRatio,
+  type AgentImageGenerationParams,
+  type AgentImageResolution,
+  type AgentVideoGenerationParams,
+} from '../utils/agentGenerationPlan'
+import {
+  AGENT_SKILLS,
+  AGENT_SKILL_CATEGORIES,
+  AGENT_SKILL_INPUT_LABELS,
+  AGENT_SKILL_OUTPUT_LABELS,
+  MAX_ACTIVE_AGENT_SKILLS,
+  getAgentSkillById,
+  getAgentSkillInputIssue,
+  getRecommendedAgentSkillIds,
+  toAgentSkillSelections,
+  type AgentSkillDefinition,
+} from '../utils/agentSkills'
 
 const MIN_PANEL_WIDTH = 360
 
@@ -86,23 +118,10 @@ interface AgentPanelProps {
   onClose?: () => void
 }
 
-interface AgentSkill {
-  id: string
-  label: string
-  description: string
-  instruction: string
-}
-
 interface PendingImageRequest {
   id: string
   prompt: string
   contextNodeIds: string[]
-}
-
-interface ImageGenerationParams {
-  model: string
-  sizeId: string
-  count: number
 }
 
 interface PendingVideoRequest {
@@ -112,43 +131,12 @@ interface PendingVideoRequest {
   sourceImageNodeIds?: string[]
 }
 
-interface VideoGenerationParams {
-  model: string
-  mode: VideoMode
-  aspectRatio: VideoAspectRatio
-  resolution: VideoResolution
-  durationSeconds: number
-  count: number
-  quality: 'standard' | 'high'
-}
-
 interface PendingEditRequest {
   id: string
   prompt: string
   editType: 'style_transfer' | 'modify' | 'remove_bg'
   contextNodeIds: string[]
 }
-
-const AGENT_SKILLS: AgentSkill[] = [
-  {
-    id: 'image-retouch',
-    label: '图片修改',
-    description: '围绕引用图片做局部修改、风格统一和图生图。',
-    instruction: '优先保留引用图片主体，按用户要求做可执行的图像修改。',
-  },
-  {
-    id: 'prompt-polish',
-    label: '提示词增强',
-    description: '把粗略想法整理成更稳定的生成提示词。',
-    instruction: '把用户需求改写成结构清晰、可直接用于生成的提示词。',
-  },
-  {
-    id: 'shot-design',
-    label: '镜头设计',
-    description: '补充景别、构图、光线、运动和叙事节奏。',
-    instruction: '从镜头语言、构图和光线角度增强输出。',
-  },
-]
 
 function uniqueModels(models: string[]): string[] {
   return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)))
@@ -166,6 +154,24 @@ function nodeTitle(node: { id: string; type?: string; data: unknown }): string {
 function getMentionQuery(value: string): string | null {
   const match = value.match(/(?:^|\s)@([\u4e00-\u9fa5\w-]*)$/)
   return match ? match[1] : null
+}
+
+function conversationHistoryForRequest(userIdea: string): AgentConversationTurn[] {
+  const messages = useAgentStore.getState().messages
+  const lastMessage = messages.at(-1)
+  const priorMessages =
+    lastMessage?.role === 'user' && lastMessage.content.trim() === userIdea.trim()
+      ? messages.slice(0, -1)
+      : messages
+
+  return priorMessages.slice(-12).flatMap<AgentConversationTurn>((message) => {
+    if (message.role !== 'user' && message.role !== 'assistant') return []
+    const content =
+      message.role === 'assistant' && message.optimizedPrompt
+        ? message.content + '\n已给出的提示词：' + message.optimizedPrompt
+        : message.content
+    return [{ role: message.role, content }]
+  })
 }
 
 export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
@@ -189,6 +195,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const generationResults = useAgentStore((s) => s.generationResults)
   const addGenerationResult = useAgentStore((s) => s.addGenerationResult)
   const clearGenerationResults = useAgentStore((s) => s.clearGenerationResults)
+  const activeConversationId = useAgentStore((s) => s.activeConversationId)
+  const conversations = useAgentStore((s) => s.conversations)
+  const newConversation = useAgentStore((s) => s.newConversation)
+  const openConversation = useAgentStore((s) => s.openConversation)
+  const deleteConversation = useAgentStore((s) => s.deleteConversation)
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
@@ -223,20 +234,21 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [models, setModels] = useState<string[]>([])
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
-  const [actionMenuOpen, setActionMenuOpen] = useState(false)
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
-  const [pickingCanvasImage, setPickingCanvasImage] = useState(false)
+  const [pickingCanvasNode, setPickingCanvasNode] = useState(false)
   const [pendingImageRequest, setPendingImageRequest] =
     useState<PendingImageRequest | null>(null)
   const [imageGenerationParams, setImageGenerationParams] =
-    useState<ImageGenerationParams>({
+    useState<AgentImageGenerationParams>({
       model: defaultImageModelId,
-      sizeId: settings?.defaultSize || IMAGE_SIZES[0].id,
+      aspectRatio: '1:1',
+      resolution: '2K',
       count: 1,
     })
   const activeAgentImageModelNeedsJimeng =
@@ -245,7 +257,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [pendingVideoRequest, setPendingVideoRequest] =
     useState<PendingVideoRequest | null>(null)
   const [videoGenerationParams, setVideoGenerationParams] =
-    useState<VideoGenerationParams>({
+    useState<AgentVideoGenerationParams>({
       model: defaultVideoModelId,
       mode: 'image_to_video',
       aspectRatio: '16:9',
@@ -268,6 +280,25 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'edit' | 'done'>('idle')
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [voiceStatus, setVoiceStatus] = useState('')
+
+  const resetConversationUi = useCallback(() => {
+    setDraft('')
+    setMentionedNodeIds([])
+    setPendingImageRequest(null)
+    setPendingVideoRequest(null)
+    setPendingEditRequest(null)
+    setImageGenerationStatus('')
+    setVideoGenerationStatus('')
+    setEditGenerationStatus('')
+    setSkillStep('idle')
+    setExpandedThinkingIds(new Set())
+    setVoiceStatus('')
+    setRolePickerOpen(false)
+    setTemplatePickerOpen(false)
+    setModelOpen(false)
+    setSkillPickerOpen(false)
+    setPickingCanvasNode(false)
+  }, [])
 
   const configuredCurrentModel = settings?.llmModel || ''
   const preferredModels = useMemo(() => {
@@ -296,13 +327,22 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }, [maxPanelWidth])
 
   useEffect(() => {
-    setImageGenerationParams((params) => ({
-      ...params,
-      model: imageModelOptions.some((model) => model.id === params.model)
+    const [defaultWidth, defaultHeight] = (settings?.defaultSize ?? '')
+      .split('x')
+      .map(Number)
+    setImageGenerationParams((params) => {
+      const model = imageModelOptions.some((option) => option.id === params.model)
         ? params.model
-        : defaultImageModelId,
-      sizeId: settings?.defaultSize || params.sizeId,
-    }))
+        : defaultImageModelId
+      return resolveAgentImageGenerationParams(
+        { ...params, model },
+        {
+          width: Number.isFinite(defaultWidth) ? defaultWidth : undefined,
+          height: Number.isFinite(defaultHeight) ? defaultHeight : undefined,
+        },
+        imageModelOptions.map((option) => option.id),
+      )
+    })
   }, [defaultImageModelId, imageModelOptions, settings?.defaultSize])
 
   useEffect(() => {
@@ -328,6 +368,28 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }, [rolePickerOpen])
 
   useEffect(() => {
+    if (!historyOpen) return
+    const closeHistory = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (
+        !target.closest('.agent-conversation-history') &&
+        !target.closest('.agent-history-btn')
+      ) {
+        setHistoryOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setHistoryOpen(false)
+    }
+    document.addEventListener('mousedown', closeHistory)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeHistory)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [historyOpen])
+
+  useEffect(() => {
     if (!templatePickerOpen) return
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement
@@ -338,6 +400,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [templatePickerOpen])
+
+  useEffect(() => {
+    if (!skillPickerOpen) return
+    const handler = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('.agent-action-picker')) {
+        setSkillPickerOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [skillPickerOpen])
 
   const mentionOptions = useMemo(() => {
     const query = (mentionQuery ?? '').toLowerCase()
@@ -351,8 +425,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const activeSkills = useMemo(() => {
     return activeSkillIds
-      .map((id) => AGENT_SKILLS.find((skill) => skill.id === id))
-      .filter((skill): skill is AgentSkill => !!skill)
+      .map(getAgentSkillById)
+      .filter((skill): skill is AgentSkillDefinition => !!skill)
   }, [activeSkillIds])
 
   const selectedMentionNodes = useMemo(() => {
@@ -360,6 +434,29 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       .map((id) => nodes.find((node) => node.id === id))
       .filter((node): node is (typeof nodes)[number] => !!node)
   }, [mentionedNodeIds, nodes])
+
+  const contextNodeTypes = useMemo(() => {
+    const ids = mentionedNodeIds.length > 0
+      ? mentionedNodeIds
+      : selectedNodeId
+        ? [selectedNodeId]
+        : []
+    return ids
+      .map((id) => nodes.find((node) => node.id === id)?.type)
+      .filter((type): type is string => typeof type === 'string')
+  }, [mentionedNodeIds, nodes, selectedNodeId])
+
+  const recommendedSkillIds = useMemo(
+    () => getRecommendedAgentSkillIds(draft, contextNodeTypes),
+    [contextNodeTypes, draft],
+  )
+
+  const activeSkillInputIssue = useMemo(
+    () => activeSkills
+      .map((skill) => getAgentSkillInputIssue(skill, contextNodeTypes))
+      .find((issue): issue is string => !!issue) ?? null,
+    [activeSkills, contextNodeTypes],
+  )
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -391,66 +488,80 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }
 
   const toggleSkill = (skillId: string) => {
-    setActiveSkillIds((ids) =>
-      ids.includes(skillId)
-        ? ids.filter((id) => id !== skillId)
-        : [...ids, skillId],
+    if (activeSkillIds.includes(skillId)) {
+      setActiveSkillIds((ids) => ids.filter((id) => id !== skillId))
+      setVoiceStatus('')
+      setError(undefined)
+      return
+    }
+    if (activeSkillIds.length >= MAX_ACTIVE_AGENT_SKILLS) {
+      setVoiceStatus(`一次最多组合 ${MAX_ACTIVE_AGENT_SKILLS} 个技能`)
+      return
+    }
+    const skill = getAgentSkillById(skillId)
+    if (!skill) return
+    setActiveSkillIds((ids) => [...ids, skillId])
+    const issue = getAgentSkillInputIssue(skill, contextNodeTypes)
+    setVoiceStatus(
+      issue
+        ? `${skill.label}已加入技能链，${issue.replace(`${skill.label}需要`, '还需要')}`
+        : `${skill.label}已加入技能链`,
     )
   }
 
   const removeSkill = (skillId: string) => {
     setActiveSkillIds((ids) => ids.filter((id) => id !== skillId))
+    setVoiceStatus('')
+    setError(undefined)
   }
 
-  const attachCanvasImage = useCallback((nodeId: string) => {
+  const attachCanvasNode = useCallback((nodeId: string) => {
     const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId)
-    if (!node || node.type !== 'image') return
+    if (!node) return
 
     setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
     setDraft((value) =>
-      value.trim() ? value : '请根据引用图片进行修改：',
+      value.trim() ? value : '请结合引用的画布节点继续创作：',
     )
-    setVoiceStatus(`已引用 ${nodeTitle(node)}`)
+    setVoiceStatus(`已选择 ${nodeTitle(node)}，可继续选择其他节点`)
   }, [])
 
   useEffect(() => {
-    document.body.classList.toggle('agent-pick-image-active', pickingCanvasImage)
+    document.body.classList.toggle('agent-pick-node-active', pickingCanvasNode)
 
-    if (!pickingCanvasImage) {
+    if (!pickingCanvasNode) {
       return () => {
-        document.body.classList.remove('agent-pick-image-active')
+        document.body.classList.remove('agent-pick-node-active')
       }
     }
 
     const handlePick = (event: MouseEvent) => {
       const target = event.target as Element | null
-      const wrapper = target?.closest(
-        '[data-flow-node-type="image"]',
-      ) as HTMLElement | null
+      const wrapper = target?.closest('[data-flow-node-id]') as HTMLElement | null
       if (!wrapper) return
 
       event.preventDefault()
       event.stopPropagation()
       const nodeId = wrapper.dataset.flowNodeId
-      if (nodeId) attachCanvasImage(nodeId)
-      setPickingCanvasImage(false)
-      setActionMenuOpen(false)
-      setSkillPickerOpen(false)
+      if (nodeId) attachCanvasNode(nodeId)
     }
 
     const handleCancel = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPickingCanvasImage(false)
+      if (event.key === 'Escape') {
+        setPickingCanvasNode(false)
+        setVoiceStatus('')
+      }
     }
 
     document.addEventListener('click', handlePick, true)
     window.addEventListener('keydown', handleCancel)
 
     return () => {
-      document.body.classList.remove('agent-pick-image-active')
+      document.body.classList.remove('agent-pick-node-active')
       document.removeEventListener('click', handlePick, true)
       window.removeEventListener('keydown', handleCancel)
     }
-  }, [attachCanvasImage, pickingCanvasImage])
+  }, [attachCanvasNode, pickingCanvasNode])
 
   const currentContextNodeIds = () =>
     mentionedNodeIds.length > 0
@@ -458,14 +569,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       : selectedNodeId
         ? [selectedNodeId]
         : []
-
-  const applySkillsToUserIdea = (userIdea: string) => {
-    if (activeSkills.length === 0) return userIdea
-    const skillText = activeSkills
-      .map((skill) => `技能「${skill.label}」：${skill.instruction}`)
-      .join('\n')
-    return `${skillText}\n\n用户需求：${userIdea}`
-  }
 
   const appendUserMessage = (userIdea: string, contextNodeIds: string[]) => {
     useAgentStore.setState((state) => ({
@@ -532,16 +635,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     return { assetIds, nodeIds }
   }
 
-  const startAgentImageGeneration = async () => {
+  const startAgentImageGeneration = async (generate = true) => {
     if (!pendingImageRequest) return
-    if (activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
+    if (generate && activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
       setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
 
-    const size =
-      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
-      IMAGE_SIZES[0]
+    const size = getAgentImageDimensions(
+      imageGenerationParams.aspectRatio,
+      imageGenerationParams.resolution,
+    )
     const contextNodes = pendingImageRequest.contextNodeIds
       .map((id) => nodes.find((node) => node.id === id))
       .filter((node): node is (typeof nodes)[number] => !!node)
@@ -561,7 +665,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         : ''
     const prompt = `${pendingImageRequest.prompt}${skillHint}`
 
-    const imageNodeId = addNode('image', getCanvasDropPosition())
+    const dropPosition = getCanvasDropPosition()
+    const imageNodeId = addNode('image', dropPosition)
     if (!imageNodeId) return
 
     imageContextNodes.forEach((node) => {
@@ -588,7 +693,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const generateStore = useGenerateStore.getState()
     generateStore.setLastRequest(imageNodeId, request)
-    generateStore.setStatus(imageNodeId, 'queued')
+    generateStore.setStatus(imageNodeId, generate ? 'queued' : 'idle')
     generateStore.setError(imageNodeId, undefined)
     updateNodeData(imageNodeId, {
       prompt,
@@ -598,10 +703,19 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       count: imageGenerationParams.count,
       seed: null,
       inputImageAssetIds,
-      status: 'running',
+      status: generate ? 'running' : 'idle',
       error: undefined,
       updatedAt: new Date().toISOString(),
     } as unknown as Partial<BaseNodeData>)
+    if (!generate) {
+      setSelectedNode(imageNodeId)
+      setPendingImageRequest(null)
+      setImageGenerationStatus('')
+      setSkillStep('done')
+      setVoiceStatus('已发送图片节点到画布，可在节点上继续生成')
+      return
+    }
+
 
     setImageGenerationStatus('已在画布创建图片节点，正在生成...')
 
@@ -696,13 +810,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
   }
 
-  const startAgentVideoGeneration = async () => {
+  const startAgentVideoGeneration = async (generate = true) => {
     if (!pendingVideoRequest) return
-    if (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
+    if (generate && activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
       setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
       return
     }
-    if (unsupportedAgentVideoModelMessage) {
+    if (generate && unsupportedAgentVideoModelMessage) {
       setVideoGenerationStatus(unsupportedAgentVideoModelMessage)
       return
     }
@@ -768,19 +882,32 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const generateStore = useGenerateStore.getState()
     generateStore.setLastRequest(videoNodeId, request)
-    generateStore.setStatus(videoNodeId, 'running')
+    generateStore.setStatus(videoNodeId, generate ? 'running' : 'idle')
     generateStore.setError(videoNodeId, undefined)
     const latestVideoData = useCanvasStore
       .getState()
       .nodes.find((node) => node.id === videoNodeId)
       ?.data as Partial<VideoNodeData> | undefined
+    const videoNodePatch = buildAgentVideoRunningPatch(
+      request,
+      latestVideoData ?? {},
+    )
     updateNodeData(
       videoNodeId,
-      buildAgentVideoRunningPatch(
-        request,
-        latestVideoData ?? {},
-      ) as unknown as Partial<BaseNodeData>,
+      {
+        ...videoNodePatch,
+        status: generate ? 'running' : 'idle',
+      } as unknown as Partial<BaseNodeData>,
     )
+
+    if (!generate) {
+      setSelectedNode(videoNodeId)
+      setPendingVideoRequest(null)
+      setVideoGenerationStatus('')
+      setSkillStep('done')
+      setVoiceStatus('已发送视频节点到画布，可在节点上继续生成')
+      return
+    }
 
     setVideoGenerationStatus(
       existingVideoNodeId
@@ -905,9 +1032,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       })
     })
 
-    const size =
-      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
-      IMAGE_SIZES[0]
+    const size = getAgentImageDimensions(
+      imageGenerationParams.aspectRatio,
+      imageGenerationParams.resolution,
+    )
 
     const generateStore = useGenerateStore.getState()
     generateStore.setStatus(imageNodeId, 'queued')
@@ -988,9 +1116,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       return
     }
 
-    const size =
-      IMAGE_SIZES.find((item) => item.id === imageGenerationParams.sizeId) ??
-      IMAGE_SIZES[0]
+    const size = getAgentImageDimensions(
+      imageGenerationParams.aspectRatio,
+      imageGenerationParams.resolution,
+    )
     const basePos = getCanvasDropPosition()
     const imageNodeIds: string[] = []
 
@@ -1360,17 +1489,26 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
     const model = modelOverride || currentModel
 
+    clearGenerationResults()
+    setPendingImageRequest(null)
+    setPendingVideoRequest(null)
+    setPendingEditRequest(null)
+    setImageGenerationStatus('')
+    setVideoGenerationStatus('')
+    setEditGenerationStatus('')
     setLoading(true)
     setError(undefined)
     setSkillStep('loading')
 
     try {
       const request: PromptOptimizeRequest = {
-        userIdea: applySkillsToUserIdea(lastReq.userIdea),
+        userIdea: lastReq.userIdea,
+        conversationHistory: conversationHistoryForRequest(lastReq.userIdea),
         contextNodeIds: lastReq.contextNodeIds,
         selectedNodeId: lastReq.selectedNodeId,
         model,
         role: lastReq.role || 'general',
+        skills: toAgentSkillSelections(activeSkills),
       }
 
       const response = await optimizePrompt(request)
@@ -1378,6 +1516,22 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
       const intent = response.intent
       if (intent === 'image' || intent === 'image_then_video') {
+        setImageGenerationParams((params) =>
+          resolveAgentImageGenerationParams(
+            params,
+            response.suggestedParams,
+            imageModelOptions.map((option) => option.id),
+          ),
+        )
+        if (intent === 'image_then_video') {
+          setVideoGenerationParams((params) =>
+            resolveAgentVideoGenerationParams(
+              params,
+              response.suggestedParams,
+              videoModelOptions.map((option) => option.id),
+            ),
+          )
+        }
         setSkillStep('image')
         setPendingImageRequest({
           id: `image_intent_${Date.now()}`,
@@ -1391,6 +1545,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           setTimeout(() => setSkillStep('done'), 600)
         }
       } else if (intent === 'video') {
+        setVideoGenerationParams((params) =>
+          resolveAgentVideoGenerationParams(
+            params,
+            response.suggestedParams,
+            videoModelOptions.map((option) => option.id),
+          ),
+        )
         setSkillStep('video')
         setPendingVideoRequest({
           id: `video_intent_${Date.now()}`,
@@ -1426,6 +1587,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const userIdea = (overrideDraft ?? draft).trim()
     if (!userIdea || loading) return
 
+    if (activeSkillInputIssue) {
+      setError(activeSkillInputIssue)
+      setVoiceStatus(activeSkillInputIssue)
+      return
+    }
     const contextNodeIds = currentContextNodeIds()
 
     appendUserMessage(userIdea, contextNodeIds)
@@ -1475,13 +1641,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       }
     }
 
+    // 这是一个新的创作请求：旧预览和旧待执行计划不能继续挂在新消息下面。
+    clearGenerationResults()
+    setPendingImageRequest(null)
+    setPendingVideoRequest(null)
+    setPendingEditRequest(null)
+    setImageGenerationStatus('')
+    setVideoGenerationStatus('')
+    setEditGenerationStatus('')
     // 先走 LLM 优化，由 LLM 判断意图
     const request: PromptOptimizeRequest = {
-      userIdea: applySkillsToUserIdea(userIdea),
+      userIdea,
+      conversationHistory: conversationHistoryForRequest(userIdea),
       contextNodeIds,
       selectedNodeId: selectedNodeId ?? undefined,
       model: currentModel,
       role: useAgentStore.getState().role,
+      skills: toAgentSkillSelections(activeSkills),
     }
 
     setLoading(true)
@@ -1496,6 +1672,22 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       const intent = response.intent
       if (intent === 'image' || intent === 'image_then_video') {
         setSkillStep('image')
+        setImageGenerationParams((params) =>
+          resolveAgentImageGenerationParams(
+            params,
+            response.suggestedParams,
+            imageModelOptions.map((option) => option.id),
+          ),
+        )
+        if (intent === 'image_then_video') {
+          setVideoGenerationParams((params) =>
+            resolveAgentVideoGenerationParams(
+              params,
+              response.suggestedParams,
+              videoModelOptions.map((option) => option.id),
+            ),
+          )
+        }
         setPendingImageRequest({
           id: `image_intent_${Date.now()}`,
           prompt: response.optimizedPrompt || userIdea,
@@ -1511,6 +1703,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         }
       } else if (intent === 'video') {
         setSkillStep('video')
+        setVideoGenerationParams((params) =>
+          resolveAgentVideoGenerationParams(
+            params,
+            response.suggestedParams,
+            videoModelOptions.map((option) => option.id),
+          ),
+        )
         setPendingVideoRequest({
           id: `video_intent_${Date.now()}`,
           prompt: response.optimizedPrompt || userIdea,
@@ -1549,6 +1748,30 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     })
   }
 
+  const handleNewConversation = () => {
+    if (loading) return
+    newConversation()
+    resetConversationUi()
+    setHistoryOpen(false)
+  }
+
+  const handleOpenConversation = (conversationId: string) => {
+    if (loading || conversationId === activeConversationId) {
+      setHistoryOpen(false)
+      return
+    }
+    openConversation(conversationId)
+    resetConversationUi()
+    setHistoryOpen(false)
+  }
+
+  const handleDeleteConversation = (conversationId: string) => {
+    if (loading && conversationId === activeConversationId) return
+    const deletingActiveConversation = conversationId === activeConversationId
+    deleteConversation(conversationId)
+    if (deletingActiveConversation) resetConversationUi()
+  }
+
   return (
     <aside className="agent-chat-panel" style={{ width: panelWidth }}>
       <div
@@ -1567,41 +1790,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             type="button"
             onClick={() => setRolePickerOpen((v) => !v)}
             className="agent-role-pill"
+            aria-expanded={rolePickerOpen}
+            aria-haspopup="menu"
             title="切换 Agent 角色"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '3px 8px',
-              borderRadius: 12,
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.06)',
-              color: '#e6e6e6',
-              fontSize: 11,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-            }}
           >
             <span style={{ fontSize: 13 }}>{AGENT_ROLES.find((r) => r.id === role)?.icon}</span>
             <span>{AGENT_ROLES.find((r) => r.id === role)?.name}</span>
             <ChevronDown size={10} />
           </button>
           {rolePickerOpen && (
-            <div
-              className="agent-role-dropdown"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                right: 0,
-                zIndex: 50,
-                width: 220,
-                background: '#202020',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 10,
-                padding: 6,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-              }}
-            >
+            <div className="agent-role-dropdown" role="menu">
               {AGENT_ROLES.map((r) => (
                 <button
                   key={r.id}
@@ -1610,27 +1808,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                     setRole(r.id as AgentRole)
                     setRolePickerOpen(false)
                   }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: role === r.id ? 'rgba(255,255,255,0.08)' : 'transparent',
-                    color: '#e6e6e6',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 0.15s',
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.12)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = role === r.id ? 'rgba(255,255,255,0.08)' : 'transparent')}
+                  className={`agent-role-option${role === r.id ? ' selected' : ''}`}
+                  role="menuitemradio"
+                  aria-checked={role === r.id}
                 >
-                  <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{r.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4 }}>{r.name}</div>
-                    <div style={{ fontSize: 10, color: '#a3a3a3', lineHeight: 1.3, marginTop: 1 }}>{r.description}</div>
+                  <span className="agent-role-option-icon">{r.icon}</span>
+                  <div className="agent-role-option-copy">
+                    <div className="agent-role-option-label">{r.name}</div>
+                    <div className="agent-role-option-description">{r.description}</div>
                   </div>
                   {role === r.id && <Check size={12} style={{ color: '#f2f2f2', flexShrink: 0 }} />}
                 </button>
@@ -1639,9 +1824,39 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           )}
         </div>
         <div className="agent-header-actions">
-          <button type="button" className="agent-header-btn" title="新对话">
+          <button
+            type="button"
+            className="agent-header-btn"
+            title={loading ? '等待当前回复完成后再新建对话' : '新建对话'}
+            aria-label="新建对话"
+            onClick={handleNewConversation}
+            disabled={loading}
+          >
             <Plus size={14} />
           </button>
+          <button
+            type="button"
+            className="agent-header-btn agent-history-btn"
+            title="历史对话"
+            aria-label="历史对话"
+            aria-expanded={historyOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setRolePickerOpen(false)
+              setHistoryOpen((open) => !open)
+            }}
+          >
+            <History size={14} />
+          </button>
+          {historyOpen && (
+            <AgentConversationHistory
+              activeConversationId={activeConversationId}
+              conversations={conversations}
+              switchingDisabled={loading}
+              onOpen={handleOpenConversation}
+              onDelete={handleDeleteConversation}
+            />
+          )}
           <button
             type="button"
             className="agent-header-btn"
@@ -1945,11 +2160,25 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-bubble assistant agent-image-request">
             <div className="agent-card-title">
               <Sparkles size={14} />
-              <span>生成图片前确认一下参数</span>
+              <span>Agent 推荐的图片计划</span>
             </div>
             <p className="agent-card-desc">
-              我会把这个需求变成画布上的图片节点，并按下面参数开始生成。
+              已根据用途预选参数。你可以修改后只发送节点，也可以直接开始生成。
             </p>
+            <div className="agent-video-params agent-image-params">
+              <span className="agent-video-param-tag">
+                <strong>模型</strong> {imageModelOptions.find((model) => model.id === imageGenerationParams.model)?.label ?? imageGenerationParams.model}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>比例</strong> {imageGenerationParams.aspectRatio}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>清晰度</strong> {imageGenerationParams.resolution}
+              </span>
+              <span className="agent-video-param-tag">
+                <strong>数量</strong> {imageGenerationParams.count}
+              </span>
+            </div>
 
             <div className="agent-image-fields">
               <label>
@@ -1972,19 +2201,38 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               </label>
 
               <label>
-                <span>比例 / 尺寸</span>
+                <span>画面比例</span>
                 <select
-                  value={imageGenerationParams.sizeId}
+                  value={imageGenerationParams.aspectRatio}
                   onChange={(event) =>
                     setImageGenerationParams((params) => ({
                       ...params,
-                      sizeId: event.target.value,
+                      aspectRatio: event.target.value as AgentImageAspectRatio,
                     }))
                   }
                 >
-                  {IMAGE_SIZES.map((size) => (
-                    <option key={size.id} value={size.id}>
-                      {size.label}
+                  {AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => (
+                    <option key={ratio} value={ratio}>
+                      {ratio}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>清晰度 / 大小</span>
+                <select
+                  value={imageGenerationParams.resolution}
+                  onChange={(event) =>
+                    setImageGenerationParams((params) => ({
+                      ...params,
+                      resolution: event.target.value as AgentImageResolution,
+                    }))
+                  }
+                >
+                  {getAgentImageResolutionOptions(imageGenerationParams.model).map((resolution) => (
+                    <option key={resolution} value={resolution}>
+                      {resolution}
                     </option>
                   ))}
                 </select>
@@ -2034,16 +2282,23 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               </button>
               <button
                 type="button"
+                className="agent-card-secondary"
+                onClick={() => void startAgentImageGeneration(false)}
+              >
+                发送至画布
+              </button>
+              <button
+                type="button"
                 className="agent-card-primary"
-                onClick={() => void startAgentImageGeneration()}
+                onClick={() => void startAgentImageGeneration(true)}
                 disabled={activeAgentImageModelNeedsJimeng && !isJimengConfigured}
                 title={
                   activeAgentImageModelNeedsJimeng && !isJimengConfigured
                     ? '未配置 dreamina CLI'
-                    : '生成到画布'
+                    : '发送并生成'
                 }
               >
-                生成到画布
+                发送并生成
               </button>
             </div>
           </div>
@@ -2053,10 +2308,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-bubble assistant agent-video-request">
             <div className="agent-card-title">
               <Film size={14} />
-              <span>视频生成确认</span>
+              <span>Agent 推荐的视频计划</span>
             </div>
             <p className="agent-video-desc">
-              {pendingVideoRequest.prompt}
+              {pendingVideoRequest.prompt}。你可以调整参数后只发送节点，或直接开始生成。
             </p>
 
             <div className="agent-video-params">
@@ -2223,8 +2478,15 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               </button>
               <button
                 type="button"
+                className="agent-card-secondary"
+                onClick={() => void startAgentVideoGeneration(false)}
+              >
+                发送至画布
+              </button>
+              <button
+                type="button"
                 className="agent-card-primary"
-                onClick={() => void startAgentVideoGeneration()}
+                onClick={() => void startAgentVideoGeneration(true)}
                 disabled={
                   (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) ||
                   !!unsupportedAgentVideoModelMessage
@@ -2233,10 +2495,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                   unsupportedAgentVideoModelMessage ||
                   (activeAgentVideoModelNeedsJimeng && !isJimengConfigured
                     ? '未配置 dreamina CLI'
-                    : '生成到画布')
+                    : '发送并生成')
                 }
               >
-                生成到画布
+                发送并生成
               </button>
             </div>
           </div>
@@ -2270,20 +2532,48 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
       <footer className="agent-composer">
         {activeSkills.length > 0 && (
-          <div className="agent-skill-chips">
-            {activeSkills.map((skill) => (
+          <div className="agent-skill-plan">
+            <div className="agent-skill-plan-header">
+              <span>
+                <Wand2 size={12} />
+                技能链 · {activeSkills.length} 步
+              </span>
               <button
                 type="button"
-                key={skill.id}
-                className="agent-skill-chip"
-                onClick={() => removeSkill(skill.id)}
-                title="移除技能"
+                onClick={() => {
+                  setActiveSkillIds([])
+                  setVoiceStatus('')
+                  setError(undefined)
+                }}
               >
-                <Wand2 size={11} />
-                {skill.label}
-                <X size={11} />
+                清空
               </button>
-            ))}
+            </div>
+            <div className="agent-skill-plan-steps">
+              {activeSkills.map((skill, index) => (
+                <div className="agent-skill-plan-step" key={skill.id}>
+                  <span className="agent-skill-plan-index">{index + 1}</span>
+                  <span className="agent-skill-plan-copy">
+                    <strong>{skill.label}</strong>
+                    <small>
+                      {AGENT_SKILL_INPUT_LABELS[skill.input]}
+                      <ChevronRight size={10} />
+                      {AGENT_SKILL_OUTPUT_LABELS[skill.output]}
+                    </small>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeSkill(skill.id)}
+                    aria-label={`移除${skill.label}`}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {activeSkillInputIssue && (
+              <div className="agent-skill-plan-warning">{activeSkillInputIssue}</div>
+            )}
           </div>
         )}
 
@@ -2353,66 +2643,110 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           <div className="agent-action-picker">
             <button
               type="button"
-              className={`agent-round-btn ${actionMenuOpen || pickingCanvasImage ? 'active' : ''}`}
-              title="添加能力"
+              className={`agent-round-btn agent-canvas-pick-btn ${pickingCanvasNode ? 'active' : ''}`}
+              title={pickingCanvasNode ? '结束选择节点' : '从画布选择节点'}
+              aria-label={pickingCanvasNode ? '结束选择节点' : '从画布选择节点'}
+              aria-pressed={pickingCanvasNode}
               onClick={() => {
-                setActionMenuOpen((open) => !open)
+                const nextPicking = !pickingCanvasNode
+                setPickingCanvasNode(nextPicking)
                 setSkillPickerOpen(false)
+                setVoiceStatus('')
               }}
             >
-              <Plus size={15} />
+              <MousePointer2 size={14} />
+            </button>
+            <button
+              type="button"
+              className={`agent-round-btn ${skillPickerOpen ? 'active' : ''}`}
+              title="打开技能库"
+              aria-label="打开技能库"
+              aria-expanded={skillPickerOpen}
+              aria-haspopup="dialog"
+              onClick={() => {
+                const nextOpen = !skillPickerOpen
+                setSkillPickerOpen(nextOpen)
+                if (nextOpen) {
+                  setPickingCanvasNode(false)
+                  setVoiceStatus('')
+                }
+              }}
+            >
+              <Blocks size={14} />
             </button>
 
-            {actionMenuOpen && (
-              <div className="agent-action-menu">
-                <button
-                  type="button"
-                  className="agent-action-option"
-                  onClick={() => {
-                    setPickingCanvasImage(true)
-                    setActionMenuOpen(false)
-                    setVoiceStatus('点击画布上的图片节点进行引用')
-                  }}
-                >
-                  <ImageIcon size={14} />
+            {skillPickerOpen && (
+              <div className="agent-skill-library" role="dialog" aria-label="技能库">
+                <div className="agent-skill-library-header">
                   <span>
-                    引用画布图片
-                    <small>点选图片节点</small>
+                    <strong>技能库</strong>
+                    <small>最多组合 {MAX_ACTIVE_AGENT_SKILLS} 个，按选择顺序执行</small>
                   </span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setSkillPickerOpen(false)}
+                    aria-label="关闭技能库"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
 
-                <button
-                  type="button"
-                  className="agent-action-option"
-                  onClick={() => setSkillPickerOpen((open) => !open)}
-                >
-                  <Wand2 size={14} />
-                  <span>
-                    添加技能
-                    <small>让 Agent 带着能力工作</small>
-                  </span>
-                </button>
-
-                {skillPickerOpen && (
-                  <div className="agent-skill-menu">
-                    {AGENT_SKILLS.map((skill) => (
-                      <button
-                        type="button"
-                        key={skill.id}
-                        className={
-                          activeSkillIds.includes(skill.id) ? 'selected' : ''
-                        }
-                        onClick={() => toggleSkill(skill.id)}
-                      >
-                        <Sparkles size={12} />
-                        <span>
+                <div className="agent-skill-recommended">
+                  <span>智能推荐</span>
+                  <div>
+                    {recommendedSkillIds.map((skillId) => {
+                      const skill = getAgentSkillById(skillId)
+                      if (!skill) return null
+                      return (
+                        <button
+                          type="button"
+                          key={skill.id}
+                          className={activeSkillIds.includes(skill.id) ? 'selected' : ''}
+                          onClick={() => toggleSkill(skill.id)}
+                        >
+                          <Sparkles size={10} />
                           {skill.label}
-                          <small>{skill.description}</small>
-                        </span>
-                      </button>
-                    ))}
+                        </button>
+                      )
+                    })}
                   </div>
-                )}
+                </div>
+
+                <div className="agent-skill-library-list">
+                  {AGENT_SKILL_CATEGORIES.map((category) => (
+                    <section key={category}>
+                      <h4>{category}</h4>
+                      {AGENT_SKILLS.filter((skill) => skill.category === category).map((skill) => {
+                        const selected = activeSkillIds.includes(skill.id)
+                        const issue = getAgentSkillInputIssue(skill, contextNodeTypes)
+                        return (
+                          <button
+                            type="button"
+                            key={skill.id}
+                            className={`agent-skill-library-item ${selected ? 'selected' : ''}`}
+                            onClick={() => toggleSkill(skill.id)}
+                            aria-pressed={selected}
+                          >
+                            <span className="agent-skill-library-icon"><Wand2 size={13} /></span>
+                            <span className="agent-skill-library-copy">
+                              <strong>{skill.label}</strong>
+                              <small>{skill.description}</small>
+                              <span className="agent-skill-library-meta">
+                                {AGENT_SKILL_INPUT_LABELS[skill.input]}
+                                <ChevronRight size={10} />
+                                {AGENT_SKILL_OUTPUT_LABELS[skill.output]}
+                                {issue && <em>缺少输入</em>}
+                              </span>
+                            </span>
+                            <span className="agent-skill-library-state">
+                              {selected ? <Check size={13} /> : <Plus size={13} />}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </section>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -2515,8 +2849,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             type="button"
             className="agent-send-btn"
             onClick={() => void submit()}
-            disabled={!draft.trim() || loading || !currentModel}
-            title={currentModel ? '发送' : '请先在设置中添加大语言模型'}
+            disabled={!draft.trim() || loading || !currentModel || !!activeSkillInputIssue}
+            title={
+              activeSkillInputIssue ??
+              (currentModel ? '发送' : '请先在设置中添加大语言模型')
+            }
           >
             <ArrowUp size={15} />
           </button>

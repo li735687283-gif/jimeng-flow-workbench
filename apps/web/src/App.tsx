@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ArrowLeft } from 'lucide-react'
-import { CanvasView } from './components/canvas/CanvasView'
+import {
+  CanvasView,
+  type CanvasViewHandle,
+} from './components/canvas/CanvasView'
 import { CanvasBottomToolbar } from './components/canvas/CanvasBottomToolbar'
 import { AssetLibraryModal } from './components/AssetLibraryModal'
 import { AgentPanel } from './components/AgentPanel'
@@ -119,6 +122,7 @@ function AppInner() {
   const centeredFlowIdRef = useRef<string | null>(null)
   const restoringFlowIdRef = useRef<string | null>(null)
   const lastSavedFlowIdRef = useRef<string | null>(currentFlowId)
+  const canvasViewRef = useRef<CanvasViewHandle>(null)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
   // 恢复上次画布期间先禁用，避免与恢复逻辑冲突。
@@ -356,7 +360,7 @@ function AppInner() {
         />
       ) : (
         <main className="canvas-stage">
-          <CanvasView />
+          <CanvasView ref={canvasViewRef} />
 
           <div className="canvas-topbar canvas-topbar-left">
             <button type="button" className="ghost-pill" onClick={handleShowHome}>
@@ -366,7 +370,8 @@ function AppInner() {
           </div>
 
           <CanvasBottomToolbar
-            onAddNode={() => handleSelectFromLibrary('text')}
+            onAddNode={handleSelectFromLibrary}
+            onUpload={() => canvasViewRef.current?.openUploadAtCenter()}
             onOpenAssetLibrary={() => setAssetLibraryOpen(true)}
             onOpenHistory={() => setGenerationHistoryOpen(true)}
             onLocateNodes={handleLocateNodes}

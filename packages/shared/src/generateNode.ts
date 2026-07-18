@@ -218,6 +218,7 @@ export function appendImageGenerationRun(
 
 /** 可选图片模型列表（对齐 dreamina CLI model_version） */
 export const IMAGE_MODELS = [
+  { id: 'jimeng-5.0-pro', label: '即梦 5.0 Pro', description: 'CLI model_version=5.0Pro' },
   { id: 'jimeng-5.0', label: '即梦 5.0', description: 'CLI model_version=5.0' },
   { id: 'jimeng-4.7', label: '即梦 4.7', description: 'CLI model_version=4.7' },
   { id: 'jimeng-3.0', label: '即梦 3.0', description: 'CLI model_version=3.0' },

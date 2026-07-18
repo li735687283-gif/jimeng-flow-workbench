@@ -196,12 +196,18 @@ async function waitBeforeNextQuery(remaining: number): Promise<void> {
   })
 }
 
-function getResolutionType(width: number, height: number): string {
+export function getImageResolutionType(
+  width: number,
+  height: number,
+  model: string,
+): string {
   const maxSide = Math.max(width, height)
+  if (model === 'jimeng-5.0-pro' && maxSide <= 1024) return '1k'
   return maxSide >= 3000 ? '4k' : '2k'
 }
 
-function getImageModelVersion(model: string): string | null {
+export function getImageModelVersion(model: string): string | null {
+  if (model === 'jimeng-5.0-pro') return '5.0Pro'
   const match = model.match(/(\d+(?:\.\d+)?)/)
   return match?.[1] ?? null
 }
@@ -409,7 +415,7 @@ export async function generateImage(
     command,
     `--prompt=${params.prompt}`,
     `--ratio=${getClosestRatio(params.width, params.height)}`,
-    `--resolution_type=${getResolutionType(params.width, params.height)}`,
+    `--resolution_type=${getImageResolutionType(params.width, params.height, params.model)}`,
     `--generate_num=${Math.max(1, Math.min(params.count ?? 1, 10))}`,
   ]
 

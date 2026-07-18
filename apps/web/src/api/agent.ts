@@ -7,6 +7,23 @@ import type {
   PromptOptimizeResponse,
 } from '@jimeng-flow/shared/agentMessage'
 
+export function getAgentApiErrorMessage(
+  status: number,
+  statusText: string,
+  responseText: string,
+): string {
+  const fallback = `Agent 调用失败：${status} ${statusText}`
+  try {
+    const parsed = JSON.parse(responseText) as { message?: string; code?: string }
+    if (parsed.code === 'PARSE_FAILED') {
+      return '模型返回格式异常，本次没有生成新结果。请重试或切换模型。'
+    }
+    return parsed.message || fallback
+  } catch {
+    return fallback
+  }
+}
+
 /** POST /api/agent/prompt-optimize - 优化 Prompt */
 export async function optimizePrompt(
   req: PromptOptimizeRequest,
@@ -18,14 +35,7 @@ export async function optimizePrompt(
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    let message = `Agent 调用失败：${res.status} ${res.statusText}`
-    try {
-      const parsed = JSON.parse(text) as { message?: string }
-      if (parsed.message) message = parsed.message
-    } catch {
-      // 非 JSON 错误体，保留默认 message
-    }
-    throw new Error(message)
+    throw new Error(getAgentApiErrorMessage(res.status, res.statusText, text))
   }
   return (await res.json()) as PromptOptimizeResponse
 }
