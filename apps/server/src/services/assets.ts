@@ -8,9 +8,9 @@
 // asset.path 为相对 workspace/ 的路径。
 
 import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
-import { extname, relative, resolve, sep } from 'node:path'
+import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import type { Asset, AssetType } from '@jimeng-flow/shared/asset'
+import type { Asset, AssetCategory, AssetType } from '@jimeng-flow/shared/asset'
 import { readSettings, getProjectRoot, resolveOutputDir } from '../config'
 
 // workspace 根目录：<projectRoot>/workspace
@@ -46,6 +46,25 @@ function deriveAssetType(mimeType: string, originalName: string): AssetType {
     return 'video'
   }
   return 'image'
+}
+
+/** 根据提示词和参数对资产做稳定的自动分类。 */
+export function inferAssetCategory(
+  asset: Pick<Asset, 'prompt' | 'type' | 'params'>,
+): AssetCategory {
+  const parameterText = asset.params && typeof asset.params === 'object'
+    ? Object.values(asset.params)
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+    : ''
+  const text = `${asset.prompt ?? ''} ${parameterText}`.toLocaleLowerCase()
+  if (/(角色|人物|人像|肖像|少年|少女|男孩|女孩|男人|女人|character|portrait|person|human|man|woman)/i.test(text)) {
+    return '角色'
+  }
+  if (/(道具|物品|武器|装备|家具|车辆|汽车|prop|object|item|weapon|tool|furniture|vehicle)/i.test(text)) {
+    return '道具'
+  }
+  return '场景'
 }
 
 /** 把 Windows 反斜杠路径归一化为正斜杠，便于跨平台存储 */
@@ -161,6 +180,25 @@ export async function getAsset(id: string): Promise<Asset | null> {
 }
 
 /**
+ * 将一个已经存在的输出资产登记到资产库。
+ * 资产文件不复制，资产库和 outputs 使用同一份 metadata/文件。
+ */
+export async function saveAssetToLibrary(id: string): Promise<Asset | null> {
+  const asset = await getAsset(id)
+  if (!asset) return null
+
+  const nextAsset: Asset = {
+    ...asset,
+    savedToLibrary: true,
+    category: asset.category ?? inferAssetCategory(asset),
+  }
+  const absPath = getAssetFilePath(asset)
+  const metadataPath = resolve(dirname(absPath), `${asset.id}.json`)
+  await writeFile(metadataPath, JSON.stringify(nextAsset, null, 2), 'utf8')
+  return nextAsset
+}
+
+/**
  * 列出全部资产，按创建时间倒序（最新在前）。
  */
 export async function listAssets(): Promise<Asset[]> {
@@ -197,4 +235,15 @@ export async function listAssets(): Promise<Asset[]> {
   }
   assets.sort((a, b) => (b.createdAt < a.createdAt ? -1 : b.createdAt > a.createdAt ? 1 : 0))
   return assets
+}
+
+/** 只返回通过节点右键保存到资产库的资产。 */
+export async function listLibraryAssets(): Promise<Asset[]> {
+  const assets = await listAssets()
+  return assets
+    .filter((asset) => asset.savedToLibrary === true)
+    .map((asset) => ({
+      ...asset,
+      category: asset.category ?? inferAssetCategory(asset),
+    }))
 }

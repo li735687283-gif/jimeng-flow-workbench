@@ -8,12 +8,8 @@ import {
 } from '../src/utils/videoModels'
 import type { ModelConfig } from '@jimeng-flow/shared/settings'
 
-test('configured video models keep user-selected video model ids', () => {
-  const models = getConfiguredVideoModels([
-    'seedance-2.0',
-    'veo3-fast',
-    'kling-video',
-  ])
+test('configured video models show exactly the selected video model ids', () => {
+  const models = getConfiguredVideoModels(['seedance-2.0', 'veo3-fast', 'kling-video'])
 
   assert.deepEqual(
     models.map((model) => [model.id, model.label]),
@@ -25,11 +21,9 @@ test('configured video models keep user-selected video model ids', () => {
   )
 })
 
-test('configured video models fall back to built-in models when empty', () => {
-  const models = getConfiguredVideoModels([])
-
-  assert.equal(models[0]?.id, 'seedance-2.0')
-  assert.ok(models.length >= 1)
+test('an explicitly empty video selection stays empty', () => {
+  assert.deepEqual(getConfiguredVideoModels([]), [])
+  assert.equal(getConfiguredDefaultVideoModel([], 'seedance-2.0'), '')
 })
 
 test('configured default video model must be one of configured video models', () => {
@@ -51,20 +45,10 @@ test('third-party video models use the backend provider instead of dreamina gati
   assert.equal(videoModelNeedsJimeng('veo3-fast'), false)
 })
 
-test('configured video models use only video-capable structured model configs', () => {
+test('video model picker uses structured video configs only for legacy settings', () => {
   const modelConfigs: ModelConfig[] = [
-    {
-      id: 'gpt-4o-mini',
-      label: 'GPT 4o mini',
-      provider: 'openai-compatible',
-      capabilities: ['chat'],
-    },
-    {
-      id: 'gpt-image-2',
-      label: 'GPT Image 2',
-      provider: 'codex',
-      capabilities: ['image'],
-    },
+    { id: 'gpt-4o-mini', provider: 'openai-compatible', capabilities: ['chat'] },
+    { id: 'gpt-image-2', provider: 'codex', capabilities: ['image'] },
     {
       id: 'veo3-fast',
       label: 'Veo 3 Fast',
@@ -73,9 +57,8 @@ test('configured video models use only video-capable structured model configs', 
     },
   ]
 
-  const models = getConfiguredVideoModels([], modelConfigs)
-
-  assert.deepEqual(models.map((model) => [model.id, model.label]), [
-    ['veo3-fast', 'Veo 3 Fast'],
-  ])
+  assert.deepEqual(
+    getConfiguredVideoModels(undefined, modelConfigs).map((model) => [model.id, model.label]),
+    [['veo3-fast', 'Veo 3 Fast']],
+  )
 })

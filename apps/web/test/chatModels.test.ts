@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { ModelConfig } from '@jimeng-flow/shared/settings'
 import { getConfiguredChatModels } from '../src/utils/chatModels'
 
-test('configured chat models use only chat-capable structured model configs', () => {
+test('configured chat models show exactly the selected chat model ids', () => {
   const modelConfigs: ModelConfig[] = [
     {
       id: 'gpt-4o-mini',
@@ -11,29 +11,45 @@ test('configured chat models use only chat-capable structured model configs', ()
       provider: 'openai-compatible',
       capabilities: ['chat'],
     },
-    {
-      id: 'gpt-image-2',
-      label: 'GPT Image 2',
-      provider: 'codex',
-      capabilities: ['image'],
-    },
-    {
-      id: 'veo3-fast',
-      label: 'Veo 3 Fast',
-      provider: 'openai-compatible',
-      capabilities: ['video'],
-    },
+    { id: 'gpt-image-2', provider: 'codex', capabilities: ['image'] },
+    { id: 'veo3-fast', provider: 'openai-compatible', capabilities: ['video'] },
   ]
 
   assert.deepEqual(
-    getConfiguredChatModels(['legacy-chat', 'gpt-image-2'], 'gpt-4o-mini', modelConfigs),
-    ['gpt-4o-mini'],
+    getConfiguredChatModels(
+      ['legacy-chat', 'codex:gpt-5.5', 'gpt-image-2', 'veo3-fast', 'gpt-4o-mini'],
+      'gpt-4o-mini',
+      modelConfigs,
+    ),
+    ['legacy-chat', 'gpt-4o-mini'],
   )
 })
 
-test('configured chat models keep legacy llm models when no structured chat models exist', () => {
+test('image and video-only models never enter the chat picker', () => {
   assert.deepEqual(
-    getConfiguredChatModels(['legacy-chat'], 'legacy-default', []),
-    ['legacy-chat', 'legacy-default'],
+    getConfiguredChatModels(
+      ['gemini-3-pro-image-preview', 'doubao-seedream-5-0-pro', 'veo3-fast', 'claude-fable-5'],
+      '',
+      [],
+    ),
+    ['claude-fable-5'],
   )
+})
+
+test('an explicitly empty chat selection stays empty', () => {
+  assert.deepEqual(getConfiguredChatModels([], 'legacy-default', []), [])
+})
+
+test('structured chat configs remain a compatibility path when no explicit list exists', () => {
+  const modelConfigs: ModelConfig[] = [
+    { id: 'gpt-4o-mini', provider: 'openai-compatible', capabilities: ['chat'] },
+    { id: 'gpt-image-2', provider: 'codex', capabilities: ['image'] },
+  ]
+
+  assert.deepEqual(getConfiguredChatModels(undefined, 'legacy-default', modelConfigs), [
+    'gpt-4o-mini',
+  ])
+  assert.deepEqual(getConfiguredChatModels(undefined, 'legacy-default', []), [
+    'legacy-default',
+  ])
 })

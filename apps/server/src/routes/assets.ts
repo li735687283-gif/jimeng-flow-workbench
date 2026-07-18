@@ -15,7 +15,14 @@ import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { basename, extname, resolve } from 'node:path'
 import type { GenerationResult } from '@jimeng-flow/shared/generateNode'
 import { getProjectRoot } from '../config'
-import { saveUploadFile, getAsset, listAssets, getAssetFilePath } from '../services/assets'
+import {
+  saveUploadFile,
+  getAsset,
+  listAssets,
+  listLibraryAssets,
+  saveAssetToLibrary,
+  getAssetFilePath,
+} from '../services/assets'
 import {
   createAssetContentHash,
   findDuplicateImportedImage,
@@ -283,6 +290,11 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
   )
 
+  // GET /api/assets/library — 只列出通过右键保存到资产库的资产
+  app.get('/api/assets/library', async () => {
+    return await listLibraryAssets()
+  })
+
   // GET /api/assets
   app.get('/api/assets', async () => {
     return await listAssets()
@@ -293,6 +305,22 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     '/api/assets/:assetId',
     async (req, reply) => {
       const asset = await getAsset(req.params.assetId)
+      if (!asset) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: '资产不存在',
+        })
+      }
+      return asset
+    },
+  )
+
+  // POST /api/assets/:assetId/library — 将现有输出资产登记到资产库
+  app.post<{ Params: { assetId: string } }>(
+    '/api/assets/:assetId/library',
+    async (req, reply) => {
+      const asset = await saveAssetToLibrary(req.params.assetId)
       if (!asset) {
         return reply.code(404).send({
           statusCode: 404,

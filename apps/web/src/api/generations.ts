@@ -83,6 +83,8 @@ export interface EditGenerationRequest {
   model?: string
   width?: number
   height?: number
+  flowId?: string
+  nodeId?: string
 }
 
 /** POST /api/generations/edit - 创建图片编辑任务 */

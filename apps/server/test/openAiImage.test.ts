@@ -71,12 +71,69 @@ test('getOpenAiCompatibleImagePayload uses APIMart async image parameters', () =
   assert.deepEqual(payload, {
     model: 'gemini-3-pro-image-preview',
     prompt: 'city skyline',
-    n: 4,
+    n: 1,
     size: '16:9',
     resolution: '2k',
   })
 })
 
+test('generateOpenAiCompatibleImage fans out APIMart Gemini multi-image requests', async () => {
+  let submitted = 0
+  const requestedCounts: number[] = []
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    const urlText = String(url)
+    if (urlText.endsWith('/images/generations')) {
+      const payload = JSON.parse(String(init?.body)) as { n?: number }
+      requestedCounts.push(payload.n ?? 0)
+      submitted++
+      return Response.json({
+        code: 200,
+        data: [{ status: 'submitted', task_id: `task_fanout_${submitted}` }],
+      })
+    }
+
+    const taskId = /\/tasks\/([^?]+)/.exec(urlText)?.[1] ?? 'unknown'
+    return Response.json({
+      code: 200,
+      data: {
+        status: 'completed',
+        result: {
+          images: [
+            {
+              url: [`https://upload.apimart.ai/f/image/${taskId}.png`],
+            },
+          ],
+        },
+      },
+    })
+  }
+
+  const results = await generateOpenAiCompatibleImage(
+    {
+      flowId: 'local',
+      nodeId: 'image-fanout',
+      mediaType: 'image',
+      prompt: 'four distinct options',
+      model: 'gemini-3-pro-image-preview',
+      width: 1536,
+      height: 864,
+      count: 4,
+    },
+    {
+      settings: {
+        llmBaseUrl: 'https://api.apimart.ai/v1',
+        llmApiKey: 'test-key',
+      },
+      fetchImpl,
+      pollIntervalMs: 0,
+    },
+  )
+
+  assert.equal(submitted, 4)
+  assert.deepEqual(requestedCounts, [1, 1, 1, 1])
+  assert.equal(results.length, 4)
+  assert.equal(new Set(results.map((item) => item.remoteUrl)).size, 4)
+})
 test('generateOpenAiCompatibleImage polls APIMart task results', async () => {
   const calls: { url: string; body?: unknown }[] = []
   const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
@@ -138,6 +195,64 @@ test('generateOpenAiCompatibleImage polls APIMart task results', async () => {
   ])
   assert.equal(calls.length, 2)
   assert.equal(calls[1].url, 'https://api.apimart.ai/v1/tasks/task_123?language=en')
+})
+
+test('generateOpenAiCompatibleImage waits for completed task before using image urls', async () => {
+  let pollCount = 0
+  const fetchImpl = async (url: string | URL | Request) => {
+    const urlText = String(url)
+    if (urlText.endsWith('/images/generations')) {
+      return Response.json({
+        code: 200,
+        data: [{ status: 'submitted', task_id: 'task_pending_url' }],
+      })
+    }
+
+    pollCount++
+    return Response.json({
+      code: 200,
+      data: {
+        status: pollCount === 1 ? 'processing' : 'completed',
+        result: {
+          images: [
+            {
+              url: [
+                pollCount === 1
+                  ? 'https://upload.apimart.ai/f/image/not-ready.png'
+                  : 'https://upload.apimart.ai/f/image/ready.png',
+              ],
+            },
+          ],
+        },
+      },
+    })
+  }
+
+  const results = await generateOpenAiCompatibleImage(
+    {
+      flowId: 'local',
+      nodeId: 'image-wait',
+      mediaType: 'image',
+      prompt: 'wait until ready',
+      model: 'gemini-3-pro-image-preview',
+      width: 1536,
+      height: 864,
+      count: 1,
+    },
+    {
+      settings: {
+        llmBaseUrl: 'https://api.apimart.ai/v1',
+        llmApiKey: 'test-key',
+      },
+      fetchImpl,
+      pollIntervalMs: 0,
+    },
+  )
+
+  assert.equal(pollCount, 2)
+  assert.deepEqual(results, [
+    { remoteUrl: 'https://upload.apimart.ai/f/image/ready.png' },
+  ])
 })
 
 test('generateOpenAiCompatibleImage sends APIMart reference images as image_urls', async () => {

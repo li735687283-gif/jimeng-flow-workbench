@@ -1,11 +1,11 @@
 // 即梦 Flow 前端 - SettingsModal 设置弹窗组件
 // 暗色主题，固定遮罩 + 居中卡片。
 // 字段分组：Dreamina CLI、LLM Provider。
-// 加载时拉取 GET /api/settings；保存时 PUT /api/settings，成功后更新 store 并关闭。
+// 加载时拉取 GET /api/settings；保存时 PUT /api/settings，成功后更新 store，并在弹窗内显示保存状态。
 // 参考 PRD 7.1、8.6、11.3、12.1。
 
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Plus, RefreshCw, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, Copy, Plus, RefreshCw, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
 import type { Settings } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import {
@@ -15,7 +15,6 @@ import {
 import { IMAGE_MODELS, isJimengImageModel } from '@jimeng-flow/shared/generateNode'
 import { VIDEO_MODELS, isJimengVideoModel } from '@jimeng-flow/shared/videoNode'
 import { useSettingsStore } from '../state/settingsStore'
-import { getAssetFileUrl, uploadAsset } from '../api/assets'
 import {
   createSettingsDraft,
   getSettingsModalGuards,
@@ -75,11 +74,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 }
 
-const dropdownControlStyle: React.CSSProperties = {
-  ...inputStyle,
-  '--menu-control-font-size': '12px',
-  '--menu-control-padding': '6px 8px',
-} as React.CSSProperties
+
 
 const subtleButtonStyle: React.CSSProperties = {
   display: 'inline-flex',
@@ -97,32 +92,10 @@ const subtleButtonStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 }
 
-const iconButtonStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 34,
-  height: 34,
-  borderRadius: '6px',
-  border: '1px solid #333',
-  background: '#202020',
-  color: '#b8b8b8',
-  cursor: 'pointer',
-}
-
 const helperTextStyle: React.CSSProperties = {
   color: '#777',
   fontSize: 11,
 }
-
-const DEFAULT_MOK_HERO_PREVIEW_URL = new URL('../assets/mok-hero.png', import.meta.url).href
-
-const MOK_HERO_LAYOUT_CONTROLS = [
-  { key: 'homeMokHeroScale', id: 'settings-home-mok-hero-scale', label: '主图尺寸', min: 0.4, max: 1.6, step: 0.05, fallback: 1 },
-  { key: 'homeMokHeroOffsetX', id: 'settings-home-mok-hero-offset-x', label: '水平位置', min: -240, max: 240, step: 1, fallback: 0 },
-  { key: 'homeMokHeroOffsetY', id: 'settings-home-mok-hero-offset-y', label: '垂直位置', min: -240, max: 240, step: 1, fallback: 0 },
-  { key: 'homeMokHeroMarginTop', id: 'settings-home-mok-hero-margin-top', label: '顶部间距', min: -120, max: 240, step: 1, fallback: 0 },
-] as const
 
 const CODEX_IMAGE_MODEL_ID = 'codex:gpt-5.5'
 
@@ -149,6 +122,203 @@ function uniqueModelIds(models: string[]): string[] {
   )
 }
 
+export function appendUniqueModelId(models: string[], modelId: string): string[] {
+  return uniqueModelIds([...models, modelId])
+}
+
+type ModelPickerCategoryId = 'chat' | 'image' | 'video'
+
+interface ModelPickerCategory {
+  id: ModelPickerCategoryId
+  label: string
+}
+
+const RELAY_MODEL_PICKER_CATEGORIES: ModelPickerCategory[] = [
+  { id: 'chat', label: '大语言模型' },
+  { id: 'image', label: '图片模型' },
+  { id: 'video', label: '视频模型' },
+]
+
+const RELAY_VIDEO_MODEL_KEYWORDS = [
+  'video',
+  'veo',
+  'sora',
+  'kling',
+  'seedance',
+  'runway',
+  'pika',
+  'luma',
+  'hailuo',
+  'pixverse',
+  'vidu',
+  'skyreels',
+  'wan2',
+  'wan-',
+  'hunyuanvideo',
+  'mimo',
+]
+
+const RELAY_IMAGE_MODEL_KEYWORDS = [
+  'image',
+  'imagen',
+  'banana',
+  'gpt-image',
+  'dall-e',
+  'dalle',
+  'flux',
+  'sdxl',
+  'stable-diffusion',
+  'seedream',
+  'midjourney',
+  'recraft',
+  'ideogram',
+  'imagine',
+]
+
+export function getRelayModelCategory(
+  model: Pick<LlmModelInfo, 'id' | 'label' | 'description'>,
+): ModelPickerCategoryId {
+  const text = [model.id, model.label, model.description]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  if (RELAY_VIDEO_MODEL_KEYWORDS.some((keyword) => text.includes(keyword))) {
+    return 'video'
+  }
+  if (RELAY_IMAGE_MODEL_KEYWORDS.some((keyword) => text.includes(keyword))) {
+    return 'image'
+  }
+  return 'chat'
+}
+
+interface SettingsModelPickerPanelProps {
+  models: LlmModelInfo[]
+  selectedModelIds: string[]
+  currentModelId?: string
+  categories?: ModelPickerCategory[]
+  onSelect: (modelId: string) => void
+}
+
+export function SettingsModelPickerPanel({
+  models,
+  selectedModelIds,
+  currentModelId,
+  categories,
+  onSelect,
+}: SettingsModelPickerPanelProps) {
+  const [activeCategoryId, setActiveCategoryId] = useState<ModelPickerCategoryId>(
+    categories?.[0]?.id ?? 'chat',
+  )
+  const selectedModels = new Set(selectedModelIds)
+  const categorizedModels = categories?.map((category) => ({
+    category,
+    models: models.filter((model) => getRelayModelCategory(model) === category.id),
+  }))
+  const activeCategory =
+    categorizedModels?.find((entry) => entry.category.id === activeCategoryId) ??
+    categorizedModels?.[0]
+  const visibleModels = activeCategory?.models ?? models
+  const listLabel = activeCategory
+    ? activeCategory.category.label + '，共 ' + visibleModels.length + ' 个模型'
+    : '模型列表，共 ' + models.length + ' 个模型'
+
+  return (
+    <div className={'settings-model-picker' + (categories ? ' has-categories' : '')}>
+      <div className="settings-model-picker-summary">
+        <span>选择一个模型</span>
+        <span data-model-count={models.length}>共 {models.length} 个模型</span>
+      </div>
+
+      {categorizedModels && (
+        <>
+          <div className="settings-model-picker-tabs" role="tablist" aria-label="模型分类">
+            {categorizedModels.map((entry) => {
+              const active = entry.category.id === activeCategory?.category.id
+              return (
+                <button
+                  type="button"
+                  className={'settings-model-picker-tab' + (active ? ' is-active' : '')}
+                  key={entry.category.id}
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveCategoryId(entry.category.id)}
+                  data-model-category={entry.category.id}
+                >
+                  <span>{entry.category.label}</span>
+                  <span
+                    className="settings-model-picker-tab-count"
+                    data-model-category-count={entry.models.length}
+                  >
+                    {entry.models.length}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div className="settings-model-picker-note">未识别模型归入大语言模型</div>
+        </>
+      )}
+
+      <div className="settings-model-picker-list" role="listbox" aria-label={listLabel}>
+        {visibleModels.length === 0 ? (
+          <div className="settings-model-picker-empty">
+            {models.length === 0
+              ? '还没有模型，请先点击“拉取模型”。'
+              : '这个分类暂时没有模型。'}
+          </div>
+        ) : (
+          visibleModels.map((model, index) => {
+            const isCurrent = model.id === currentModelId
+            const isSelected = selectedModels.has(model.id) && !isCurrent
+            const label = model.label || model.id
+
+            return (
+              <button
+                type="button"
+                className={
+                  'settings-model-picker-option' + (isCurrent ? ' is-current' : '')
+                }
+                key={model.id + '-' + index}
+                role="option"
+                aria-selected={isCurrent || isSelected}
+                disabled={isSelected}
+                onClick={() => onSelect(model.id)}
+                data-model-option-id={model.id}
+              >
+                <span className="settings-model-picker-option-copy">
+                  <span className="settings-model-picker-option-label">{label}</span>
+                  {label !== model.id && (
+                    <span className="settings-model-picker-option-id">{model.id}</span>
+                  )}
+                </span>
+                <span className="settings-model-picker-option-state">
+                  {isCurrent ? '当前已选' : isSelected ? '已添加' : null}
+                </span>
+              </button>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
+interface RelayModelPickerPanelProps {
+  models: LlmModelInfo[]
+  selectedModelIds: string[]
+  currentModelId?: string
+  onSelect: (modelId: string) => void
+}
+
+export function RelayModelPickerPanel(props: RelayModelPickerPanelProps) {
+  return (
+    <SettingsModelPickerPanel
+      {...props}
+      categories={RELAY_MODEL_PICKER_CATEGORIES}
+    />
+  )
+}
 function normalizeImageModelId(modelId: string): string {
   const id = modelId.trim()
   const normalized = id.toLowerCase()
@@ -169,6 +339,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const { settings, loadSettings, saveSettings } = useSettingsStore()
   const [form, setForm] = useState<FormState>(() => createSettingsDraft(DEFAULT_SETTINGS))
   const [submitting, setSubmitting] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -194,19 +365,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [availableLlmModels, setAvailableLlmModels] = useState<LlmModelInfo[]>([])
   const [loadingLlmModels, setLoadingLlmModels] = useState(false)
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
-  const [uploadingMokHero, setUploadingMokHero] = useState(false)
-  const [mokHeroUploadError, setMokHeroUploadError] = useState<string | null>(null)
+  const [openModelPicker, setOpenModelPicker] = useState<{
+    id: string
+    target: 'add' | number
+  } | null>(null)
   const autoFetchedModelsRef = useRef(false)
-  const mokHeroInputRef = useRef<HTMLInputElement>(null)
-  const mokHeroUploadRequestRef = useRef(0)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
-    if (!open) {
-      mokHeroUploadRequestRef.current += 1
-      setUploadingMokHero(false)
-      return
-    }
+    if (!open) return
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setLoadError(null)
     setSaveError(null)
@@ -215,7 +382,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setCodexSetupCommands(FALLBACK_CODEX_SETUP_COMMANDS)
     setLlmTestResult(null)
     setLlmModelsMessage(null)
-    setMokHeroUploadError(null)
+    setSaveStatus('idle')
+    setOpenModelPicker(null)
     autoFetchedModelsRef.current = false
     loadSettings().catch((err: unknown) => {
       setLoadError(err instanceof Error ? err.message : String(err))
@@ -238,66 +406,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   if (!open) return null
 
-  const guards = getSettingsModalGuards(submitting, uploadingMokHero)
+  const guards = getSettingsModalGuards(submitting)
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setSaveStatus('idle')
     setForm((prev) => ({ ...prev, [key]: value }))
   }
-
-  const handleMokHeroFile = async (file: File | null | undefined) => {
-    if (!file || guards.mokHeroBlocked) return
-    if (!file.type.startsWith('image/')) {
-      setMokHeroUploadError('请选择图片文件')
-      return
-    }
-
-    const requestId = ++mokHeroUploadRequestRef.current
-    setUploadingMokHero(true)
-    setMokHeroUploadError(null)
-    try {
-      const asset = await uploadAsset(file)
-      if (requestId !== mokHeroUploadRequestRef.current) return
-      update('homeMokHeroImagePath', getAssetFileUrl(asset.id))
-    } catch (err: unknown) {
-      if (requestId !== mokHeroUploadRequestRef.current) return
-      setMokHeroUploadError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (requestId === mokHeroUploadRequestRef.current) {
-        setUploadingMokHero(false)
-      }
-    }
-  }
-
-  const clearMokHeroImage = () => {
-    if (guards.mokHeroBlocked) return
-    update('homeMokHeroImagePath', '')
-    setMokHeroUploadError(null)
-  }
-
-  const resetMokHeroLayout = () => {
-    if (guards.mokHeroBlocked) return
-    setForm((prev) => ({
-      ...prev,
-      homeMokHeroScale: DEFAULT_SETTINGS.homeMokHeroScale,
-      homeMokHeroOffsetX: DEFAULT_SETTINGS.homeMokHeroOffsetX,
-      homeMokHeroOffsetY: DEFAULT_SETTINGS.homeMokHeroOffsetY,
-      homeMokHeroMarginTop: DEFAULT_SETTINGS.homeMokHeroMarginTop,
-    }))
-  }
-
-  const mokHeroImagePath = form.homeMokHeroImagePath?.trim() ?? ''
-  const mokHeroPreviewUrl = mokHeroImagePath || DEFAULT_MOK_HERO_PREVIEW_URL
-  const mokHeroUploadStatus = mokHeroUploadError
-    ? `上传失败：${mokHeroUploadError}`
-    : uploadingMokHero
-      ? 'MO.K 主图上传中...'
-      : mokHeroImagePath
-        ? '当前使用自定义 MO.K 主图'
-        : '当前使用默认 MO.K 主图'
 
   const handleSave = async () => {
     if (guards.saveBlocked) return
     setSubmitting(true)
+    setSaveStatus('saving')
     setSaveError(null)
     try {
       const cleanedModels = uniqueModelIds(form.llmModels ?? [])
@@ -314,7 +433,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
       await saveSettings(nextForm)
+      setSaveStatus('saved')
     } catch (err: unknown) {
+      setSaveStatus('error')
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setSubmitting(false)
@@ -324,9 +445,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const handleCancel = () => {
     if (guards.closeBlocked) return
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
-    mokHeroUploadRequestRef.current += 1
-    setUploadingMokHero(false)
-    setMokHeroUploadError(null)
+    setSaveStatus('idle')
     setSaveError(null)
     onClose()
   }
@@ -452,34 +571,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     update('videoModels', cleaned)
   }
 
-  const addJimengImageModel = () => {
-    const used = new Set(form.imageModels ?? [])
-    const next = IMAGE_MODELS.find((m) => !used.has(m.id))?.id ?? ''
-    update('imageModels', [...(form.imageModels ?? []), next])
+  const addImageModel = (modelId: string) => {
+    update('imageModels', cleanImageModelIds([...(form.imageModels ?? []), modelId]))
   }
 
-  const addCodexImageModel = () => {
-    const used = new Set(form.imageModels ?? [])
-    const next = !used.has(CODEX_IMAGE_MODEL_ID) ? CODEX_IMAGE_MODEL_ID : ''
-    update('imageModels', [...(form.imageModels ?? []), next])
+  const addVideoModel = (modelId: string) => {
+    update('videoModels', cleanVideoModelIds([...(form.videoModels ?? []), modelId]))
   }
 
-  const addJimengVideoModel = () => {
-    const used = new Set(form.videoModels ?? [])
-    const next = VIDEO_MODELS.find((m) => !used.has(m.id))?.id ?? ''
-    update('videoModels', [...(form.videoModels ?? []), next])
-  }
-
-  const addCodexChatModel = () => {
-    const used = new Set(form.llmModels ?? [])
-    const next = CODEX_CHAT_MODEL_OPTIONS.find((m) => !used.has(m.id))?.id ?? ''
-    update('llmModels', [...(form.llmModels ?? []), next])
-  }
-
-  const addRelayModel = () => {
-    const used = new Set(form.llmModels ?? [])
-    const next = availableLlmModels.find((m) => !used.has(m.id))?.id ?? ''
-    update('llmModels', [...(form.llmModels ?? []), next])
+  const addLlmModel = (modelId: string) => {
+    update('llmModels', appendUniqueModelId(form.llmModels ?? [], modelId))
   }
 
   const renderTestResult = (result: { ok: boolean; message: string } | null) => {
@@ -549,94 +650,124 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const codexImageOptions = [{ id: CODEX_IMAGE_MODEL_ID, label: CODEX_IMAGE_MODEL_ID }]
   const jimengVideoOptions = VIDEO_MODELS.map((m) => ({ id: m.id, label: m.label }))
   const codexChatOptions = CODEX_CHAT_MODEL_OPTIONS
-  const relayModelOptions = availableLlmModels
 
   const renderModelList = (
+    pickerId: string,
     title: string,
     emptyHint: string,
     models: string[],
     indices: number[],
     options: LlmModelInfo[],
-    datalistId: string,
-    placeholder: string,
+    selectedModelIds: string[],
     addLabel: string,
-    onAdd: () => void,
-    onUpdate: (displayIndex: number, value: string) => void,
-    onRemove: (displayIndex: number) => void,
-  ) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      <div style={{ ...labelStyle, color: '#c0c0c0' }}>{title}</div>
-      {models.length === 0 && (
-        <div
-          style={{
-            padding: '10px',
-            border: '1px dashed #383838',
-            borderRadius: '8px',
-            color: '#777',
-            fontSize: 12,
-          }}
-        >
-          {emptyHint}
-        </div>
-      )}
+    onAdd: (modelId: string) => void,
+    onUpdate: (index: number, modelId: string) => void,
+    onRemove: (index: number) => void,
+    pickerCategories?: ModelPickerCategory[],
+    pickerDirection: 'up' | 'down' = 'down',
+  ) => {
+    const pickerDirectionClass = pickerDirection === 'up' ? ' is-upward' : ''
+    const isPickerOpen = (target: 'add' | number) =>
+      openModelPicker?.id === pickerId && openModelPicker.target === target
+    const selectModel = (target: 'add' | number, modelId: string) => {
+      if (target === 'add') {
+        onAdd(modelId)
+      } else {
+        onUpdate(target, modelId)
+      }
+      setOpenModelPicker(null)
+    }
 
-      <datalist id={datalistId}>
-        {options.map((model) => (
-          <option key={model.id} value={model.id}>
-            {model.label || model.id}
-          </option>
-        ))}
-      </datalist>
+    return (
+      <div className="settings-model-list">
+        <div style={{ ...labelStyle, color: '#c0c0c0' }}>{title}</div>
+        {models.length === 0 && (
+          <div className="settings-model-list-empty">{emptyHint}</div>
+        )}
 
-      {models.map((modelId, displayIndex) => {
-        const originalIndex = indices[displayIndex]
-        return (
-          <div
-            key={`${modelId}-${originalIndex}`}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 34px',
-              gap: '8px',
-              alignItems: 'center',
-            }}
+        {models.map((modelId, displayIndex) => {
+          const originalIndex = indices[displayIndex]
+          const model = options.find((item) => item.id === modelId)
+          const label = model?.label || modelId
+          const pickerOpen = isPickerOpen(originalIndex)
+
+          return (
+            <div className="settings-model-list-row" key={modelId + '-' + originalIndex}>
+              <div className={'settings-model-picker-wrap' + pickerDirectionClass}>
+                <button
+                  type="button"
+                  className={'settings-model-list-selected' + (pickerOpen ? ' is-open' : '')}
+                  onClick={() =>
+                    setOpenModelPicker((current) =>
+                      current?.id === pickerId && current.target === originalIndex
+                        ? null
+                        : { id: pickerId, target: originalIndex },
+                    )
+                  }
+                  aria-expanded={pickerOpen}
+                >
+                  <span className="settings-model-list-selected-copy">
+                    <span className="settings-model-list-selected-label">{label}</span>
+                    {label !== modelId && (
+                      <span className="settings-model-list-selected-id">{modelId}</span>
+                    )}
+                  </span>
+                  <ChevronDown size={14} aria-hidden="true" />
+                </button>
+
+                {pickerOpen && (
+                  <SettingsModelPickerPanel
+                    models={options}
+                    selectedModelIds={selectedModelIds}
+                    currentModelId={modelId}
+                    categories={pickerCategories}
+                    onSelect={(value) => selectModel(originalIndex, value)}
+                  />
+                )}
+              </div>
+              <button
+                type="button"
+                className="settings-icon-button"
+                onClick={() => onRemove(originalIndex)}
+                aria-label={'移除' + title}
+                title={'移除' + title}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          )
+        })}
+
+        <div className={'settings-model-picker-wrap' + pickerDirectionClass}>
+          <button
+            type="button"
+            className={'settings-model-list-add' + (isPickerOpen('add') ? ' is-open' : '')}
+            onClick={() =>
+              setOpenModelPicker((current) =>
+                current?.id === pickerId && current.target === 'add'
+                  ? null
+                  : { id: pickerId, target: 'add' },
+              )
+            }
+            aria-expanded={isPickerOpen('add')}
           >
-            <input
-              className="settings-dropdown-control"
-              style={dropdownControlStyle}
-              list={datalistId}
-              value={modelId}
-              onChange={(e) => onUpdate(displayIndex, e.target.value)}
-              placeholder={placeholder}
+            <Plus size={14} />
+            {addLabel}
+            <ChevronDown size={14} aria-hidden="true" />
+          </button>
+
+          {isPickerOpen('add') && (
+            <SettingsModelPickerPanel
+              models={options}
+              selectedModelIds={selectedModelIds}
+              categories={pickerCategories}
+              onSelect={(modelId) => selectModel('add', modelId)}
             />
-            <button
-              type="button"
-              style={iconButtonStyle}
-              onClick={() => onRemove(displayIndex)}
-              aria-label={`移除${title}`}
-              title={`移除${title}`}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        )
-      })}
-
-      <button
-        type="button"
-        style={{
-          ...subtleButtonStyle,
-          width: '100%',
-          justifyContent: 'center',
-          borderStyle: 'dashed',
-        }}
-        onClick={onAdd}
-      >
-        <Plus size={14} />
-        {addLabel}
-      </button>
-    </div>
-  )
-
+          )}
+        </div>
+      </div>
+    )
+  }
   const codexSetupRows = [
     { label: '安装 Codex CLI', command: codexSetupCommands.installCodex },
     { label: '打开登录', command: codexSetupCommands.login },
@@ -679,7 +810,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
           border: '1px solid #2a2a2a',
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          if (
+            openModelPicker &&
+            !(e.target instanceof Element && e.target.closest('.settings-model-picker-wrap'))
+          ) {
+            setOpenModelPicker(null)
+          }
+          e.stopPropagation()
+        }}
       >
         {/* Header */}
         <div
@@ -704,6 +843,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             onClick={handleCancel}
             disabled={guards.closeBlocked}
             aria-label="关闭"
+            className="settings-icon-button settings-modal-close-button"
             style={{
               background: 'transparent',
               border: 'none',
@@ -736,127 +876,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           )}
 
-          <section aria-label="首页主图（MO.K）设置" style={sectionStyle}>
-            <div style={sectionTitleStyle}>首页主图（MO.K）</div>
-            <div style={{ ...gridStyle, alignItems: 'start' }}>
-              <div style={{ ...fieldStyle, gap: '8px' }}>
-                <span style={{ ...labelStyle, color: '#c0c0c0' }}>预览</span>
-                <img
-                  src={mokHeroPreviewUrl}
-                  alt="MO.K 首页主图预览"
-                  style={{
-                    width: '100%',
-                    maxHeight: '200px',
-                    objectFit: 'contain',
-                    borderRadius: '8px',
-                    background: '#111',
-                  }}
-                />
-                <span style={helperTextStyle}>留空使用默认主图</span>
-              </div>
-
-              <div style={{ ...fieldStyle, gap: '12px' }}>
-                <label
-                  htmlFor="settings-home-mok-hero-input"
-                  role="button"
-                  tabIndex={0}
-                  aria-disabled={guards.mokHeroBlocked}
-                  onClick={(event) => {
-                    if (guards.mokHeroBlocked) event.preventDefault()
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return
-                    event.preventDefault()
-                    if (!guards.mokHeroBlocked) mokHeroInputRef.current?.click()
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    event.dataTransfer.dropEffect = guards.mokHeroBlocked ? 'none' : 'copy'
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    if (guards.mokHeroBlocked) return
-                    void handleMokHeroFile(event.dataTransfer.files?.[0])
-                  }}
-                  style={{
-                    ...fieldStyle,
-                    alignItems: 'center',
-                    padding: '16px',
-                    border: '1px dashed #444',
-                    borderRadius: '8px',
-                    color: guards.mokHeroBlocked ? '#777' : '#cfcfcf',
-                    cursor: guards.mokHeroBlocked ? 'not-allowed' : 'pointer',
-                    fontSize: '12px',
-                  }}
-                >
-                  <span>{uploadingMokHero ? '上传中...' : '拖入图片或点击选择'}</span>
-                  <small style={helperTextStyle}>支持常见图片格式</small>
-                </label>
-                <input
-                  ref={mokHeroInputRef}
-                  id="settings-home-mok-hero-input"
-                  type="file"
-                  accept="image/*"
-                  disabled={guards.mokHeroBlocked}
-                  style={{ display: 'none' }}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0]
-                    event.currentTarget.value = ''
-                    void handleMokHeroFile(file)
-                  }}
-                />
-
-                <span
-                  role={mokHeroUploadError ? 'alert' : 'status'}
-                  aria-live={mokHeroUploadError ? 'assertive' : 'polite'}
-                  style={{ ...helperTextStyle, color: '#cfcfcf' }}
-                >
-                  {mokHeroUploadStatus}
-                </span>
-
-                {MOK_HERO_LAYOUT_CONTROLS.map((control) => (
-                  <label
-                    key={control.id}
-                    htmlFor={control.id}
-                    style={{ ...fieldStyle, gap: '6px' }}
-                  >
-                    <span style={labelStyle}>{control.label}</span>
-                    <input
-                      id={control.id}
-                      type="range"
-                      min={control.min}
-                      max={control.max}
-                      step={control.step}
-                      value={form[control.key] ?? control.fallback}
-                      disabled={guards.mokHeroBlocked}
-                      onChange={(event) => update(control.key, Number(event.target.value))}
-                    />
-                  </label>
-                ))}
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    style={{ ...subtleButtonStyle, flex: 1 }}
-                    disabled={!mokHeroImagePath || guards.mokHeroBlocked}
-                    onClick={clearMokHeroImage}
-                  >
-                    清除自定义图
-                  </button>
-                  <button
-                    type="button"
-                    style={{ ...subtleButtonStyle, flex: 1 }}
-                    disabled={guards.mokHeroBlocked}
-                    onClick={resetMokHeroLayout}
-                  >
-                    重置
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
 
           {/* Dreamina CLI */}
           <section style={sectionStyle}>
@@ -872,6 +891,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <button
                 type="button"
                 onClick={handleTestJimeng}
+                className="settings-action-button"
                 disabled={testingJimeng}
                 style={{
                   padding: '4px 10px',
@@ -904,30 +924,30 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             <div style={{ ...fieldStyle, gap: '16px', marginTop: '8px' }}>
               {renderModelList(
+                'jimeng-image',
                 '图片模型',
                 '暂未添加即梦图片模型。点击下方加号添加。',
                 jimengImageModels,
                 jimengImageModelIndices,
                 jimengImageOptions,
-                'set-jimeng-image-model-options',
-                '选择或输入图片模型 ID',
+                selectedImageModels,
                 '添加一个图片模型',
-                addJimengImageModel,
-                (displayIndex, value) => updateImageModelRow(jimengImageModelIndices[displayIndex], value),
-                (displayIndex) => removeImageModelRow(jimengImageModelIndices[displayIndex]),
+                addImageModel,
+                updateImageModelRow,
+                removeImageModelRow,
               )}
               {renderModelList(
+                'jimeng-video',
                 '视频模型',
                 '暂未添加即梦视频模型。点击下方加号添加。',
                 jimengVideoModels,
                 jimengVideoModelIndices,
                 jimengVideoOptions,
-                'set-jimeng-video-model-options',
-                '选择或输入视频模型 ID',
+                selectedVideoModels,
                 '添加一个视频模型',
-                addJimengVideoModel,
-                (displayIndex, value) => updateVideoModelRow(jimengVideoModelIndices[displayIndex], value),
-                (displayIndex) => removeVideoModelRow(jimengVideoModelIndices[displayIndex]),
+                addVideoModel,
+                updateVideoModelRow,
+                removeVideoModelRow,
               )}
             </div>
           </section>
@@ -946,6 +966,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <button
                 type="button"
                 onClick={handleTestCodex}
+                className="settings-action-button"
                 disabled={testingCodex}
                 style={{
                   padding: '4px 10px',
@@ -1000,7 +1021,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </code>
                   <button
                     type="button"
-                    style={iconButtonStyle}
+                    className="settings-icon-button"
                     onClick={() => handleCopyCommand(row.command)}
                     aria-label={`复制${row.label}命令`}
                     title={`复制${row.label}命令`}
@@ -1012,30 +1033,30 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             <div style={{ ...fieldStyle, gap: '16px', marginTop: '8px' }}>
               {renderModelList(
+                'codex-image',
                 '图片模型',
                 '暂未添加 OpenAI CLI 图片模型。点击下方加号添加。',
                 codexImageModels,
                 codexImageModelIndices,
                 codexImageOptions,
-                'set-codex-image-model-options',
-                '选择或输入图片模型 ID',
+                selectedImageModels,
                 '添加一个图片模型',
-                addCodexImageModel,
-                (displayIndex, value) => updateImageModelRow(codexImageModelIndices[displayIndex], value),
-                (displayIndex) => removeImageModelRow(codexImageModelIndices[displayIndex]),
+                addImageModel,
+                updateImageModelRow,
+                removeImageModelRow,
               )}
               {renderModelList(
+                'codex-chat',
                 '大语言模型',
                 '暂未添加 OpenAI CLI 大语言模型。点击下方加号添加。',
                 codexChatModels,
                 codexChatModelIndices,
                 codexChatOptions,
-                'set-codex-chat-model-options',
-                '选择或输入模型 ID',
+                selectedLlmModels,
                 '添加一个模型',
-                addCodexChatModel,
-                (displayIndex, value) => updateLlmModelRow(codexChatModelIndices[displayIndex], value),
-                (displayIndex) => removeLlmModelRow(codexChatModelIndices[displayIndex]),
+                addLlmModel,
+                updateLlmModelRow,
+                removeLlmModelRow,
               )}
             </div>
           </section>
@@ -1054,6 +1075,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <button
                 type="button"
                 onClick={handleTestLlm}
+                className="settings-action-button"
                 disabled={testingLlm}
                 style={{
                   padding: '4px 10px',
@@ -1112,6 +1134,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
                   <button
                     type="button"
+                    className="settings-action-button"
                     style={{
                       ...subtleButtonStyle,
                       opacity: loadingLlmModels ? 0.65 : 1,
@@ -1121,7 +1144,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     onClick={() => void refreshLlmModels()}
                   >
                     <RefreshCw size={13} className={loadingLlmModels ? 'animate-spin' : undefined} />
-                    {loadingLlmModels ? '拉取中' : '刷新模型'}
+                    {loadingLlmModels ? '拉取中' : '拉取模型'}
                   </button>
                 </div>
 
@@ -1132,17 +1155,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 )}
 
                 {renderModelList(
-                  '模型',
-                  '暂未添加中转站模型。点击下方加号添加。',
+                  'relay-models',
+                  '已添加模型',
+                  '暂未添加第三方 API 模型。点击下方加号添加。',
                   relayModels,
                   relayModelIndices,
-                  relayModelOptions,
-                  'set-relay-model-options',
-                  '选择或输入模型 ID',
+                  availableLlmModels,
+                  selectedLlmModels,
                   '添加一个模型',
-                  addRelayModel,
-                  (displayIndex, value) => updateLlmModelRow(relayModelIndices[displayIndex], value),
-                  (displayIndex) => removeLlmModelRow(relayModelIndices[displayIndex]),
+                  addLlmModel,
+                  updateLlmModelRow,
+                  removeLlmModelRow,
+                  RELAY_MODEL_PICKER_CATEGORIES,
+                  'up',
                 )}
               </div>
             </div>
@@ -1172,6 +1197,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             type="button"
             onClick={handleCancel}
             disabled={guards.closeBlocked}
+            className="settings-action-button settings-footer-button settings-action-button--quiet"
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
@@ -1188,6 +1214,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             type="button"
             onClick={handleSave}
             disabled={guards.saveBlocked}
+            className={'settings-action-button settings-footer-button settings-action-button--primary' + (submitting ? ' is-saving' : saveStatus === 'saved' ? ' is-success' : saveStatus === 'error' ? ' is-error' : '')}
+            aria-busy={submitting}
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
@@ -1198,7 +1226,21 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               fontSize: '13px',
             }}
           >
-            {submitting ? '保存中...' : '保存'}
+            {submitting ? (
+              <>
+                <RefreshCw size={13} className="animate-spin" />
+                保存中...
+              </>
+            ) : saveStatus === 'saved' ? (
+              <>
+                <Check size={13} />
+                已保存
+              </>
+            ) : saveStatus === 'error' ? (
+              '重试保存'
+            ) : (
+              '保存'
+            )}
           </button>
         </div>
       </div>

@@ -1,11 +1,12 @@
 import { Search, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Asset } from '@jimeng-flow/shared/asset'
-import { getAssetFileUrl, listAssets } from '../api/assets'
+import { getAssetFileUrl, listAssets, listLibraryAssets } from '../api/assets'
 import {
   ASSET_LIBRARY_FILTERS,
   assetLabel,
   filterAssetLibraryAssets,
+  getAssetCategory,
   type AssetFilter,
   type AssetLibraryMode,
 } from '../utils/assetLibraryFiltering'
@@ -13,23 +14,19 @@ import {
 interface AssetLibraryModalProps {
   open: boolean
   onClose: () => void
-  onSelectAsset?: (asset: Asset) => void
   initialAssets?: Asset[]
   initialFilter?: AssetFilter
   mode?: AssetLibraryMode
   projectId?: string | null
-  projectAssetIds?: ReadonlySet<string>
 }
 
 export function AssetLibraryModal({
   open,
   onClose,
-  onSelectAsset,
   initialAssets,
   initialFilter = '全部',
   mode = 'library',
   projectId,
-  projectAssetIds,
 }: AssetLibraryModalProps) {
   const [assets, setAssets] = useState<Asset[]>(initialAssets ?? [])
   const [activeFilter, setActiveFilter] = useState<AssetFilter>(initialFilter)
@@ -44,7 +41,8 @@ export function AssetLibraryModal({
     }
     let cancelled = false
     setLoadError(null)
-    listAssets()
+    const load = mode === 'library' ? listLibraryAssets : listAssets
+    load()
       .then((items) => {
         if (!cancelled) setAssets(items)
       })
@@ -56,7 +54,7 @@ export function AssetLibraryModal({
     return () => {
       cancelled = true
     }
-  }, [open, initialAssets])
+  }, [open, initialAssets, mode])
 
   if (!open) return null
 
@@ -67,7 +65,6 @@ export function AssetLibraryModal({
     query,
     mode,
     projectId,
-    projectAssetIds,
   })
 
   return (
@@ -98,7 +95,7 @@ export function AssetLibraryModal({
               />
             </label>
           )}
-          <div className="asset-filter-tabs" aria-label="素材类型">
+          <div className="asset-filter-tabs" aria-label="资产分类">
             {ASSET_LIBRARY_FILTERS.map((filter) => (
               <button
                 key={filter}
@@ -117,13 +114,12 @@ export function AssetLibraryModal({
           {filteredAssets.length > 0 ? (
             <div className="asset-preview-grid">
               {filteredAssets.map((asset) => (
-                <button
+                <article
                   key={asset.id}
-                  type="button"
                   className="asset-preview-card"
                   title={assetLabel(asset)}
                   data-source-node-id={asset.sourceNodeId}
-                  onClick={() => onSelectAsset?.(asset)}
+                  aria-label={assetLabel(asset)}
                 >
                   <span className="asset-preview-thumb asset-media-thumb">
                     {asset.type === 'video' ? (
@@ -138,7 +134,8 @@ export function AssetLibraryModal({
                     )}
                   </span>
                   <span className="asset-preview-caption">{assetLabel(asset)}</span>
-                </button>
+                  <span className="asset-preview-category">{getAssetCategory(asset)}</span>
+                </article>
               ))}
             </div>
           ) : (

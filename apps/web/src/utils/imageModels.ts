@@ -19,23 +19,22 @@ const WIDE_LABEL_CHAR_WIDTH = 14
 const OPENAI_CLI_IMAGE_MODEL_ID = 'codex:gpt-5.5'
 const OPENAI_CLI_IMAGE_MODEL_LABEL = 'GPT Image（OpenAI CLI）'
 
+export function isOpenAiCliImageModel(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase()
+  return (
+    normalized === '$imagegen' ||
+    normalized === 'gpt-image-2' ||
+    normalized === OPENAI_CLI_IMAGE_MODEL_ID ||
+    normalized.startsWith('codex:')
+  )
+}
+
 function normalizeOpenAiCliImageModelId(modelId: string): string {
   const id = modelId.trim()
   const normalized = id.toLowerCase()
   return normalized === '$imagegen' || normalized === 'gpt-image-2'
     ? OPENAI_CLI_IMAGE_MODEL_ID
     : id
-}
-
-function appendOpenAiCliImageModel(
-  selected: ImageModelOption[],
-  seen: Set<string>,
-): void {
-  if (seen.has(OPENAI_CLI_IMAGE_MODEL_ID)) return
-  const option = toImageModelOption(OPENAI_CLI_IMAGE_MODEL_ID)
-  if (!option) return
-  selected.push(option)
-  seen.add(option.id)
 }
 
 function toImageModelOption(modelId: string): ImageModelOption | null {
@@ -115,62 +114,45 @@ export function shouldRequireJimengCliForImageModel(modelId: string): boolean {
 
 export function getConfiguredImageModels(
   modelIds: string[] | undefined,
-  commonModelIds: string[] | undefined = [],
+  _legacyCommonModelIds: string[] | undefined = [],
   modelConfigs: ModelConfig[] | undefined = [],
 ): ImageModelOption[] {
   const selected: ImageModelOption[] = []
   const seen = new Set<string>()
+
+  // The explicit settings list is authoritative. Do not infer image models
+  // from the LLM list or append built-in/CLI fallbacks here.
+  if (modelIds !== undefined) {
+    for (const modelId of modelIds) {
+      const option = toImageModelOption(modelId)
+      if (!option || seen.has(option.id)) continue
+      selected.push(option)
+      seen.add(option.id)
+    }
+    return selected
+  }
+
+  // Compatibility path for older settings that have not been migrated to the
+  // explicit imageModels array yet.
   for (const model of getModelConfigsByCapability(modelConfigs, 'image')) {
     const option = modelConfigToImageOption(model)
     if (!option || seen.has(option.id)) continue
     selected.push(option)
     seen.add(option.id)
   }
-
-  const inferredImageModels = (commonModelIds ?? []).filter(isLikelyImageModelId)
-  for (const modelId of modelIds ?? []) {
-    const option = toImageModelOption(modelId)
-    if (!option || seen.has(option.id)) continue
-    selected.push(option)
-    seen.add(option.id)
-  }
-  if (selected.some((model) => isJimengImageModel(model.id))) {
-    appendOpenAiCliImageModel(selected, seen)
-  }
-  if (inferredImageModels.length > 0) {
-    appendOpenAiCliImageModel(selected, seen)
-  }
-  for (const modelId of inferredImageModels) {
-    const option = toImageModelOption(modelId)
-    if (!option || seen.has(option.id)) continue
-    selected.push(option)
-    seen.add(option.id)
-  }
-
-  if (selected.length > 0) return selected
-
-  const defaultImageModel = IMAGE_MODELS.find((model) => model.id === 'jimeng')
-  if (defaultImageModel) {
-    const fallback = [defaultImageModel]
-    appendOpenAiCliImageModel(fallback, new Set(fallback.map((model) => model.id)))
-    return fallback
-  }
-  const fallback = IMAGE_MODELS.slice(0, 1)
-  appendOpenAiCliImageModel(fallback, new Set(fallback.map((model) => model.id)))
-  return fallback
+  return selected
 }
 
 export function getConfiguredDefaultImageModel(
   modelIds: string[] | undefined,
   preferredModel: string | undefined,
-  commonModelIds: string[] | undefined = [],
+  _legacyCommonModelIds: string[] | undefined = [],
   modelConfigs: ModelConfig[] | undefined = [],
 ): string {
-  const models = getConfiguredImageModels(modelIds, commonModelIds, modelConfigs)
+  const models = getConfiguredImageModels(modelIds, undefined, modelConfigs)
   return (
     models.find((model) => model.id === preferredModel)?.id ??
     models[0]?.id ??
-    IMAGE_MODELS[0]?.id ??
     ''
   )
 }

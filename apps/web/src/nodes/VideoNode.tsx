@@ -238,7 +238,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
     setActionBusy(true)
     try {
-      downloadAssetFile(assetId)
+      await downloadAssetFile(assetId)
     } catch {
       // 下载失败时保留当前界面
     } finally {

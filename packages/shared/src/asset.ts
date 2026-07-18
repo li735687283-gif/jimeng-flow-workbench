@@ -6,6 +6,9 @@
 /** 资产媒体类型 */
 export type AssetType = 'image' | 'video'
 
+/** 资产库自动分类。 */
+export type AssetCategory = '角色' | '场景' | '道具'
+
 /**
  * 一条本地资产记录。
  * 对应磁盘上两个文件：<id>.<ext>（媒体本体）与 <id>.json（本对象序列化）。
@@ -15,6 +18,10 @@ export interface Asset {
   id: string
   /** 媒体类型 */
   type: AssetType
+  /** 是否已通过节点右键“保存到资产库”收录。 */
+  savedToLibrary?: boolean
+  /** 资产库自动分类。 */
+  category?: AssetCategory
   /** 相对 workspace 的路径，如 outputs/2026-07-04/asset_001.png */
   path: string
   /** 生成该资产所使用的提示词（可选） */

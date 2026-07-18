@@ -19,7 +19,7 @@ test('asset library modal renders only useful navigation and search controls', a
     <AssetLibraryModal open={true} onClose={() => undefined} />,
   )
 
-  for (const text of ['素材库', '全部', '图片', '视频', '暂无素材']) {
+  for (const text of ['素材库', '全部', '角色', '场景', '道具', '暂无素材']) {
     assert.equal(html.includes(text), true)
   }
 
@@ -79,7 +79,7 @@ test('asset library modal renders real image and video assets', async () => {
   assert.equal(html.includes('图片生成'), false)
 })
 
-test('asset library modal can start filtered to video assets', async () => {
+test('asset library modal can start filtered to an automatic category', async () => {
   const { AssetLibraryModal } = await import(
     '../src/components/AssetLibraryModal'
   )
@@ -88,13 +88,14 @@ test('asset library modal can start filtered to video assets', async () => {
     <AssetLibraryModal
       open={true}
       onClose={() => undefined}
-      initialFilter="视频"
+      initialFilter="场景"
       initialAssets={[
         {
           id: 'asset_image_1',
           type: 'image',
           path: 'workspace/outputs/asset_image_1.png',
           prompt: 'image result',
+          category: '道具',
           createdAt: '2026-07-07T10:00:00.000Z',
         },
         {
@@ -102,6 +103,7 @@ test('asset library modal can start filtered to video assets', async () => {
           type: 'video',
           path: 'workspace/outputs/asset_video_1.mp4',
           prompt: 'video result',
+          category: '场景',
           createdAt: '2026-07-07T11:00:00.000Z',
         },
       ]}

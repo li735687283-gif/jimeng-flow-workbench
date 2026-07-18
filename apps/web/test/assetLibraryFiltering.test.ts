@@ -25,16 +25,17 @@ const assets: Asset[] = [
     type: 'video',
     path: 'workspace/outputs/generated.mp4',
     prompt: 'Forest camera move',
+    category: '道具',
     provider: 'dreamina',
     params: { flowId: 'flow_other' },
     createdAt: '2026-07-07T11:00:00.000Z',
   },
 ]
 
-test('asset library search matches labels without losing type filters', () => {
+test('asset library search matches labels without losing category filters', () => {
   assert.deepEqual(
     filterAssetLibraryAssets(assets, {
-      filter: '图片',
+      filter: '场景',
       query: 'forest',
       mode: 'library',
     }).map((asset) => asset.id),
@@ -54,7 +55,7 @@ test('history mode keeps all generated image and video assets', () => {
   )
 })
 
-test('history mode can include legacy generated assets referenced by this project', () => {
+test('history mode excludes legacy and referenced assets without the current project id', () => {
   assert.deepEqual(
     filterAssetLibraryAssets(
       [
@@ -65,15 +66,22 @@ test('history mode can include legacy generated assets referenced by this projec
           provider: 'codex',
           createdAt: '2026-07-07T10:00:00.000Z',
         },
+        {
+          id: 'other_project_generated',
+          type: 'image',
+          path: 'workspace/outputs/other.png',
+          provider: 'codex',
+          params: { flowId: 'flow_other' },
+          createdAt: '2026-07-07T11:00:00.000Z',
+        },
       ],
       {
         filter: '全部',
         query: '',
         mode: 'history',
         projectId: 'flow_current',
-        projectAssetIds: new Set(['legacy_generated']),
       },
     ).map((asset) => asset.id),
-    ['legacy_generated'],
+    [],
   )
 })

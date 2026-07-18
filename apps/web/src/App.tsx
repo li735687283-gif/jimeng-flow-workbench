@@ -18,11 +18,6 @@ import { useVideoPlayerStore } from './state/videoPlayerStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
-import {
-  buildAssetInsertPatch,
-  buildAssetRestorePatch,
-  resolveAssetSourceNodeId,
-} from './utils/assetLibrarySelection'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
@@ -59,32 +54,6 @@ function setLastFlowId(id: string | null) {
   } else {
     window.localStorage.removeItem(LAST_FLOW_ID_KEY)
   }
-}
-
-function collectProjectAssetIds(
-  nodes: ReadonlyArray<{ data?: unknown }>,
-): Set<string> {
-  const assetIds = new Set<string>()
-  const assetKeys = new Set(['assetId', 'assetIds', 'outputAssetIds', 'generationRuns'])
-
-  const visit = (value: unknown, key?: string): void => {
-    if (Array.isArray(value)) {
-      value.forEach((item) => visit(item, key))
-      return
-    }
-    if (!value || typeof value !== 'object') {
-      if (assetKeys.has(key ?? '') && typeof value === 'string' && value.startsWith('asset_')) {
-        assetIds.add(value)
-      }
-      return
-    }
-    Object.entries(value).forEach(([childKey, childValue]) => {
-      visit(childValue, childKey)
-    })
-  }
-
-  nodes.forEach((node) => visit(node.data))
-  return assetIds
 }
 
 function resolveHomeMokHeroImage(path: string | undefined): string {
@@ -136,8 +105,6 @@ function AppInner() {
 
   const addNode = useCanvasStore((s) => s.addNode)
   const nodes = useCanvasStore((s) => s.nodes)
-  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const currentFlowId = useFlowStore((s) => s.currentFlowId)
   const flowList = useFlowStore((s) => s.flowList)
   const flowsLoading = useFlowStore((s) => s.loading)
@@ -152,7 +119,6 @@ function AppInner() {
   const centeredFlowIdRef = useRef<string | null>(null)
   const restoringFlowIdRef = useRef<string | null>(null)
   const lastSavedFlowIdRef = useRef<string | null>(currentFlowId)
-  const projectAssetIds = collectProjectAssetIds(nodes)
 
   // 仅进入画布后启用自动保存，避免首页默认打开时创建空工作流。
   // 恢复上次画布期间先禁用，避免与恢复逻辑冲突。
@@ -363,56 +329,6 @@ function AppInner() {
     [deleteFlowAction],
   )
 
-  const handleSelectAsset = useCallback(
-    (asset: Asset) => {
-      const sourceNodeId = resolveAssetSourceNodeId(
-        asset,
-        nodes.map((node) => node.id),
-      )
-
-      if (sourceNodeId) {
-        const sourceNode = nodes.find((node) => node.id === sourceNodeId)
-        if (!sourceNode) return
-
-        const patch = buildAssetRestorePatch(asset, sourceNode)
-        if (patch) updateNodeData(sourceNodeId, patch)
-
-        setSelectedNode(sourceNodeId)
-        setAssetLibraryOpen(false)
-        setGenerationHistoryOpen(false)
-        void fitView({
-          nodes: [{ id: sourceNodeId }],
-          padding: 0.45,
-          duration: 320,
-          maxZoom: 1,
-        })
-        return
-      }
-
-      const nodeId = addNode(asset.type, getCanvasCenterPosition())
-      const patch = buildAssetInsertPatch(asset)
-      if (nodeId && patch) updateNodeData(nodeId, patch)
-      setAssetLibraryOpen(false)
-      setGenerationHistoryOpen(false)
-      if (nodeId) {
-        void fitView({
-          nodes: [{ id: nodeId }],
-          padding: 0.45,
-          duration: 320,
-          maxZoom: 1,
-        })
-      }
-    },
-    [
-      addNode,
-      fitView,
-      getCanvasCenterPosition,
-      nodes,
-      setSelectedNode,
-      updateNodeData,
-    ],
-  )
-
   return (
     <div className="app-layout mature-layout">
       {view === 'home' ? (
@@ -483,16 +399,13 @@ function AppInner() {
       <AssetLibraryModal
         open={assetLibraryOpen}
         onClose={() => setAssetLibraryOpen(false)}
-        onSelectAsset={view === 'canvas' ? handleSelectAsset : undefined}
       />
 
       <AssetLibraryModal
         open={generationHistoryOpen}
         mode="history"
         projectId={currentFlowId}
-        projectAssetIds={projectAssetIds}
         onClose={() => setGenerationHistoryOpen(false)}
-        onSelectAsset={view === 'canvas' ? handleSelectAsset : undefined}
       />
 
       <VideoAdminModal

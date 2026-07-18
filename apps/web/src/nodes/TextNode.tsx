@@ -34,7 +34,7 @@ import {
   TEXT_FRAME_COLOR_PRESETS,
   TextActionCard,
 } from '../components/TextActionCard'
-import { listLlmModels, runTextNode } from '../api/llm'
+import { runTextNode } from '../api/llm'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
 import { useSettingsStore } from '../state/settingsStore'
@@ -144,9 +144,6 @@ const SUMMARY_STYLE = (isJson: boolean): CSSProperties => ({
   boxSizing: 'border-box',
 })
 
-function uniqueModels(models: string[]): string[] {
-  return Array.from(new Set(models.map((item) => item.trim()).filter(Boolean)))
-}
 
 interface ChatModelOption {
   id: string
@@ -224,7 +221,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const modelMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const promptMenuButtonRef = useRef<HTMLButtonElement | null>(null)
-  const remoteModelsFetchedRef = useRef(false)
   /** 与 bodyEditing 同步，供 click 回调里同步判断 */
   const bodyEditingRef = useRef(false)
 
@@ -251,13 +247,11 @@ export function TextNode({ id, data, selected }: NodeProps) {
   const [promptMenuOpen, setPromptMenuOpen] = useState(false)
   const [promptMenuStyle, setPromptMenuStyle] = useState<CSSProperties>({})
   const [menuDirection, setMenuDirection] = useState<FloatingMenuDirection>('down')
-  const [remoteModels, setRemoteModels] = useState<ChatModelOption[]>([])
   const [sendError, setSendError] = useState('')
 
   const content = nodeData.content ?? ''
   const contentType = nodeData.contentType ?? 'text'
   const status = nodeData.status ?? 'idle'
-  const llmModel = nodeData.llm?.model
   const isJson = contentType === 'json'
   const isEmpty = content.trim().length === 0
 
@@ -288,47 +282,25 @@ export function TextNode({ id, data, selected }: NodeProps) {
       id: modelId,
       label: modelId,
     }))
-    if (fromConfig.length > 0) return fromConfig
-    if (remoteModels.length > 0) return remoteModels
-    if (llmModel) return [{ id: llmModel, label: llmModel }]
-    return []
-  }, [configuredModelIds, llmModel, remoteModels])
+    return fromConfig
+  }, [configuredModelIds])
 
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ?? modelOptions[0]
 
-  useEffect(() => {
-    if (configuredModelIds.length > 0) return
-    if (remoteModelsFetchedRef.current) return
-    remoteModelsFetchedRef.current = true
-    listLlmModels()
-      .then((list) => {
-        setRemoteModels(
-          uniqueModels(list.map((item) => item.id)).map((modelId) => {
-            const matched = list.find((item) => item.id === modelId)
-            return {
-              id: modelId,
-              label: matched?.label?.trim() || modelId,
-            }
-          }),
-        )
-      })
-      .catch(() => {
-        setRemoteModels([])
-      })
-  }, [configuredModelIds.length])
 
   useEffect(() => {
     setSelectedModelId((current) => {
       if (modelTouched && current && modelOptions.some((model) => model.id === current)) {
         return current
       }
-      if (llmModel && modelOptions.some((model) => model.id === llmModel)) {
-        return llmModel
+      const nodeModel = nodeData.llm?.model?.trim()
+      if (nodeModel && modelOptions.some((model) => model.id === nodeModel)) {
+        return nodeModel
       }
       return modelOptions[0]?.id ?? ''
     })
-  }, [llmModel, modelOptions, modelTouched])
+  }, [nodeData.llm?.model, modelOptions, modelTouched])
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current !== null) {

@@ -194,18 +194,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const saveSettings = useSettingsStore((s) => s.saveSettings)
   const { screenToFlowPosition, setCenter } = useReactFlow()
   const imageModelOptions = useMemo(
-    () => getConfiguredImageModels(settings?.imageModels, settings?.llmModels, settings?.modelConfigs),
-    [settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
+    () => getConfiguredImageModels(settings?.imageModels, undefined, settings?.modelConfigs),
+    [settings?.imageModels, settings?.modelConfigs],
   )
   const defaultImageModelId = useMemo(
     () =>
       getConfiguredDefaultImageModel(
         settings?.imageModels,
         settings?.defaultModel,
-        settings?.llmModels,
+        undefined,
         settings?.modelConfigs,
       ),
-    [settings?.defaultModel, settings?.imageModels, settings?.llmModels, settings?.modelConfigs],
+    [settings?.defaultModel, settings?.imageModels, settings?.modelConfigs],
   )
   const videoModelOptions = useMemo(
     () => getConfiguredVideoModels(settings?.videoModels, settings?.modelConfigs),
@@ -269,16 +269,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
   const [voiceStatus, setVoiceStatus] = useState('')
 
-  const currentModel = settings?.llmModel || ''
+  const configuredCurrentModel = settings?.llmModel || ''
   const preferredModels = useMemo(() => {
     const configured = getConfiguredChatModels(
       settings?.llmModels,
-      currentModel,
+      configuredCurrentModel,
       settings?.modelConfigs,
     )
-    if (configured.length === 0) return []
     return uniqueModels(configured)
-  }, [currentModel, settings?.llmModels, settings?.modelConfigs])
+  }, [configuredCurrentModel, settings?.llmModels, settings?.modelConfigs])
+  const currentModel = preferredModels.includes(configuredCurrentModel)
+    ? configuredCurrentModel
+    : preferredModels[0] ?? ''
   const mentionQuery = getMentionQuery(draft)
   const maxPanelWidth =
     typeof window === 'undefined'
@@ -286,7 +288,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth / 3))
 
   useEffect(() => {
-    setModels(uniqueModels([...preferredModels, currentModel]))
+    setModels(preferredModels)
   }, [currentModel, preferredModels])
 
   useEffect(() => {
@@ -933,6 +935,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         model: imageGenerationParams.model,
         width: size.width,
         height: size.height,
+        flowId: resolveGenerationFlowId(getCurrentFlowId()),
+        nodeId: imageNodeId,
       })
       generateStore.setGenerationId(imageNodeId, response.id)
       const results = response.results ?? []

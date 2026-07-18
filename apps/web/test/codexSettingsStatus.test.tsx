@@ -5,42 +5,6 @@ import { renderToStaticMarkup } from 'react-dom/server'
 
 Object.assign(globalThis, { React })
 
-function extractDatalist(html: string, id: string): string {
-  const openingTag = `<datalist id="${id}">`
-  const start = html.indexOf(openingTag)
-  assert.notEqual(start, -1, `Missing datalist #${id}`)
-
-  const end = html.indexOf('</datalist>', start + openingTag.length)
-  assert.notEqual(end, -1, `Missing closing tag for datalist #${id}`)
-  return html.slice(start, end + '</datalist>'.length)
-}
-
-function extractInputForList(html: string, listId: string): string {
-  const input = (html.match(/<input\b[^>]*>/g) ?? []).find((tag) =>
-    tag.includes(`list="${listId}"`),
-  )
-  assert.ok(input, `Missing input linked to datalist #${listId}`)
-  return input
-}
-
-async function renderSettingsModalWithCodexModelRows(): Promise<string> {
-  const { DEFAULT_SETTINGS } = await import('@jimeng-flow/shared')
-  const originalImageModels = DEFAULT_SETTINGS.imageModels
-  const originalLlmModels = DEFAULT_SETTINGS.llmModels
-  DEFAULT_SETTINGS.imageModels = [...originalImageModels, 'codex:gpt-5.5']
-  DEFAULT_SETTINGS.llmModels = [...originalLlmModels, 'codex:gpt-5.5']
-
-  try {
-    const { SettingsModal } = await import('../src/components/SettingsModal')
-    return renderToStaticMarkup(
-      <SettingsModal open={true} onClose={() => undefined} />,
-    )
-  } finally {
-    DEFAULT_SETTINGS.imageModels = originalImageModels
-    DEFAULT_SETTINGS.llmModels = originalLlmModels
-  }
-}
-
 test('getCodexStatus fetches OpenAI CLI readiness from the backend', async () => {
   const { getCodexStatus } = await import('../src/api/settings')
   const calls: { url: string; init?: RequestInit }[] = []
@@ -104,50 +68,38 @@ test('SettingsModal exposes Codex CLI setup commands', async () => {
   assert.equal(html.includes('打开登录'), true)
   assert.equal(html.includes('chatgpt.com/codex/install'), true)
   assert.equal(html.includes(['安装图片', 'Helper'].join(' ')), false)
-  assert.equal(html.includes(['npm install -g', ['gpt-image', '2-skill'].join('-')].join(' ')), false)
+  assert.equal(
+    html.includes(['npm install -g', ['gpt-image', '2-skill'].join('-')].join(' ')),
+    false,
+  )
   assert.equal(html.includes('codex'), true)
 })
 
-test('SettingsModal offers a Codex model as the OpenAI CLI image model option', async () => {
+test('shared picker exposes a Codex model with the unified menu surface', async () => {
+  const { SettingsModelPickerPanel } = await import('../src/components/SettingsModal')
+
+  const html = renderToStaticMarkup(
+    <SettingsModelPickerPanel
+      models={[{ id: 'codex:gpt-5.5', label: 'codex:gpt-5.5' }]}
+      selectedModelIds={[]}
+      onSelect={() => undefined}
+    />,
+  )
+
+  assert.match(html, /settings-model-picker/)
+  assert.match(html, /settings-model-picker-option/)
+  assert.match(html, /data-model-option-id="codex:gpt-5.5"/)
+  assert.equal(html.includes('<datalist'), false)
+})
+
+test('SettingsModal uses one custom picker system instead of browser datalists', async () => {
   const { SettingsModal } = await import('../src/components/SettingsModal')
 
   const html = renderToStaticMarkup(
     <SettingsModal open={true} onClose={() => undefined} />,
   )
 
-  const imageOptions = extractDatalist(html, 'set-codex-image-model-options')
-  assert.equal(
-    imageOptions.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
-    true,
-  )
-})
-
-test('SettingsModal datalist inputs use the shared canvas menu rhythm', async () => {
-  const html = await renderSettingsModalWithCodexModelRows()
-
-  extractDatalist(html, 'set-codex-image-model-options')
-  extractDatalist(html, 'set-codex-chat-model-options')
-
-  const imageInput = extractInputForList(html, 'set-codex-image-model-options')
-  const chatInput = extractInputForList(html, 'set-codex-chat-model-options')
-  assert.match(imageInput, /\blist="set-codex-image-model-options"/)
-  assert.match(chatInput, /\blist="set-codex-chat-model-options"/)
-  assert.match(imageInput, /\bclass="settings-dropdown-control"/)
-  assert.match(chatInput, /\bclass="settings-dropdown-control"/)
-  assert.match(html, /--menu-control-font-size:12px/)
-  assert.match(html, /--menu-control-padding:6px 8px/)
-})
-
-test('SettingsModal offers Codex CLI chat models as selectable common LLM options', async () => {
-  const { SettingsModal } = await import('../src/components/SettingsModal')
-
-  const html = renderToStaticMarkup(
-    <SettingsModal open={true} onClose={() => undefined} />,
-  )
-
-  const chatOptions = extractDatalist(html, 'set-codex-chat-model-options')
-  assert.equal(
-    chatOptions.includes('<option value="codex:gpt-5.5">codex:gpt-5.5</option>'),
-    true,
-  )
+  assert.equal(html.includes('<datalist'), false)
+  assert.equal(html.includes('settings-dropdown-control'), false)
+  assert.equal((html.match(/settings-model-list-add/g) ?? []).length >= 5, true)
 })

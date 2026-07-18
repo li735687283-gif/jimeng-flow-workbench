@@ -91,6 +91,23 @@ function getNodeSize(node: Node): { width: number; height: number } {
   return { width, height }
 }
 
+function cloneNodeForPaste(
+  source: Node,
+  position: { x: number; y: number },
+): Node {
+  const data = source.data as BaseNodeData
+  return {
+    ...source,
+    id: `${source.type ?? 'node'}-${crypto.randomUUID()}`,
+    position,
+    selected: false,
+    dragging: false,
+    data: {
+      ...source.data,
+      title: `${data.title || '节点'} 副本`,
+    },
+  }
+}
 function cleanupRemovedEdgeReferences(
   nodes: Node[],
   removedEdges: Edge[],
@@ -295,6 +312,9 @@ interface CanvasState {
   onNodesDelete: (nodes: Node[]) => void
   onEdgesDelete: (edges: Edge[]) => void
   addNode: (type: FlowNodeType, position: { x: number; y: number }) => string
+  clipboardNode: Node | null
+  copyNode: (id: string) => boolean
+  pasteNode: (position?: { x: number; y: number }) => string
   createUpscaleImageNode: (
     sourceId: string,
     resolution: UpscaleResolution,
@@ -318,6 +338,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   deletedNodeIds: [],
   selectedNodeId: null,
+  clipboardNode: null,
 
   onNodesChange: (changes: NodeChange[]) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) })
@@ -383,6 +404,36 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       selectedNodeId: node.id,
     })
     return node.id
+  },
+
+  copyNode: (id) => {
+    const source = get().nodes.find((node) => node.id === id)
+    if (!source) return false
+    set({
+      clipboardNode: {
+        ...source,
+        position: { ...source.position },
+        selected: false,
+        dragging: false,
+        data: { ...source.data },
+      },
+    })
+    return true
+  },
+
+  pasteNode: (position) => {
+    const source = get().clipboardNode
+    if (!source) return ''
+    const nextPosition = position ?? {
+      x: source.position.x + 32,
+      y: source.position.y + 32,
+    }
+    const pasted = cloneNodeForPaste(source, nextPosition)
+    set((state) => ({
+      nodes: [...state.nodes, pasted],
+      selectedNodeId: pasted.id,
+    }))
+    return pasted.id
   },
 
   createUpscaleImageNode: (sourceId, resolution) => {

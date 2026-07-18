@@ -104,6 +104,16 @@ function isApimartBaseUrl(baseUrl: string): boolean {
   return /(^|\.)apimart\.ai$/i.test(new URL(baseUrl).hostname)
 }
 
+function isApimartSingleImageTaskModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase()
+  return [
+    'gemini-3-pro-image-preview',
+    'gemini-3-pro-image-preview-official',
+    'nano-banana-pro-ext',
+    'nano-banana-pro',
+  ].includes(normalized)
+}
+
 function getRatioSize(width: number, height: number): string {
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 1024
   const safeHeight = Number.isFinite(height) && height > 0 ? height : 1024
@@ -343,7 +353,13 @@ export function getOpenAiCompatibleImagePayload(
   baseUrl: string,
 ): Record<string, unknown> {
   const isApimart = isApimartBaseUrl(baseUrl)
-  const count = Math.max(1, Math.min(req.count ?? 1, isApimart ? 4 : 10))
+  const maxCount =
+    isApimart && isApimartSingleImageTaskModel(req.model)
+      ? 1
+      : isApimart
+        ? 4
+        : 10
+  const count = Math.max(1, Math.min(req.count ?? 1, maxCount))
 
   if (isApimart) {
     return {
@@ -468,13 +484,21 @@ async function pollOpenAiImageTask({
       )
     }
 
-    const results = extractOpenAiImageResults(json)
-    if (results.length > 0) return results
-
     const status = extractTaskStatus(json)
     if (['failed', 'failure', 'error', 'cancelled', 'canceled'].includes(status)) {
       throw new Error(extractTaskError(json))
     }
+
+    const results = extractOpenAiImageResults(json)
+    const isPending = [
+      'submitted',
+      'pending',
+      'queued',
+      'processing',
+      'in_progress',
+      'running',
+    ].includes(status)
+    if (results.length > 0 && !isPending) return results
 
     await delay(pollIntervalMs)
   }
@@ -498,6 +522,24 @@ export async function generateOpenAiCompatibleImage(
     throw new Error('第三方图片 API Key 未配置，请先在设置中配置 LLM Provider')
   }
 
+  const isApimart = isApimartBaseUrl(baseUrl)
+  const requestedCount = Math.max(1, Math.min(req.count ?? 1, 4))
+  if (
+    isApimart &&
+    isApimartSingleImageTaskModel(req.model) &&
+    requestedCount > 1
+  ) {
+    const batches = await Promise.all(
+      Array.from({ length: requestedCount }, () =>
+        generateOpenAiCompatibleImage(
+          { ...req, count: 1 },
+          { ...deps, settings, fetchImpl },
+        ),
+      ),
+    )
+    return batches.flat()
+  }
+
   const controller = new AbortController()
   const timeoutMs = deps.timeoutMs ?? 300_000
   const pollIntervalMs = deps.pollIntervalMs ?? 2_000
@@ -505,7 +547,6 @@ export async function generateOpenAiCompatibleImage(
 
   try {
     const hasInputImages = !!req.inputImages && req.inputImages.length > 0
-    const isApimart = isApimartBaseUrl(baseUrl)
     let res: Response
     if (hasInputImages && !isApimart) {
       res = await fetchImpl(`${baseUrl}/images/edits`, {

@@ -546,6 +546,12 @@ async function persistVideoGenerationResultToFlow(
   }
 }
 
+const IMAGE_DOWNLOAD_RETRY_DELAYS_MS = [0, 1_500, 3_500] as const
+
+function waitForImageDownloadRetry(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 /** 从 URL 下载图片二进制 */
 async function downloadImage(
   url: string,
@@ -554,9 +560,23 @@ async function downloadImage(
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const res = await fetch(url, { signal: controller.signal })
-    if (!res.ok) {
-      throw new Error(`下载图片失败：HTTP ${res.status} ${res.statusText}`)
+    let res: Response | null = null
+    for (let attempt = 0; attempt < IMAGE_DOWNLOAD_RETRY_DELAYS_MS.length; attempt++) {
+      const delayMs = IMAGE_DOWNLOAD_RETRY_DELAYS_MS[attempt]
+      if (delayMs > 0) await waitForImageDownloadRetry(delayMs)
+
+      res = await fetch(url, { signal: controller.signal })
+      if (res.ok) break
+
+      const canRetry =
+        (res.status === 403 || res.status === 404) &&
+        attempt < IMAGE_DOWNLOAD_RETRY_DELAYS_MS.length - 1
+      if (!canRetry) {
+        throw new Error(`下载图片失败：HTTP ${res.status} ${res.statusText}`)
+      }
+    }
+    if (!res || !res.ok) {
+      throw new Error('下载图片失败：远程图片暂不可用')
     }
     const buf = Buffer.from(await res.arrayBuffer())
     const ext = extFromImageUrl(url)

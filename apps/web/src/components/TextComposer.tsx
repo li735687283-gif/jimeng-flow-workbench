@@ -3,14 +3,14 @@
 // 参考 PRD 7.6、8.9、13.8（文本节点 UI 参考）、12.2（错误处理）。
 // 集成约定：BottomPanel 在选中节点 type==='text' 时渲染 <TextComposer nodeId={...} />。
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Send, AlertCircle, Loader2, ChevronDown } from 'lucide-react'
 import type { LlmModelInfo, TextNodeData } from '@jimeng-flow/shared/textNode'
 import { useCanvasStore } from '../state/canvasStore'
 import { useSettingsStore } from '../state/settingsStore'
 import { useTextNodeStore } from '../state/textNodeStore'
-import { listLlmModels, runTextNode } from '../api/llm'
+import { runTextNode } from '../api/llm'
 
 interface TextComposerProps {
   /** 选中的文本节点 id */
@@ -163,49 +163,27 @@ export function TextComposer({ nodeId }: TextComposerProps) {
   const [model, setModel] = useState('')
   const [message, setMessage] = useState('')
   const [modelsLoading, setModelsLoading] = useState(true)
-  const fetchedRef = useRef(false)
   const preferredModels = useMemo(() => {
-    const configured = settings?.llmModels ?? []
-    if (configured.length === 0) return []
-    return uniqueModels([...configured, settings?.llmModel ?? ''])
-  }, [settings?.llmModel, settings?.llmModels])
+    return uniqueModels(settings?.llmModels ?? [])
+  }, [settings?.llmModels])
 
-  // 拉取模型列表（仅一次）
+  // 仅显示后台设置中已选择的模型
   useEffect(() => {
-    if (preferredModels.length > 0) {
-      setModels(preferredModels.map((id) => ({ id, label: id })))
-      setModelsLoading(false)
-      return
-    }
-    if (fetchedRef.current) return
-    fetchedRef.current = true
-    listLlmModels()
-      .then((list) => {
-        setModels(list)
-        setModelsLoading(false)
-      })
-      .catch(() => {
-        setModelsLoading(false)
-      })
+    setModels(preferredModels.map((id) => ({ id, label: id })))
+    setModelsLoading(false)
   }, [preferredModels])
 
   // 初始化选中模型：优先节点已记录的模型，否则取列表第一项
   useEffect(() => {
-    if (model) return
     if (modelsLoading) return
+    if (model && models.some((item) => item.id === model)) return
     const nodeModel = (node?.data as unknown as TextNodeData | undefined)?.llm?.model
-    if (nodeModel) {
+    if (nodeModel && models.some((item) => item.id === nodeModel)) {
       setModel(nodeModel)
       return
     }
-    if (settings?.llmModel) {
-      setModel(settings.llmModel)
-      return
-    }
-    if (models.length > 0) {
-      setModel(models[0].id)
-    }
-  }, [models, modelsLoading, node, model, settings?.llmModel])
+    setModel(models[0]?.id ?? '')
+  }, [models, modelsLoading, node, model])
 
   // 节点切换时重置输入
   useEffect(() => {

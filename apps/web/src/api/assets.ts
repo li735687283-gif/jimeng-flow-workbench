@@ -15,17 +15,27 @@ export function getAssetDownloadUrl(id: string): string {
   return `/api/assets/${encodeURIComponent(id)}/download`
 }
 
-/** 触发浏览器下载当前资产 */
-export function downloadAssetFile(id: string): void {
+/** 读取资产并触发浏览器下载，避免直接链接被浏览器拦截。 */
+export async function downloadAssetFile(id: string): Promise<void> {
+  const res = await fetch(getAssetDownloadUrl(id))
+  if (!res.ok) {
+    throw new Error(`下载资产失败：${res.status} ${res.statusText}`)
+  }
+
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const disposition = res.headers.get('content-disposition') || ''
+  const filenameMatch = /filename="?([^";]+)"?/i.exec(disposition)
+  const filename = filenameMatch?.[1] || `asset-${id}`
   const anchor = document.createElement('a')
-  anchor.href = getAssetDownloadUrl(id)
-  anchor.download = ''
+  anchor.href = objectUrl
+  anchor.download = filename
   anchor.rel = 'noopener'
   document.body.appendChild(anchor)
   anchor.click()
   anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
 }
-
 /** 将资产导出到本地 workspace/outputs/downloads 文件夹 */
 export async function exportAssetFile(id: string): Promise<{ path: string }> {
   const res = await fetch(`/api/assets/${encodeURIComponent(id)}/export`, {
@@ -74,6 +84,27 @@ export async function listAssets(): Promise<Asset[]> {
     throw new Error(`列出资产失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Asset[]
+}
+
+/** 读取资产库中的资产（只包含右键保存过的资产）。 */
+export async function listLibraryAssets(): Promise<Asset[]> {
+  const res = await fetch('/api/assets/library')
+  if (!res.ok) {
+    throw new Error(`列出资产库失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Asset[]
+}
+
+/** 将已有输出资产登记到资产库，并由后端自动分类。 */
+export async function saveAssetToLibrary(id: string): Promise<Asset> {
+  const res = await fetch(`/api/assets/${encodeURIComponent(id)}/library`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `保存到资产库失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as Asset
 }
 
 /** 使用 dreamina image_upscale 高清当前图片资产，返回新资产 */

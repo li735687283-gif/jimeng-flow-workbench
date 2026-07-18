@@ -192,6 +192,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const hasInputImage = resolvedInputImages.length > 0
   const submitDisabled =
     running ||
+    !activeVideoModelId ||
     (activeVideoModelNeedsJimeng && !isJimengConfigured) ||
     !!unsupportedModelMessage
 
@@ -204,7 +205,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
 
   const makeRequest = (): VideoGenerationRequest | null => {
     const prompt = resolvedPrompt.trim()
-    if (!prompt) return null
+    if (!prompt || !activeVideoModelId) return null
 
     const mode = resolveVideoModeForInputImages(d.mode, resolvedInputImages)
 

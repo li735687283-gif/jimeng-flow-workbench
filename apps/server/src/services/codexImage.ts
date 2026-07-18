@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { constants, existsSync } from 'node:fs'
+import { constants, existsSync, readdirSync, statSync } from 'node:fs'
 import {
   access,
   mkdir,
@@ -119,9 +119,30 @@ function getCodexPath(
   deps: Pick<CodexImageDeps, 'codexPath' | 'env'> = {},
 ): string {
   const env = deps.env ?? process.env
-  return deps.codexPath?.trim() ||
+  const explicitPath =
+    deps.codexPath?.trim() ||
     env.CODEX_BIN?.trim() ||
-    (process.platform === 'win32' ? 'codex.cmd' : 'codex')
+    env.CODEX_CLI_PATH?.trim()
+  if (explicitPath) return explicitPath
+  if (deps.env === undefined && process.platform === 'win32') {
+    try {
+      const root = join(
+        env.LOCALAPPDATA?.trim() || join(homedir(), 'AppData', 'Local'),
+        'OpenAI',
+        'Codex',
+        'bin',
+      )
+      const nativePath = readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(root, entry.name, 'codex.exe'))
+        .filter((path) => existsSync(path))
+        .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0]
+      if (nativePath) return nativePath
+    } catch {
+      // Fall back to PATH when the native Codex install is unavailable.
+    }
+  }
+  return process.platform === 'win32' ? 'codex.cmd' : 'codex'
 }
 
 function getCodexExecModel(modelId: string): string {
@@ -727,6 +748,7 @@ export async function generateCodexCliImage(
       cwd,
       '--sandbox',
       'danger-full-access',
+      '--ephemeral',
       '--skip-git-repo-check',
       '--output-last-message',
       lastMessagePath,

@@ -28,7 +28,7 @@ import { Plus } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 import { useAssetStore } from '../../state/assetStore'
 import { useFlowStore } from '../../state/flowStore'
-import { uploadAsset } from '../../api/assets'
+import { saveAssetToLibrary, uploadAsset } from '../../api/assets'
 import { nodeTypes } from '../../nodes/registry'
 import type { BaseNodeData, FlowNodeType } from '../../types/nodeTypes'
 import {
@@ -59,6 +59,39 @@ const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 's
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'])
 const VIEWPORT_STORAGE_PREFIX = 'jimeng-flow:viewport:'
 const SNAP_ALIGN_STORAGE_KEY = 'jimeng-flow:canvas-snap-align'
+
+function findAssetId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim().startsWith('asset_')) {
+    return value.trim()
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findAssetId(item)
+      if (found) return found
+    }
+    return undefined
+  }
+  if (!value || typeof value !== 'object') return undefined
+  for (const child of Object.values(value)) {
+    const found = findAssetId(child)
+    if (found) return found
+  }
+  return undefined
+}
+
+function getNodeAssetId(node: Node): string | undefined {
+  const data = node.data as BaseNodeData | undefined
+  const directCandidates: unknown[] = [
+    data?.assetId,
+    ...(Array.isArray(data?.outputAssetIds) ? data.outputAssetIds : []),
+    ...(Array.isArray(data?.assetIds) ? data.assetIds : []),
+  ]
+  const directAssetId = directCandidates.find(
+    (value): value is string =>
+      typeof value === 'string' && value.trim().startsWith('asset_'),
+  )
+  return directAssetId ?? findAssetId(data?.generationRuns)
+}
 
 function readSnapAlignEnabled(): boolean {
   if (typeof window === 'undefined') return true
@@ -278,6 +311,10 @@ export function CanvasView() {
   const addNode = useCanvasStore((s) => s.addNode)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const setAsset = useAssetStore((s) => s.setAsset)
+  const copyNode = useCanvasStore((s) => s.copyNode)
+  const pasteNode = useCanvasStore((s) => s.pasteNode)
+  const removeNode = useCanvasStore((s) => s.removeNode)
+  const hasClipboard = useCanvasStore((s) => Boolean(s.clipboardNode))
   const zoom = useStore((s) => s.transform[2])
   const connectionRadius = Math.round(clamp(28 * zoom, 16, 56))
   const currentFlowId = useFlowStore((s) => s.currentFlowId)
@@ -391,6 +428,37 @@ export function CanvasView() {
     setHelperLines(null)
   }, [])
 
+  const handleNodeContextMenu = useCallback(
+    (event: ReactMouseEvent, node: Node) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setSelectedNode(node.id)
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        flowPosition: screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+        nodeId: node.id,
+        assetId: getNodeAssetId(node),
+        hasClipboard,
+      })
+      setAddMenu(null)
+      setReferenceMenu(null)
+    },
+    [hasClipboard, screenToFlowPosition, setSelectedNode],
+  )
+
+  const handleSaveNodeToLibrary = useCallback(
+    async (assetId: string) => {
+      try {
+        const asset = await saveAssetToLibrary(assetId)
+        setAsset(asset)
+      } catch (err) {
+        console.error('[CanvasView] 保存到资产库失败:', err)
+      }
+    },
+    [setAsset],
+  )
+
   const handlePaneContextMenu = useCallback(
     (event: ReactMouseEvent | MouseEvent) => {
       event.preventDefault()
@@ -401,6 +469,7 @@ export function CanvasView() {
         y: clientY,
         flowPosition: screenToFlowPosition({ x: clientX, y: clientY }),
       })
+      setAddMenu(null)
       setReferenceMenu(null)
     },
     [screenToFlowPosition],
@@ -689,6 +758,7 @@ export function CanvasView() {
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
         onNodeClick={handleNodeClick}
+        onNodeContextMenu={handleNodeContextMenu}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={handlePaneClick}
@@ -767,6 +837,31 @@ export function CanvasView() {
             })
           }}
           onUpload={() => triggerUpload(contextMenu.flowPosition)}
+          onSaveToAssetLibrary={
+            contextMenu.assetId
+              ? () => void handleSaveNodeToLibrary(contextMenu.assetId as string)
+              : undefined
+          }
+          onCopyNode={
+            contextMenu.nodeId
+              ? () => {
+                  copyNode(contextMenu.nodeId as string)
+                }
+              : undefined
+          }
+          onPasteNode={() => {
+            pasteNode({
+              x: contextMenu.flowPosition.x + 36,
+              y: contextMenu.flowPosition.y + 36,
+            })
+          }}
+          onDeleteNode={
+            contextMenu.nodeId
+              ? () => {
+                  removeNode(contextMenu.nodeId as string)
+                }
+              : undefined
+          }
           onClose={() => setContextMenu(null)}
         />
       )}

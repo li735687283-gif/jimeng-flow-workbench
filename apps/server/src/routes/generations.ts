@@ -102,7 +102,7 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // POST /api/generations/edit
   // body: { inputImage: string, editType: 'style_transfer'|'modify'|'remove_bg', prompt?: string, ... }
   app.post('/api/generations/edit', async (req, reply) => {
-    const body = req.body as { inputImage: string; editType: string; prompt?: string; model?: string; width?: number; height?: number }
+    const body = req.body as { inputImage: string; editType: string; prompt?: string; model?: string; width?: number; height?: number; flowId?: string; nodeId?: string }
     if (!body.inputImage) {
       return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'inputImage 不能为空' })
     }
@@ -120,6 +120,13 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
             originalName: 'remove_bg_output.png',
             mimeType: 'image/png',
             prompt: body.prompt || 'remove background',
+            sourceNodeId: body.nodeId,
+            inputAssetIds: [body.inputImage],
+            provider: 'jimeng',
+            params: {
+              flowId: body.flowId?.trim() || 'local',
+              editType: 'remove_bg',
+            },
           })
           editResult.assetId = asset.id
         }
@@ -127,8 +134,8 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       }
       // style_transfer / modify 使用 image2image
       const genReq: GenerationRequest = {
-        flowId: 'local',
-        nodeId: `edit_${Date.now()}`,
+        flowId: body.flowId?.trim() || 'local',
+        nodeId: body.nodeId?.trim() || `edit_${Date.now()}`,
         mediaType: 'image',
         prompt: body.prompt || 'modify image',
         inputImages: [body.inputImage],

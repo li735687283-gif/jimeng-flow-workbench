@@ -34,23 +34,26 @@ export function getConfiguredVideoModels(
   const selected: VideoModelOption[] = []
   const seen = new Set<string>()
 
+  // The explicit settings list is authoritative. An empty list means that no
+  // video model has been selected; never show built-in or cross-capability
+  // models as a fallback.
+  if (modelIds !== undefined) {
+    for (const modelId of modelIds) {
+      const option = toVideoModelOption(modelId)
+      if (!option || seen.has(option.id)) continue
+      selected.push(option)
+      seen.add(option.id)
+    }
+    return selected
+  }
+
   for (const model of getModelConfigsByCapability(modelConfigs, 'video')) {
     const option = modelConfigToVideoOption(model)
     if (!option || seen.has(option.id)) continue
     selected.push(option)
     seen.add(option.id)
   }
-  if (selected.length > 0) return selected
-
-  for (const modelId of modelIds ?? []) {
-    const option = toVideoModelOption(modelId)
-    if (!option || seen.has(option.id)) continue
-    selected.push(option)
-    seen.add(option.id)
-  }
-
-  if (selected.length > 0) return selected
-  return VIDEO_MODELS.map((model) => ({ id: model.id, label: model.label }))
+  return selected
 }
 
 export function getConfiguredDefaultVideoModel(
@@ -62,7 +65,6 @@ export function getConfiguredDefaultVideoModel(
   return (
     models.find((model) => model.id === preferredModel)?.id ??
     models[0]?.id ??
-    VIDEO_MODELS[0]?.id ??
     ''
   )
 }

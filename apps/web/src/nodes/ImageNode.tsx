@@ -37,6 +37,10 @@ import {
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
 import { getCodexStatus, testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
+import {
+  getImageResultAssetIds,
+  ImageResultGallery,
+} from '../components/ImageResultGallery'
 import { ImageFullscreenViewer } from '../components/ImageFullscreenViewer'
 import { PromptEditor } from '../components/PromptEditor'
 import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
@@ -68,6 +72,7 @@ import {
 import {
   getConfiguredImageModels,
   getImageModelMenuWidth,
+  isOpenAiCliImageModel,
   shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
 import { validateImageProvider } from '../utils/imageProviderValidation'
@@ -126,7 +131,6 @@ const MEDIA_DISPLAY_STYLE: CSSProperties = {
   maxWidth: '72vw',
   maxHeight: 420,
   borderRadius: 12,
-  overflow: 'hidden',
 }
 
 const MEDIA_IMG_STYLE: CSSProperties = {
@@ -164,7 +168,7 @@ const RATIO_OPTIONS = [
   '21:9',
   '9:21',
 ] as const
-const COUNT_OPTIONS = [1, 2, 4] as const
+const COUNT_OPTIONS = [1, 2, 3, 4] as const
 const EDITOR_CLOSE_ANIMATION_MS = 260
 const IMAGE_MENU_GAP = 8
 const MODEL_MENU_ROW_HEIGHT = 56
@@ -343,6 +347,11 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     () => getImageGenerationHistoryItems(nodeData.generationRuns),
     [nodeData.generationRuns],
   )
+  const imageResultAssetIds = useMemo(() => {
+    const outputAssetIds = getImageResultAssetIds(nodeData.outputAssetIds)
+    if (outputAssetIds.length > 0) return outputAssetIds
+    return getImageResultAssetIds(generationRuns.at(-1)?.run.assetIds)
+  }, [generationRuns, nodeData.outputAssetIds])
   const referenceAssetIds = useMemo(() => {
     const selfAssetId = nodeData.assetId
     const references = new Set<string>()
@@ -460,10 +469,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const modelOptions = useMemo(() => {
     return getConfiguredImageModels(
       settings?.imageModels,
-      settings?.llmModels,
+      undefined,
       settings?.modelConfigs,
     )
-  }, [settings?.imageModels, settings?.llmModels, settings?.modelConfigs])
+  }, [settings?.imageModels, settings?.modelConfigs])
   const modelMenuStyle = useMemo(
     () =>
       ({
@@ -561,6 +570,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0]
+  const isSingleImageModel = selectedModel ? isOpenAiCliImageModel(selectedModel.id) : false
+  const selectedCount = isSingleImageModel ? 1 : count
   const selectedSize = getSizeFromRatio(ratio, resolution)
   const savedSize =
     typeof nodeData.width === 'number' && typeof nodeData.height === 'number'
@@ -572,6 +583,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     ...MEDIA_DISPLAY_STYLE,
     ...frameStyle,
   }
+  const primaryImageAssetId = nodeData.assetId ?? imageResultAssetIds[0] ?? ''
   const emptyContainerStyle = {
     ...CONTAINER_STYLE,
     ...frameStyle,
@@ -657,6 +669,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   )
 
   const handleValidateImageProvider = useCallback(async () => {
+    if (!selectedModel) {
+      setValidationStatus('error')
+      return
+    }
     setActionBusy(true)
     setValidationStatus('checking')
     try {
@@ -670,7 +686,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     } finally {
       setActionBusy(false)
     }
-  }, [selectedModel.id, settings])
+  }, [selectedModel?.id, settings])
 
   const handleDownloadImage = useCallback(async () => {
     if (!nodeData.assetId) {
@@ -678,13 +694,56 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     }
     setActionBusy(true)
     try {
-      downloadAssetFile(nodeData.assetId)
+      await downloadAssetFile(nodeData.assetId)
     } catch {
       // 下载失败时保留当前界面，不再显示额外状态文字。
     } finally {
       setActionBusy(false)
     }
   }, [nodeData.assetId])
+
+  const handleDownloadImageAsset = useCallback(async (assetId: string) => {
+    const normalizedAssetId = assetId.trim()
+    if (!normalizedAssetId) return
+    try {
+      await downloadAssetFile(normalizedAssetId)
+    } catch {
+      // 下载失败时保留当前界面，不再显示额外状态文字。
+    }
+  }, [])
+
+  const handleSetPrimaryImage = useCallback(
+    async (assetId: string) => {
+      const normalizedAssetId = assetId.trim()
+      if (!normalizedAssetId) return
+      const currentOutputAssetIds = getImageResultAssetIds(nodeData.outputAssetIds)
+      const availableAssetIds =
+        currentOutputAssetIds.length > 0
+          ? currentOutputAssetIds
+          : getImageResultAssetIds(generationRuns.at(-1)?.run.assetIds)
+      if (!availableAssetIds.includes(normalizedAssetId)) return
+
+      const nextOutputAssetIds = [
+        normalizedAssetId,
+        ...availableAssetIds.filter((item) => item !== normalizedAssetId),
+      ]
+      useCanvasStore.getState().updateNodeData(id, {
+        assetId: normalizedAssetId,
+        outputAssetIds: nextOutputAssetIds,
+        status: 'success',
+        error: undefined,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      setImgError(false)
+      try {
+        await useFlowStore.getState().saveCurrent()
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSendError(`主图已切换，但保存到画布失败：${message}`)
+      }
+    },
+    [generationRuns, id, nodeData.outputAssetIds],
+  )
 
   const handleUpscaleImage = useCallback(async (resolution = upscaleResolution) => {
     if (!nodeData.assetId) {
@@ -935,10 +994,14 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     const effectiveModel =
       modelOptions.find((model) => model.id === options.modelId) ??
       selectedModel
+    if (!effectiveModel) {
+      setSendError('请先在后台设置中选择图片模型')
+      return
+    }
     const effectiveQuality = options.quality ?? quality
     const effectiveRatio = options.ratio ?? ratio
     const effectiveResolution = options.resolution ?? resolution
-    const effectiveCount = options.count ?? count
+    const effectiveCount = isOpenAiCliImageModel(effectiveModel.id) ? 1 : options.count ?? count
     if (!trimmedPrompt) {
       setSendError(
         resolved.upstreamRefs.length > 0
@@ -1295,7 +1358,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             validationStatus={validationStatus}
             validationLabel={'校验'}
             validationAriaLabel={
-              shouldRequireJimengCliForImageModel(selectedModel.id)
+              shouldRequireJimengCliForImageModel(selectedModel?.id ?? '')
                 ? '校验即梦 CLI'
                 : '校验当前图片模型'
             }
@@ -1314,14 +1377,25 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             onClick={handleOpenEditor}
             style={mediaDisplayStyle}
           >
-            <img
-              src={imageSrc}
-              alt={nodeData.title}
-              onLoad={handleImageLoad}
-              onError={() => setImgError(true)}
-              style={MEDIA_IMG_STYLE}
-              draggable={false}
-            />
+            {imageResultAssetIds.length > 1 ? (
+              <ImageResultGallery
+                assetIds={imageResultAssetIds}
+                primaryAssetId={primaryImageAssetId}
+                title={nodeData.title}
+                onSetPrimary={(assetId) => void handleSetPrimaryImage(assetId)}
+                onDownload={handleDownloadImageAsset}
+                onPrimaryImageLoad={handleImageLoad}
+              />
+            ) : (
+              <img
+                src={imageSrc}
+                alt={nodeData.title}
+                onLoad={handleImageLoad}
+                onError={() => setImgError(true)}
+                style={MEDIA_IMG_STYLE}
+                draggable={false}
+              />
+            )}
             {generationProgressOverlay}
           </div>
         ) : (
@@ -1437,7 +1511,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   onClick={handleModelToggle}
                 >
                   <Sparkles size={19} strokeWidth={1.8} />
-                  <span>{selectedModel.label}</span>
+                  <span>{selectedModel?.label || '未选择图片模型'}</span>
                   <ChevronDown size={16} strokeWidth={1.8} />
                 </button>
                 {modelMenuOpen && (
@@ -1447,7 +1521,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         type="button"
                         key={model.id}
                         className={`image-model-option${
-                          model.id === selectedModel.id ? ' selected' : ''
+                          model.id === selectedModel?.id ? ' selected' : ''
                         }`}
                         onClick={() => {
                           setModelTouched(true)
@@ -1462,7 +1536,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         <span className="image-model-copy">
                           <strong>{model.label}</strong>
                         </span>
-                        {model.id === selectedModel.id ? (
+                        {model.id === selectedModel?.id ? (
                           <Check size={15} strokeWidth={1.8} />
                         ) : null}
                       </button>
@@ -1546,12 +1620,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   ref={countMenuButtonRef}
                   type="button"
                   className="image-editor-pill image-editor-count-button"
-                  onClick={handleCountToggle}
+                  onClick={isSingleImageModel ? undefined : handleCountToggle}
+                  disabled={isSingleImageModel}
                 >
-                  <span>{count}张</span>
-                  <ChevronDown size={15} strokeWidth={1.8} />
+                  <span>{selectedCount}张</span>
+                  {!isSingleImageModel ? <ChevronDown size={15} strokeWidth={1.8} /> : null}
                 </button>
-                {countMenuOpen && (
+                {countMenuOpen && !isSingleImageModel && (
                   <div className="image-count-menu">
                     {COUNT_OPTIONS.map((item) => (
                       <button
