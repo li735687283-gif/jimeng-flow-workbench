@@ -11,8 +11,9 @@ test('package scripts use the runner and discovery filters recursively in sorted
 
   assert.equal(
     packageJson.scripts.test,
-    'node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web',
+    'node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web && npm run test:desktop',
   );
+  assert.equal(packageJson.scripts['test:desktop'], 'node scripts/run-tests.mjs desktop');
   assert.equal(packageJson.scripts['test:server'], 'node scripts/run-tests.mjs server');
   assert.equal(packageJson.scripts['test:web'], 'node scripts/run-tests.mjs web');
   assert.equal(packageJson.scripts.lint, 'oxlint apps packages scripts');
@@ -42,7 +43,7 @@ test('package scripts use the runner and discovery filters recursively in sorted
 
   await assert.rejects(
     discoverTestFiles(fixtureRoot, 'unknown'),
-    /Unknown test scope "unknown"\. Expected server or web\./,
+    /Unknown test scope "unknown"\. Expected desktop, server, or web\./,
   );
 
   await mkdir(join(fixtureRoot, 'apps', 'web', 'test'), { recursive: true });

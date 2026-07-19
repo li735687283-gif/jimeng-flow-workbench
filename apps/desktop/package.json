@@ -1,0 +1,12 @@
+{
+  "name": "@jimeng-flow/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && wait-on http://127.0.0.1:5174/canvas http://127.0.0.1:8787/api/health && electron ../.. --dev",
+    "test": "node ../../scripts/run-tests.mjs desktop",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  }
+}

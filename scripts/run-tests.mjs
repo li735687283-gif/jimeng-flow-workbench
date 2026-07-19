@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scopeDirectories = new Map([
   ['server', join('apps', 'server', 'test')],
+  ['desktop', join('apps', 'desktop', 'test')],
   ['web', join('apps', 'web', 'test')],
 ]);
 
@@ -13,7 +14,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export async function discoverTestFiles(rootDirectory, scope) {
   const relativeTestDirectory = scopeDirectories.get(scope);
   if (!relativeTestDirectory) {
-    throw new Error(`Unknown test scope "${scope}". Expected server or web.`);
+    throw new Error(`Unknown test scope "${scope}". Expected desktop, server, or web.`);
   }
 
   const testDirectory = resolve(rootDirectory, relativeTestDirectory);

@@ -22,6 +22,7 @@ import { useAutoSave } from './hooks/useAutoSave'
 import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
+import { resolveInitialAppView } from './utils/initialAppView'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
@@ -36,8 +37,11 @@ const LAST_FLOW_ID_KEY = 'jimeng-flow:lastFlowId'
 
 function getLastView(): AppView {
   if (typeof window === 'undefined') return 'home'
-  const value = window.localStorage.getItem(LAST_VIEW_KEY)
-  return value === 'canvas' ? 'canvas' : 'home'
+  return resolveInitialAppView({
+    pathname: window.location.pathname,
+    search: window.location.search,
+    storedView: window.localStorage.getItem(LAST_VIEW_KEY),
+  })
 }
 
 function setLastView(view: AppView) {

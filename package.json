@@ -1,8 +1,10 @@
 {
   "name": "jimeng-flow-workbench",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "MO.K local-first AI canvas desktop application",
   "private": true,
   "type": "module",
+  "main": "apps/desktop/dist/main.cjs",
   "packageManager": "npm@11.13.0",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -13,22 +15,62 @@
   ],
   "scripts": {
     "build": "npm run build --workspace apps/web",
+    "build:desktop": "npm run build && npm run build --workspace apps/desktop",
     "check": "npm run typecheck && npm run lint && npm test && npm run build",
     "dev": "concurrently -n web,server -c green,blue \"npm:dev:web\" \"npm:dev:server\"",
+    "dev:desktop": "concurrently -k -s first -n web,server,desktop -c green,blue,magenta \"npm:dev:web\" \"npm:dev:server\" \"npm --workspace apps/desktop run dev\"",
     "dev:web": "npm --workspace apps/web run dev",
     "dev:server": "npm --workspace apps/server run dev",
     "lint": "oxlint apps packages scripts",
     "mok": "node scripts/mok.mjs",
-    "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web",
+    "package:win": "npm run build:desktop && electron-builder --win nsis",
+    "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web && npm run test:desktop",
+    "test:desktop": "node scripts/run-tests.mjs desktop",
     "test:server": "node scripts/run-tests.mjs server",
     "test:web": "node scripts/run-tests.mjs web",
     "typecheck": "npm run typecheck --workspaces",
+    "typecheck:desktop": "npm run typecheck --workspace apps/desktop",
     "typecheck:server": "npm run typecheck --workspace apps/server",
     "typecheck:web": "npm run typecheck --workspace apps/web"
   },
+  "build": {
+    "appId": "com.mok.canvas",
+    "productName": "MO.K",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "apps/desktop/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "apps/web/dist",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "MO.K-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "MO.K"
+    }
+  },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "oxlint": "^1.71.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "wait-on": "^9.0.10"
   }
 }

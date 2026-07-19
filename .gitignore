@@ -4,6 +4,7 @@ node_modules/
 # 构建产物
 dist/
 build/
+release/
 *.tsbuildinfo
 
 # 运行时工作区（由后端创建）
