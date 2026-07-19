@@ -6,6 +6,8 @@ import test from 'node:test'
 import type { ChildProcess } from 'node:child_process'
 import {
   createServerEnvironment,
+  LOCAL_CANVAS_URL,
+  probeCanvasPage,
   probeLocalServer,
   startOrReuseLocalServer,
   stopOwnedLocalServer,
@@ -80,6 +82,73 @@ test('desktop reuses an existing MO.K server without spawning or owning it', asy
   assert.equal(spawnCalls, 0)
   assert.equal(handle.owned, false)
   assert.equal(handle.process, null)
+})
+
+test('packaged desktop refuses to reuse a server that cannot serve the app', async () => {
+  let spawnCalls = 0
+  await assert.rejects(
+    startOrReuseLocalServer({
+      entryPath: 'server.cjs',
+      execPath: 'electron.exe',
+      fetchImpl: async (url) => {
+        if (String(url) === LOCAL_CANVAS_URL) {
+          return new Response('Not Found', { status: 404 })
+        }
+        return healthResponse()
+      },
+      projectRoot: 'project',
+      spawnImpl: () => {
+        spawnCalls += 1
+        return createFakeChild()
+      },
+      webRoot: 'web',
+      workspaceDir: 'workspace',
+    }),
+    /does not serve the app/,
+  )
+  assert.equal(spawnCalls, 0)
+})
+
+test('packaged desktop reuses a healthy server that serves the app', async () => {
+  let spawnCalls = 0
+  const handle = await startOrReuseLocalServer({
+    entryPath: 'server.cjs',
+    execPath: 'electron.exe',
+    fetchImpl: async (url) => {
+      if (String(url) === LOCAL_CANVAS_URL) {
+        return new Response('<!doctype html>', { status: 200 })
+      }
+      return healthResponse()
+    },
+    projectRoot: 'project',
+    spawnImpl: () => {
+      spawnCalls += 1
+      return createFakeChild()
+    },
+    webRoot: 'web',
+    workspaceDir: 'workspace',
+  })
+
+  assert.equal(spawnCalls, 0)
+  assert.equal(handle.owned, false)
+  assert.equal(handle.process, null)
+})
+
+test('canvas page probe reports whether the server serves the app shell', async () => {
+  assert.equal(
+    await probeCanvasPage(async () => new Response('<!doctype html>', { status: 200 })),
+    true,
+  )
+  assert.equal(
+    await probeCanvasPage(async () => new Response('Not Found', { status: 404 })),
+    false,
+  )
+  assert.equal(
+    await probeCanvasPage(async () => {
+      throw new Error('connection refused')
+    }),
+    false,
+  )
 })
 
 test('desktop owns a server it starts and closes only that process', async () => {

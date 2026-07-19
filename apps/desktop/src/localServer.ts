@@ -45,6 +45,24 @@ export async function probeLocalServer(
   }
 }
 
+export async function probeCanvasPage(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetchImpl(LOCAL_CANVAS_URL, {
+      signal: controller.signal,
+    })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export function createServerEnvironment(options: {
   baseEnv?: NodeJS.ProcessEnv
   projectRoot: string
@@ -81,6 +99,14 @@ export async function startOrReuseLocalServer(options: {
   const fetchImpl = options.fetchImpl ?? fetch
   const initialState = await probeLocalServer(fetchImpl)
   if (initialState === 'ready') {
+    // 打包模式下，8787 上可能是一个不提供前端页面的开发服务器；
+    // 直接复用会让窗口只拿到 /canvas 的 404，呈现为黑屏。
+    if (options.webRoot && !(await probeCanvasPage(fetchImpl))) {
+      throw new Error(
+        'Port 8787 is running a MO.K server that does not serve the app ' +
+          '(most likely `npm run dev`). Stop it, then start MO.K again.',
+      )
+    }
     return { owned: false, process: null }
   }
   if (initialState === 'occupied') {

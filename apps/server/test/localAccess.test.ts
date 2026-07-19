@@ -30,6 +30,43 @@ test('rejects an unknown origin', () => {
   )
 })
 
+test('allows same-origin loopback requests from the packaged app', () => {
+  assert.equal(
+    isAllowedLocalRequest({
+      host: '127.0.0.1:8787',
+      origin: 'http://127.0.0.1:8787',
+    }),
+    true,
+  )
+  assert.equal(
+    isAllowedLocalRequest({
+      host: 'localhost:8787',
+      origin: 'http://localhost:8787',
+    }),
+    true,
+  )
+})
+
+test('rejects same-origin requests to a non-loopback host (DNS rebinding)', () => {
+  assert.equal(
+    isAllowedLocalRequest({
+      host: 'evil.example',
+      origin: 'http://evil.example',
+    }),
+    false,
+  )
+})
+
+test('rejects loopback origins that do not match the request host', () => {
+  assert.equal(
+    isAllowedLocalRequest({
+      host: '127.0.0.1:9999',
+      origin: 'http://127.0.0.1:8787',
+    }),
+    false,
+  )
+})
+
 test('rejects cross-site metadata even when the origin is approved', () => {
   assert.equal(
     isAllowedLocalRequest({
