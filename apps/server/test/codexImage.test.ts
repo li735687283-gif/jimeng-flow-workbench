@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import {
   generateCodexCliImage,
   generateCodexCliText,
@@ -26,6 +26,7 @@ test('getCodexImageProviderStatus reports available when CLI and auth file exist
   const status = await getCodexImageProviderStatus({
     env: {
       CODEX_BIN: 'C:\\tools\\codex.cmd',
+      CODEX_CLI_PATH: 'C:\\legacy\\codex.exe',
       CODEX_AUTH_FILE: 'C:\\Users\\Lzw\\.codex\\auth.json',
     },
     commandExists: async (command) =>
@@ -43,6 +44,19 @@ test('getCodexImageProviderStatus reports available when CLI and auth file exist
   assert.match(status.setupCommands.installCodex, /chatgpt\.com\/codex\/install/)
   assert.equal(status.setupCommands.installImageHelper, undefined)
   assert.equal(status.setupCommands.login, 'codex')
+})
+
+test('getCodexImageProviderStatus accepts Windows exe and cmd commands', async () => {
+  for (const codexPath of ['C:\\tools\\codex.exe', 'C:\\tools\\codex.cmd']) {
+    const status = await getCodexImageProviderStatus({
+      env: { CODEX_BIN: codexPath },
+      commandExists: async (command) => command === codexPath,
+      fileExists: async () => false,
+    })
+
+    assert.equal(status.available, true)
+    assert.equal(status.codexPath, codexPath)
+  }
 })
 
 test('getCodexImageProviderStatus does not block on a missing auth file', async () => {
@@ -228,10 +242,37 @@ test('generateCodexCliText uses a platform-safe default Codex command', async ()
     await rm(dir, { recursive: true, force: true })
   }
 
-  assert.equal(
-    calls[0].command,
-    process.platform === 'win32' ? 'codex.cmd' : 'codex',
-  )
+  if (process.platform === 'win32') {
+    assert.match(basename(calls[0].command), /^codex\.(?:exe|cmd)$/i)
+  } else {
+    assert.equal(calls[0].command, 'codex')
+  }
+})
+
+test('generateCodexCliText explains when the Codex executable is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-text-missing-bin-'))
+
+  try {
+    await assert.rejects(
+      () => generateCodexCliText(
+        {
+          model: 'codex:gpt-5',
+          messages: [{ role: 'user', content: 'ping' }],
+        },
+        {
+          env: {},
+          cwd: dir,
+          outputDir: dir,
+          runCommand: async () => {
+            throw new Error('spawn codex ENOENT')
+          },
+        },
+      ),
+      /未找到 OpenAI Codex CLI 可执行命令[\s\S]*CODEX_BIN/,
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('generateCodexCliText can execute a Windows .cmd Codex binary', async (t) => {

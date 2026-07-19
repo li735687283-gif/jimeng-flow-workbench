@@ -200,8 +200,19 @@ function isCodexAuthError(message: string): boolean {
   return /(auth|login|sign in|401|unauthorized|credentials|api key)/i.test(message)
 }
 
+function isCodexCommandNotFoundError(message: string): boolean {
+  return /\bENOENT\b|command not found|not recognized as an internal or external command|系统找不到指定的文件|找不到.*(?:文件|命令)/i.test(
+    message,
+  )
+}
+
 function wrapCodexCommandError(source: string, err: unknown): Error {
   const message = getErrorMessage(err)
+  if (isCodexCommandNotFoundError(message)) {
+    return new Error(
+      `未找到 ${source} 可执行命令。请安装 Codex CLI，或通过 CODEX_BIN 指定 codex.exe、codex.cmd 或 codex。原始错误：${message}`,
+    )
+  }
   if (isCodexAuthError(message)) {
     return new Error(
       `OpenAI CLI 未登录或登录态失效。请在设置里的 OpenAI CLI 区块复制并运行“打开登录”命令：codex。原始错误：${message}`,
@@ -698,11 +709,16 @@ export async function generateCodexCliText(
   if (execModel) args.push('--model', execModel)
   args.push('-')
 
-  const result = await runCommand(codexPath, args, {
-    cwd,
-    input: buildCodexTextPrompt(req.messages),
-    timeoutMs,
-  })
+  let result: CodexCommandResult
+  try {
+    result = await runCommand(codexPath, args, {
+      cwd,
+      input: buildCodexTextPrompt(req.messages),
+      timeoutMs,
+    })
+  } catch (err) {
+    throw wrapCodexCommandError('OpenAI Codex CLI', err)
+  }
   let content = ''
   try {
     content = (await readFile(lastMessagePath, 'utf8')).trim()

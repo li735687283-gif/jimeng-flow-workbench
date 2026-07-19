@@ -1052,7 +1052,7 @@
   z-index: 1;
 }
 
-.node-wrapper.selected:not(.media-display) .node-card::after {
+.node-wrapper.selected .node-card::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -4286,7 +4286,7 @@
 
 .menu-item.danger:hover:not(:disabled) {
   background: rgba(150, 48, 48, 0.24);
-  color: #ffb0b0;
+  color: var(--menu-danger-text);
 }
 
 .menu-divider {
@@ -6521,7 +6521,7 @@
 
 .agent-conversation-delete:hover {
   background: rgba(255, 92, 92, 0.12);
-  color: #ff8888;
+  color: var(--menu-danger-text);
 }
 
 .agent-conversation-empty {
@@ -6839,7 +6839,7 @@
   padding: 6px 8px;
   border-radius: 7px;
   background: rgba(255, 173, 51, 0.08);
-  color: #d8ab66;
+  color: #f0b429;
   font-size: 10px;
   line-height: 1.4;
 }
@@ -7111,7 +7111,7 @@
 
 .agent-skill-library-meta em {
   margin-left: 4px;
-  color: #c79a58;
+  color: #f5c842;
   font-style: normal;
 }
 
