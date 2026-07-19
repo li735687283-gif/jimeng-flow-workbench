@@ -1,5 +1,10 @@
 import { dirname, join, resolve } from 'node:path'
 import { app, BrowserWindow, dialog, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
+import {
+  initializeAutoUpdates,
+  type UpdaterLike,
+} from './autoUpdate'
 import {
   LOCAL_CANVAS_URL,
   startOrReuseLocalServer,
@@ -75,6 +80,14 @@ async function startDesktop(): Promise<void> {
   })
 
   await createMainWindow()
+  initializeAutoUpdates({
+    dialog: {
+      showMessageBox: (options) => dialog.showMessageBox(options),
+    },
+    enabled:
+      app.isPackaged && process.env.MOK_DISABLE_AUTO_UPDATE !== '1',
+    updater: autoUpdater as unknown as UpdaterLike,
+  })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow()

@@ -67,7 +67,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "MO.K"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "li735687283-gif",
+        "repo": "jimeng-flow-workbench",
+        "releaseType": "release"
+      }
+    ]
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
@@ -77,5 +85,8 @@
     "oxlint": "^1.71.0",
     "tsx": "^4.19.2",
     "wait-on": "^9.0.10"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
