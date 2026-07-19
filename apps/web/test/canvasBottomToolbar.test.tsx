@@ -42,7 +42,19 @@ test('canvas bottom toolbar shows the requested icon actions only', async () => 
   assert.match(source, /onMouseEnter=\{\(\) => setAddMenuOpen\(true\)\}/)
   assert.match(source, /onMouseLeave=\{\(\) => setAddMenuOpen\(false\)\}/)
   assert.match(source, /AddNodeMenuContent/)
+  assert.equal(html.includes('dock-add-menu-shell'), true)
   assert.doesNotMatch(source, /onClick=\{onAddNode\}/)
+
+  const styles = readFileSync('apps/web/src/App.css', 'utf8')
+  assert.equal(styles.includes('--motion-slow: 500ms;'), true)
+  const shellRule = styles.match(/\.dock-add-menu-shell\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(shellRule, /opacity var\(--motion-slow\) var\(--ease-standard\)/)
+  assert.match(shellRule, /transform var\(--motion-slow\) var\(--ease-standard\)/)
+  assert.match(
+    styles,
+    /\.dock-add-menu-shell\.is-open\s*\{[^}]*opacity:\s*1;[^}]*visibility:\s*visible;/,
+  )
+  assert.doesNotMatch(styles, /\.dock-add-menu\s*\{[^}]*animation:/)
 
   for (const removedLabel of ['新建工作流', '保存', '打开']) {
     assert.equal(html.includes(removedLabel), false)

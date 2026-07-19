@@ -1032,7 +1032,7 @@
 .node-card {
   background: #242424;
   border: 1px solid #2c2c2c;
-  border-radius: 22.5px;
+  border-radius: 30px;
   box-shadow: none;
   min-width: 180px;
   min-height: 80px;
@@ -5555,14 +5555,29 @@
   left: 50%;
   bottom: 100%;
   z-index: 30;
+  --motion-slow: 500ms;
   padding-bottom: 10px;
-  transform: translateX(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(8px) scale(0.98);
+  transition:
+    opacity var(--motion-slow) var(--ease-standard),
+    transform var(--motion-slow) var(--ease-standard),
+    visibility 0s linear var(--motion-slow);
+}
+
+.dock-add-menu-shell.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+  transition-delay: 0s;
 }
 
 .dock-add-menu {
   position: static;
   transform-origin: bottom center;
-  animation: menu-rise var(--motion-base) var(--ease-out-soft) both;
 }
 
 .dock-primary-icon {

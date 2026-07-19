@@ -54,17 +54,18 @@ export function CanvasBottomToolbar({
         >
           <Plus className="dock-primary-icon" size={28} strokeWidth={1.8} />
         </button>
-        {addMenuOpen && (
-          <div className="dock-add-menu-shell">
-            <div className="add-node-menu dock-add-menu" role="menu" aria-label="添加节点">
-              <AddNodeMenuContent
-                onSelect={onAddNode}
-                onUpload={onUpload}
-                onClose={() => setAddMenuOpen(false)}
-              />
-            </div>
+        <div
+          className={`dock-add-menu-shell${addMenuOpen ? ' is-open' : ''}`}
+          aria-hidden={!addMenuOpen}
+        >
+          <div className="add-node-menu dock-add-menu" role="menu" aria-label="添加节点">
+            <AddNodeMenuContent
+              onSelect={onAddNode}
+              onUpload={onUpload}
+              onClose={() => setAddMenuOpen(false)}
+            />
           </div>
-        )}
+        </div>
       </div>
       <span className="dock-separator" aria-hidden="true" />
       <button
