@@ -366,6 +366,10 @@ function AppInner() {
         <main className="canvas-stage">
           <CanvasView ref={canvasViewRef} />
 
+          {window.mokDesktop?.isDesktop ? (
+            <div className="window-drag-strip" aria-hidden="true" />
+          ) : null}
+
           <div className="canvas-topbar canvas-topbar-left">
             <button type="button" className="ghost-pill" onClick={handleShowHome}>
               <ArrowLeft size={14} />

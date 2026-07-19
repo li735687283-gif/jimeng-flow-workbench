@@ -23,6 +23,18 @@ test('desktop renderer has no Node.js access and uses an isolated sandbox', () =
   assert.equal(options.webPreferences?.sandbox, true)
 })
 
+test('desktop window uses a frameless dark title bar without a menu strip', () => {
+  const options = createBrowserWindowOptions(join('desktop', 'preload.cjs'))
+
+  assert.equal(options.autoHideMenuBar, true)
+  assert.equal(options.titleBarStyle, 'hidden')
+  assert.deepEqual(options.titleBarOverlay, {
+    color: '#0b0b0c',
+    symbolColor: '#f2f2f2',
+    height: 36,
+  })
+})
+
 test('only HTTPS links may leave the desktop window', () => {
   assert.equal(isSafeExternalUrl('https://example.com/docs'), true)
   assert.equal(isSafeExternalUrl('http://example.com'), false)

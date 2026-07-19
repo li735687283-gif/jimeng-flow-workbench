@@ -13,6 +13,13 @@ export function createBrowserWindowOptions(
     backgroundColor: '#0b0b0c',
     show: false,
     title: 'MO.K',
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#0b0b0c',
+      symbolColor: '#f2f2f2',
+      height: 36,
+    },
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,

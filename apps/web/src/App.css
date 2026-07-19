@@ -80,6 +80,18 @@
   pointer-events: none;
 }
 
+/* 无边框窗口：首页顶栏作为窗口拖拽区域，
+   右端为系统窗口按钮预留空间，交互控件保持可点击 */
+.is-desktop .home-topbar {
+  padding-right: 178px;
+  pointer-events: auto;
+  -webkit-app-region: drag;
+}
+
+.is-desktop .home-topbar * {
+  -webkit-app-region: no-drag;
+}
+
 .home-brand {
   display: flex;
   align-items: center;
@@ -5454,6 +5466,18 @@
   pointer-events: none;
 }
 
+/* 无边框窗口：画布顶部留出可拖拽移动窗口的横条，
+   右端避开系统窗口按钮（titleBarOverlay）区域 */
+.window-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 150px;
+  height: 36px;
+  z-index: 15;
+  -webkit-app-region: drag;
+}
+
 .canvas-topbar-left {
   left: 12px;
 }
@@ -6286,6 +6310,12 @@
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
   animation: panel-slide-in var(--motion-slow) var(--ease-out-soft) both;
+}
+
+/* 无边框窗口：面板顶部避开右上角系统窗口按钮 */
+.is-desktop .agent-chat-panel {
+  height: calc(100vh - 48px);
+  margin-top: 40px;
 }
 
 .agent-resize-handle {
