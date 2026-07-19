@@ -245,7 +245,7 @@ export const IMAGE_COUNTS: number[] = [1, 2, 4]
 /** Generate 节点字段默认值（参考 PRD 11.3 默认图片参数） */
 const GENERATE_DEFAULTS = {
   prompt: '',
-  model: 'jimeng-3.0',
+  model: 'codex:gpt-5.5',
   width: 1024,
   height: 1024,
   count: 1,

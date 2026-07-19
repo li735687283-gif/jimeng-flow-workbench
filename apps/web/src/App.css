@@ -1032,7 +1032,7 @@
 .node-card {
   background: #242424;
   border: 1px solid #2c2c2c;
-  border-radius: 30px;
+  border-radius: 28px;
   box-shadow: none;
   min-width: 180px;
   min-height: 80px;
@@ -1079,7 +1079,7 @@
   min-height: 0;
   background: transparent;
   border-color: transparent;
-  border-radius: 12px;
+  border-radius: 28px;
   box-shadow: none;
   transform: none;
 }
@@ -1141,7 +1141,7 @@
 .image-node-container {
   position: relative;
   overflow: hidden;
-  border-radius: 15px;
+  border-radius: 28px;
 }
 
 .image-action-card {
@@ -1635,7 +1635,7 @@
   color: #eeeeee;
   background: #242424;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 18px;
+  border-radius: 28px;
   box-shadow:
     0 22px 48px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);

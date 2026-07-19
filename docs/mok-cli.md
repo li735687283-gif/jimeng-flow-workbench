@@ -31,5 +31,7 @@ npm run mok -- generate image --flow <flow-id> --node <node-id> "一张产品海
 npm run mok -- generate status <generation-id> --wait --json
 npm run mok -- agent prompt "把这个产品海报提示词改成中文" --flow <flow-id> --json
 ```
+图片节点和 `generate image` 未显式传入 `--model` 时，默认使用 `codex:gpt-5.5`，界面显示为“GPT Image（OpenAI CLI）”。
+
 
 生成任务沿用画布后端的图片/视频接口，不在 CLI 内保存密钥，也不新增公网监听端口。

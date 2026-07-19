@@ -54,8 +54,24 @@ test('text image and video nodes share a selected highlight ring', () => {
   )
 })
 
-test('canvas node cards use a 30 pixel corner radius', () => {
+test('canvas nodes use a 28 pixel corner radius', () => {
   const css = readFileSync('apps/web/src/App.css', 'utf8')
+  const imageNode = readFileSync('apps/web/src/nodes/ImageNode.tsx', 'utf8')
+  const videoNode = readFileSync('apps/web/src/nodes/VideoNode.tsx', 'utf8')
 
-  assert.match(css, /\.node-card\s*\{[^}]*border-radius:\s*30px;/)
+  assert.match(css, /\.node-card\s*\{[^}]*border-radius:\s*28px;/)
+  assert.match(
+    css,
+    /\.node-wrapper\.media-display \.node-card,[\s\S]*?border-radius:\s*28px;/,
+  )
+  assert.match(
+    css,
+    /\.image-node-container\s*\{[^}]*border-radius:\s*28px;/,
+  )
+  assert.match(
+    css,
+    /\.image-editor-panel\s*\{[^}]*border-radius:\s*28px;/,
+  )
+  assert.match(imageNode, /const MEDIA_DISPLAY_STYLE:[\s\S]*?borderRadius:\s*28,/)
+  assert.match(videoNode, /const VIDEO_DISPLAY_STYLE:[\s\S]*?borderRadius:\s*28,/)
 })

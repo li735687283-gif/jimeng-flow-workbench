@@ -30,5 +30,6 @@ test('node builder creates deterministic canvas node data', () => {
   assert.deepEqual(node.position, { x: 120, y: -40 });
   assert.equal(node.data.title, '封面');
   assert.equal(node.data.prompt, '黑色耳机海报');
+  assert.equal(node.data.model, 'codex:gpt-5.5');
   assert.equal(node.data.status, 'idle');
 });

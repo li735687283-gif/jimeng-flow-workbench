@@ -130,7 +130,7 @@ const MEDIA_DISPLAY_STYLE: CSSProperties = {
   width: 720,
   maxWidth: '72vw',
   maxHeight: 420,
-  borderRadius: 12,
+  borderRadius: 28,
 }
 
 const MEDIA_IMG_STYLE: CSSProperties = {

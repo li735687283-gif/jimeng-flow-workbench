@@ -72,7 +72,7 @@ const EMPTY_VIDEO_FRAME_STYLE: CSSProperties = {
 const VIDEO_DISPLAY_STYLE: CSSProperties = {
   width: 720,
   maxWidth: '72vw',
-  borderRadius: 12,
+  borderRadius: 28,
   overflow: 'hidden',
   cursor: 'pointer',
 }
