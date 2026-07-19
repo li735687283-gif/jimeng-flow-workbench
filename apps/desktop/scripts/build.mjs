@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const desktopRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
+const repositoryRoot = resolve(desktopRoot, '../..')
 
 await rm(resolve(desktopRoot, 'dist'), { force: true, recursive: true })
 
@@ -21,6 +22,17 @@ await build({
     '.js': '.cjs',
   },
   outdir: 'dist',
+  platform: 'node',
+  sourcemap: true,
+  target: 'node20',
+})
+
+await build({
+  absWorkingDir: repositoryRoot,
+  bundle: true,
+  entryPoints: ['apps/server/src/index.ts'],
+  format: 'cjs',
+  outfile: resolve(desktopRoot, 'dist/server.cjs'),
   platform: 'node',
   sourcemap: true,
   target: 'node20',

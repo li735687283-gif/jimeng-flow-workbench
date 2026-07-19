@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import multipart from '@fastify/multipart'
+import fastifyStatic from '@fastify/static'
 import type { ApiHealthResponse } from '@jimeng-flow/shared'
 import settingsRoutes from './routes/settings'
 import flowsRoutes from './routes/flows'
@@ -17,6 +18,7 @@ import {
 
 export interface CreateAppOptions {
   logger?: boolean
+  webRoot?: string
 }
 
 export function createApp(
@@ -58,6 +60,19 @@ export function createApp(
   app.register(agentRoutes)
   app.register(codexRoutes)
   app.register(videosRoutes)
+
+  if (options.webRoot) {
+    app.register(fastifyStatic, {
+      root: options.webRoot,
+      index: false,
+    })
+    app.get('/', async (_request, reply) => {
+      return reply.sendFile('index.html')
+    })
+    app.get('/canvas', async (_request, reply) => {
+      return reply.sendFile('index.html')
+    })
+  }
 
   return app
 }

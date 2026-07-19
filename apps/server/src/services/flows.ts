@@ -5,7 +5,7 @@
 import { mkdir, readFile, readdir, writeFile, unlink } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { getProjectRoot } from '../config'
+import { getWorkspaceDir } from '../config'
 import type {
   Flow,
   FlowNode,
@@ -14,7 +14,7 @@ import type {
 } from '@jimeng-flow/shared/flow'
 
 // flows 目录：<root>/workspace/flows/
-const FLOWS_DIR = resolve(getProjectRoot(), 'workspace/flows')
+const FLOWS_DIR = resolve(getWorkspaceDir(), 'flows')
 // 合法 flow ID 校验，避免路径穿越
 const FLOW_ID_PATTERN = /^flow_[a-z0-9_]+$/
 

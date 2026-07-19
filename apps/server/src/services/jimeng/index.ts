@@ -4,7 +4,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type {
   GenerationRequest,
@@ -21,7 +21,7 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import type { AuthMode, Settings } from '@jimeng-flow/shared'
-import { getProjectRoot } from '../../config'
+import { getProjectRoot, resolveRuntimePath } from '../../config'
 import { getSettings } from '../settings'
 import { getAsset, getAssetFilePath } from '../assets'
 
@@ -291,7 +291,7 @@ async function resolveInputPaths(inputImages: string[] | undefined): Promise<str
       }
       paths.push(getAssetFilePath(asset))
     } else {
-      paths.push(resolve(getProjectRoot(), input))
+      paths.push(resolveRuntimePath(input))
     }
   }
   return paths

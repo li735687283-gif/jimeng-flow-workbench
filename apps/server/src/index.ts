@@ -2,7 +2,8 @@ import { createApp } from './app'
 import { LOCAL_SERVER_HOST } from './security/localAccess'
 
 const PORT = Number(process.env.PORT ?? 8787)
-const app = createApp()
+const webRoot = process.env.MOK_WEB_ROOT?.trim()
+const app = createApp({ webRoot })
 
 const start = async () => {
   try {

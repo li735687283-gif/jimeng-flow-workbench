@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import type { BrowserWindowConstructorOptions } from 'electron'
 
 export const DEVELOPMENT_CANVAS_URL = 'http://127.0.0.1:5174/canvas'
@@ -20,16 +19,6 @@ export function createBrowserWindowOptions(
       nodeIntegration: false,
       sandbox: true,
     },
-  }
-}
-
-export function resolveProductionRenderer(resourcesPath: string): {
-  filePath: string
-  query: Record<string, string>
-} {
-  return {
-    filePath: join(resourcesPath, 'web', 'index.html'),
-    query: { view: 'canvas' },
   }
 }
 

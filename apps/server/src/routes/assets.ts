@@ -14,7 +14,7 @@ import { createReadStream } from 'node:fs'
 import { copyFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { basename, extname, resolve } from 'node:path'
 import type { GenerationResult } from '@jimeng-flow/shared/generateNode'
-import { getProjectRoot } from '../config'
+import { getWorkspaceDir } from '../config'
 import {
   saveUploadFile,
   getAsset,
@@ -395,7 +395,7 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         }
         throw err
       }
-      const exportDir = resolve(getProjectRoot(), 'workspace/outputs/downloads')
+      const exportDir = resolve(getWorkspaceDir(), 'outputs/downloads')
       await mkdir(exportDir, { recursive: true })
       const targetPath = resolve(exportDir, basename(absPath))
       await copyFile(absPath, targetPath)

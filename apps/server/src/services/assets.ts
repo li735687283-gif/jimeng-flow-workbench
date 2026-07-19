@@ -11,10 +11,10 @@ import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { Asset, AssetCategory, AssetType } from '@jimeng-flow/shared/asset'
-import { readSettings, getProjectRoot, resolveOutputDir } from '../config'
+import { readSettings, getWorkspaceDir, resolveOutputDir } from '../config'
 
 // workspace 根目录：<projectRoot>/workspace
-const WORKSPACE_DIR = resolve(getProjectRoot(), 'workspace')
+const WORKSPACE_DIR = getWorkspaceDir()
 // 合法资产 ID 校验，避免路径穿越
 const ASSET_ID_PATTERN = /^asset_[A-Za-z0-9_-]+$/
 

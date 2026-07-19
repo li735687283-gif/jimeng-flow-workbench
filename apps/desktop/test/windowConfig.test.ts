@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import test from 'node:test'
+import { LOCAL_CANVAS_URL } from '../src/localServer'
 import {
   createBrowserWindowOptions,
   DEVELOPMENT_CANVAS_URL,
   isSafeExternalUrl,
-  resolveProductionRenderer,
 } from '../src/windowConfig'
 
-test('desktop development opens the MO.K canvas on the loopback Vite server', () => {
+test('desktop canvas URLs use only the configured IPv4 loopback services', () => {
   assert.equal(DEVELOPMENT_CANVAS_URL, 'http://127.0.0.1:5174/canvas')
+  assert.equal(LOCAL_CANVAS_URL, 'http://127.0.0.1:8787/canvas')
 })
 
 test('desktop renderer has no Node.js access and uses an isolated sandbox', () => {
@@ -20,17 +21,6 @@ test('desktop renderer has no Node.js access and uses an isolated sandbox', () =
   assert.equal(options.webPreferences?.contextIsolation, true)
   assert.equal(options.webPreferences?.nodeIntegration, false)
   assert.equal(options.webPreferences?.sandbox, true)
-})
-
-test('production renderer resolves only packaged web resources', () => {
-  const renderer = resolveProductionRenderer(join('C:', 'MO.K', 'resources'))
-
-  assert.equal(
-    renderer.filePath,
-    join('C:', 'MO.K', 'resources', 'web', 'index.html'),
-  )
-  assert.deepEqual(renderer.query, { view: 'canvas' })
-  assert.equal(renderer.filePath.includes('5174'), false)
 })
 
 test('only HTTPS links may leave the desktop window', () => {

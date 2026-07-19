@@ -18,12 +18,12 @@
     "build:desktop": "npm run build && npm run build --workspace apps/desktop",
     "check": "npm run typecheck && npm run lint && npm test && npm run build",
     "dev": "concurrently -n web,server -c green,blue \"npm:dev:web\" \"npm:dev:server\"",
-    "dev:desktop": "concurrently -k -s first -n web,server,desktop -c green,blue,magenta \"npm:dev:web\" \"npm:dev:server\" \"npm --workspace apps/desktop run dev\"",
+    "dev:desktop": "concurrently -k -s first -n web,desktop -c green,magenta \"npm:dev:web\" \"npm --workspace apps/desktop run dev\"",
     "dev:web": "npm --workspace apps/web run dev",
     "dev:server": "npm --workspace apps/server run dev",
     "lint": "oxlint apps packages scripts",
     "mok": "node scripts/mok.mjs",
-    "package:win": "npm run build:desktop && electron-builder --win nsis",
+    "package:win": "npm run build:desktop && node scripts/package-win.mjs",
     "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web && npm run test:desktop",
     "test:desktop": "node scripts/run-tests.mjs desktop",
     "test:server": "node scripts/run-tests.mjs server",
@@ -41,10 +41,15 @@
       "output": "release"
     },
     "files": [
-      "apps/desktop/dist/**/*",
+      "apps/desktop/dist/main.cjs",
+      "apps/desktop/dist/preload.cjs",
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": "apps/desktop/dist/server.cjs",
+        "to": "server/server.cjs"
+      },
       {
         "from": "apps/web/dist",
         "to": "web",

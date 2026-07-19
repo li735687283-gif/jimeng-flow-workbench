@@ -24,7 +24,7 @@ import type {
   GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
 import type { Settings } from '@jimeng-flow/shared/settings'
-import { getProjectRoot, resolveOutputDir } from '../config'
+import { getProjectRoot, resolveOutputDir, resolveRuntimePath } from '../config'
 import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
 
@@ -494,7 +494,7 @@ async function resolveInputImagePath(
   if (value.startsWith('file://')) {
     return fileURLToPath(value)
   }
-  return isAbsolute(value) ? value : resolve(getProjectRoot(), value)
+  return resolveRuntimePath(value)
 }
 
 async function resolveInputImagePaths(

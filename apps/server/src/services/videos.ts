@@ -12,10 +12,10 @@ import type {
   WorkListResponse,
   WorkMediaType,
 } from '@jimeng-flow/shared/video'
-import { getProjectRoot } from '../config'
+import { getWorkspaceDir } from '../config'
 import { getAsset } from './assets'
 
-const WORKS_DIR = resolve(getProjectRoot(), 'workspace/config')
+const WORKS_DIR = resolve(getWorkspaceDir(), 'config')
 const WORKS_FILE = resolve(WORKS_DIR, 'videos.json')
 const WORK_ID_PATTERN = /^(video|work)_[a-z0-9_]+$/
 

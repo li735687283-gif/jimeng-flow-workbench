@@ -9,8 +9,8 @@ import {
   normalizeVideoReferences,
 } from '@jimeng-flow/shared/videoNode'
 import { readFile } from 'node:fs/promises'
-import { extname, resolve } from 'node:path'
-import { getProjectRoot } from '../config'
+import { extname } from 'node:path'
+import { resolveRuntimePath } from '../config'
 import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
 
@@ -120,7 +120,7 @@ async function resolveInputImageFilePath(value: string): Promise<string> {
     }
     return getAssetFilePath(asset)
   }
-  return resolve(getProjectRoot(), value)
+  return resolveRuntimePath(value)
 }
 
 async function resolveInputImageDataUrl(input: string): Promise<string | null> {
