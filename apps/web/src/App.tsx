@@ -32,21 +32,13 @@ import './App.css'
 
 type AppView = 'home' | 'canvas'
 
-const LAST_VIEW_KEY = 'jimeng-flow:lastView'
 const LAST_FLOW_ID_KEY = 'jimeng-flow:lastFlowId'
 
-function getLastView(): AppView {
+function getInitialView(): AppView {
   if (typeof window === 'undefined') return 'home'
   return resolveInitialAppView({
-    pathname: window.location.pathname,
     search: window.location.search,
-    storedView: window.localStorage.getItem(LAST_VIEW_KEY),
   })
-}
-
-function setLastView(view: AppView) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(LAST_VIEW_KEY, view)
 }
 
 function getLastFlowId(): string | null {
@@ -82,8 +74,6 @@ function resolveHomeMokHeroStyles(settings: {
   return {
     container: {
       marginTop: `${marginTop}px`,
-      position: 'relative',
-      top: '84px',
     },
     image: {
       maxWidth: `${baseMaxWidth * scale}px`,
@@ -94,8 +84,10 @@ function resolveHomeMokHeroStyles(settings: {
 }
 
 function AppInner() {
-  const [view, setView] = useState<AppView>(getLastView)
-  const [restoringView, setRestoringView] = useState(() => getLastView() === 'canvas')
+  const [view, setView] = useState<AppView>(getInitialView)
+  const [restoringView, setRestoringView] = useState(
+    () => getInitialView() === 'canvas',
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [openModalOpen, setOpenModalOpen] = useState(false)
   const [agentOpen, setAgentOpen] = useState(false)
@@ -153,7 +145,6 @@ function AppInner() {
   }, [loadSettings, reloadWorks])
 
   useEffect(() => {
-    setLastView(view)
     if (view !== 'canvas') setAgentOpen(false)
   }, [view])
 

@@ -5467,11 +5467,11 @@
 }
 
 /* 无边框窗口：画布顶部留出可拖拽移动窗口的横条，
-   右端避开系统窗口按钮（titleBarOverlay）区域 */
+   左端避开返回按钮、右端避开系统窗口按钮（titleBarOverlay）区域 */
 .window-drag-strip {
   position: absolute;
   top: 0;
-  left: 0;
+  left: 104px;
   right: 150px;
   height: 36px;
   z-index: 15;
@@ -5480,6 +5480,12 @@
 
 .canvas-topbar-left {
   left: 12px;
+}
+
+/* 返回按钮加大点击热区，避免点到边缘落空 */
+.canvas-topbar-left .ghost-pill {
+  height: 38px;
+  padding: 0 16px;
 }
 
 .canvas-topbar-right {
