@@ -6678,6 +6678,25 @@
   font-size: 12px;
 }
 
+.agent-error-relogin-btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #555;
+  background: #2a2a2a;
+  color: #f0f0f0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.agent-error-relogin-btn:hover:not(:disabled) {
+  background: #353535;
+}
+
+.agent-error-relogin-btn:disabled {
+  color: #888;
+  cursor: not-allowed;
+}
+
 /* 空对话提示 */
 .agent-empty-hint {
   margin: 42px 12px;

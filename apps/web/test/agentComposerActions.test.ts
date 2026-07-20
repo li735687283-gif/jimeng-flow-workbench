@@ -100,6 +100,19 @@ test('Agent panel dropped roles, skills, templates and storyboard', () => {
   assert.doesNotMatch(source, /pendingImageRequest|pendingVideoRequest|pendingEditRequest/)
 })
 
+test('Agent panel offers a one-click re-login on auth errors', () => {
+  // 登录态失效(refresh_token_reused 等)时,错误气泡旁直接给"重新登录"按钮
+  assert.match(source, /isCodexAuthErrorText/)
+  assert.match(source, /未登录\|登录态失效\|刷新令牌/)
+  assert.match(source, /startCodexLogin/)
+  assert.match(source, /handleCodexRelogin/)
+  assert.match(source, /agent-error-relogin-btn/)
+  assert.match(source, /重新登录/)
+  assert.match(source, /已打开登录页，登录后重试/)
+
+  assert.match(styles, /\.agent-error-relogin-btn/)
+})
+
 test('Agent chat sends conversational history plus canvas summary to the chat API', () => {
   assert.match(source, /sendAgentChat\(\{/)
   assert.match(source, /history: buildAgentChatHistory\(state\.messages\)/)

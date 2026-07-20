@@ -17,6 +17,7 @@ import type {
   AgentToolCall,
 } from '@jimeng-flow/shared/agentMessage'
 import { sendAgentChat } from '../api/agent'
+import { startCodexLogin } from '../api/settings'
 import { AgentConversationHistory } from './AgentConversationHistory'
 import { SecondaryMenuSelect } from './menus/SecondaryMenuSelect'
 import { buildAgentChatHistory, useAgentStore } from '../state/agentStore'
@@ -73,6 +74,11 @@ function createMessageId(): string {
   return `agent_msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+/** 登录态失效类错误——这类错误旁边提供「重新登录」按钮 */
+function isCodexAuthErrorText(text: string): boolean {
+  return /未登录|登录态失效|刷新令牌/.test(text)
+}
+
 /** 还没有执行结果的工具调用（手动模式下等待确认的就是这些） */
 function pendingActionsOf(message: AgentMessage): AgentToolCall[] {
   const doneIds = new Set((message.actionResults ?? []).map((result) => result.callId))
@@ -113,6 +119,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     Record<string, { aspectRatio?: string; resolution?: string; model?: string }>
   >({})
   const [openParamSelect, setOpenParamSelect] = useState<string | null>(null)
+  const [codexLoginState, setCodexLoginState] = useState<'idle' | 'starting' | 'opened'>('idle')
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   const configuredCurrentModel = settings?.llmModel || ''
@@ -494,6 +501,24 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     })
   }
 
+  /** 登录态失效时一键重新登录:清坏令牌 + 浏览器 OAuth */
+  const handleCodexRelogin = async () => {
+    if (codexLoginState === 'starting') return
+    setCodexLoginState('starting')
+    try {
+      const result = await startCodexLogin()
+      if (result.ok) {
+        setCodexLoginState('opened')
+      } else {
+        setCodexLoginState('idle')
+        setError(result.message)
+      }
+    } catch (err) {
+      setCodexLoginState('idle')
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const handleNewConversation = () => {
     if (loading) return
     newConversation()
@@ -711,7 +736,27 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             <span>正在思考...</span>
           </div>
         )}
-        {error && <div className="agent-error">{error}</div>}
+        {error && (
+          <div className="agent-error">
+            <span>{error}</span>
+            {isCodexAuthErrorText(error) && (
+              <div className="agent-error-actions">
+                <button
+                  type="button"
+                  className="agent-error-relogin-btn"
+                  disabled={codexLoginState === 'starting'}
+                  onClick={() => void handleCodexRelogin()}
+                >
+                  {codexLoginState === 'starting'
+                    ? '正在打开登录...'
+                    : codexLoginState === 'opened'
+                      ? '已打开登录页，登录后重试'
+                      : '重新登录'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <footer className="agent-composer">

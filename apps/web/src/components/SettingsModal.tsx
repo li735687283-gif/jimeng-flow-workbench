@@ -23,6 +23,7 @@ import {
   type CodexStatus,
   getCodexStatus,
   listLlmModelsForSettings,
+  startCodexLogin,
   testJimengConnection,
   testLlmConnection,
 } from '../api/settings'
@@ -369,6 +370,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     ok: boolean
     message: string
   } | null>(null)
+  const [codexReloginStarting, setCodexReloginStarting] = useState(false)
   const [codexSetupCommands, setCodexSetupCommands] = useState(
     FALLBACK_CODEX_SETUP_COMMANDS,
   )
@@ -503,6 +505,23 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       })
     } finally {
       setTestingCodex(false)
+    }
+  }
+
+  /** 一键重新登录:清掉作废令牌并拉起浏览器 OAuth(登录态失效时用) */
+  const handleCodexRelogin = async () => {
+    setCodexReloginStarting(true)
+    setCodexTestResult(null)
+    try {
+      const result = await startCodexLogin()
+      setCodexTestResult({ ok: result.ok, message: result.message })
+    } catch (err: unknown) {
+      setCodexTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setCodexReloginStarting(false)
     }
   }
 
@@ -975,23 +994,43 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               }}
             >
               <span>OpenAI CLI</span>
-              <button
-                type="button"
-                onClick={handleTestCodex}
-                className="settings-action-button"
-                disabled={testingCodex}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: '4px',
-                  border: '1px solid #444',
-                  background: testingCodex ? '#333' : '#252525',
-                  color: testingCodex ? '#888' : '#cfcfcf',
-                  cursor: testingCodex ? 'not-allowed' : 'pointer',
-                  fontSize: '12px',
-                }}
-              >
-                {testingCodex ? '检测中...' : '检测 Codex'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleCodexRelogin}
+                  className="settings-action-button"
+                  disabled={codexReloginStarting}
+                  title="登录态失效时点击:清除旧令牌并在浏览器中重新登录"
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '4px',
+                    border: '1px solid #444',
+                    background: codexReloginStarting ? '#333' : '#252525',
+                    color: codexReloginStarting ? '#888' : '#cfcfcf',
+                    cursor: codexReloginStarting ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  {codexReloginStarting ? '正在打开登录...' : '重新登录'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTestCodex}
+                  className="settings-action-button"
+                  disabled={testingCodex}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: '4px',
+                    border: '1px solid #444',
+                    background: testingCodex ? '#333' : '#252525',
+                    color: testingCodex ? '#888' : '#cfcfcf',
+                    cursor: testingCodex ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  {testingCodex ? '检测中...' : '检测 Codex'}
+                </button>
+              </div>
             </div>
             {renderTestResult(codexTestResult)}
             <div style={helperTextStyle}>

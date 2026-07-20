@@ -198,8 +198,33 @@ function getErrorMessage(err: unknown): string {
   return String(err)
 }
 
+/** 原始错误日志上限：CLI 失败时可能刷几千字重复日志,截断后再展示 */
+const CODEX_ERROR_MESSAGE_MAX_LENGTH = 500
+
+function trimCodexErrorMessage(message: string): string {
+  return message.length > CODEX_ERROR_MESSAGE_MAX_LENGTH
+    ? `${message.slice(0, CODEX_ERROR_MESSAGE_MAX_LENGTH)}...`
+    : message
+}
+
+// Codex CLI 的 OAuth 刷新令牌是单次轮换的:多个 CLI 进程并发刷新同一份
+// ~/.codex/auth.json 时,第二个刷新会报 refresh_token_reused 并作废登录态。
+// 本进程内的所有 CLI 调用串行执行,避免自己的调用互相打架
+// (用户在终端里同时跑 codex 也可能触发,那就只能重新登录了)。
+let codexCliQueue: Promise<unknown> = Promise.resolve()
+
+export function enqueueCodexCli<T>(task: () => Promise<T>): Promise<T> {
+  const run = codexCliQueue.then(task, task)
+  codexCliQueue = run.catch(() => undefined)
+  return run
+}
+
 function isCodexAuthError(message: string): boolean {
   return /(auth|login|sign in|401|unauthorized|credentials|api key)/i.test(message)
+}
+
+function isCodexRefreshTokenReusedError(message: string): boolean {
+  return /refresh_token_reused|refresh token has already been used/i.test(message)
 }
 
 function isCodexCommandNotFoundError(message: string): boolean {
@@ -209,10 +234,15 @@ function isCodexCommandNotFoundError(message: string): boolean {
 }
 
 function wrapCodexCommandError(source: string, err: unknown): Error {
-  const message = getErrorMessage(err)
+  const message = trimCodexErrorMessage(getErrorMessage(err))
   if (isCodexCommandNotFoundError(message)) {
     return new Error(
       `未找到 ${source} 可执行命令。请安装 Codex CLI，或通过 CODEX_BIN 指定 codex.exe、codex.cmd 或 codex。原始错误：${message}`,
+    )
+  }
+  if (isCodexRefreshTokenReusedError(message)) {
+    return new Error(
+      `OpenAI CLI 登录态失效（刷新令牌冲突，通常是多个 Codex 进程同时运行导致的）。请在设置里的 OpenAI CLI 区块重新运行“打开登录”命令：codex；并避免同时在终端等其他地方使用 codex。原始错误：${message}`,
     )
   }
   if (isCodexAuthError(message)) {
@@ -387,6 +417,64 @@ export async function getCodexImageProviderStatus(
         ? 'OpenAI Codex CLI 可用'
         : 'OpenAI Codex CLI 已安装，未找到 auth 文件；登录状态会在首次执行时由 CLI 校验'
       : 'OpenAI Codex CLI 未就绪，请确认已安装 codex 并完成登录',
+  }
+}
+
+/**
+ * 后台拉起交互式登录：spawn `codex login`（自动打开浏览器 OAuth、
+ * 本地回调后写入 auth.json），立即返回不等登录完成。
+ */
+export type CodexSpawnLogin = (codexPath: string) => void
+
+function defaultSpawnLogin(codexPath: string): void {
+  // shell 兼容 Windows 的 codex.cmd;detached + unref 让登录进程独立于本服务存活
+  const child = spawn(codexPath, ['login'], {
+    shell: true,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+  })
+  child.unref()
+}
+
+export interface CodexLoginStartResult {
+  ok: boolean
+  message: string
+}
+
+/**
+ * 一键重新登录：先 `codex logout` 清掉已作废的令牌（刷新令牌冲突后
+ * 旧状态不修只会一直失败），再后台拉起 `codex login` 打开浏览器。
+ * 用户在浏览器里完成登录后 auth.json 即被新令牌覆盖。
+ */
+export async function startCodexLogin(
+  deps: CodexImageDeps & { spawnLogin?: CodexSpawnLogin } = {},
+): Promise<CodexLoginStartResult> {
+  const codexPath = getCodexPath(deps)
+  const runCommand = deps.runCommand ?? defaultRunCommand
+  const spawnLogin = deps.spawnLogin ?? defaultSpawnLogin
+
+  // logout 失败不阻断——可能本来就没登录过
+  try {
+    await runCommand(codexPath, ['logout'], {
+      cwd: deps.cwd ?? getProjectRoot(),
+      timeoutMs: 15_000,
+    })
+  } catch {
+    // 忽略,继续拉起登录
+  }
+
+  try {
+    spawnLogin(codexPath)
+  } catch (err) {
+    return {
+      ok: false,
+      message: `启动 Codex 登录失败：${trimCodexErrorMessage(getErrorMessage(err))}`,
+    }
+  }
+  return {
+    ok: true,
+    message: '已在浏览器打开 OpenAI 登录页，完成登录后回来直接重试即可。',
   }
 }
 
@@ -717,11 +805,14 @@ export async function generateCodexCliText(
 
   let result: CodexCommandResult
   try {
-    result = await runCommand(codexPath, args, {
-      cwd,
-      input: buildCodexTextPrompt(req.messages, req.expectJson === true),
-      timeoutMs,
-    })
+    const execute = () =>
+      runCommand(codexPath, args, {
+        cwd,
+        input: buildCodexTextPrompt(req.messages, req.expectJson === true),
+        timeoutMs,
+      })
+    // 生产路径串行执行,避免并发刷新 OAuth 令牌把登录态弄坏(见 enqueueCodexCli)
+    result = deps.runCommand ? await execute() : await enqueueCodexCli(execute)
   } catch (err) {
     throw wrapCodexCommandError('OpenAI Codex CLI', err)
   }
@@ -784,11 +875,14 @@ export async function generateCodexCliImage(
 
     let result: CodexCommandResult
     try {
-      result = await runCommand(codexPath, args, {
-        cwd,
-        input: buildCodexImagePrompt(req, outputDir),
-        timeoutMs,
-      })
+      const execute = () =>
+        runCommand(codexPath, args, {
+          cwd,
+          input: buildCodexImagePrompt(req, outputDir),
+          timeoutMs,
+        })
+      // 生产路径串行执行,避免并发刷新 OAuth 令牌把登录态弄坏(见 enqueueCodexCli)
+      result = deps.runCommand ? await execute() : await enqueueCodexCli(execute)
     } catch (err) {
       throw wrapCodexCommandError('OpenAI Codex CLI', err)
     }

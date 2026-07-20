@@ -4,10 +4,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
+  enqueueCodexCli,
   generateCodexCliImage,
   generateCodexCliText,
   getCodexImageProviderStatus,
   isCodexImageModel,
+  startCodexLogin,
 } from '../src/services/codexImage'
 import { getAssetFilePath, saveUploadFile } from '../src/services/assets'
 
@@ -739,4 +741,120 @@ test('generateCodexCliImage explains missing Codex login for codex exec fallback
     ),
     /OpenAI CLI 未登录[\s\S]*打开登录/,
   )
+})
+
+test('generateCodexCliText explains refresh-token conflicts and trims log spam', async () => {
+  // 真实故障:CLI 会把同一条 ERROR 重复刷几千字,不能把整段塞进错误气泡
+  const spam = Array.from(
+    { length: 50 },
+    (_, i) =>
+      `2026-07-20T11:46:45.${i}Z ERROR codex_login::auth::manager: Failed to refresh token: 401 Unauthorized: {"error":{"message":"Your refresh token has already been used to generate a new access token.","code":"refresh_token_reused"}}`,
+  ).join(' ')
+
+  let thrown: Error | null = null
+  try {
+    await generateCodexCliText(
+      { model: 'codex:gpt-5.5', messages: [{ role: 'user', content: 'hi' }] },
+      {
+        cwd: 'F:\\repo',
+        outputDir: 'F:\\repo\\workspace\\outputs',
+        commandExists: async () => true,
+        runCommand: async () => {
+          throw new Error(spam)
+        },
+      },
+    )
+  } catch (err) {
+    thrown = err as Error
+  }
+
+  assert.ok(thrown)
+  assert.match(thrown.message, /刷新令牌冲突/)
+  assert.match(thrown.message, /打开登录/)
+  assert.match(thrown.message, /避免同时在终端等其他地方使用 codex/)
+  // 截断:不能整段刷屏日志都进错误消息
+  assert.ok(thrown.message.length < 800, `message too long: ${thrown.message.length}`)
+})
+
+test('enqueueCodexCli serializes concurrent tasks', async () => {
+  const order: string[] = []
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  await Promise.all([
+    enqueueCodexCli(async () => {
+      order.push('a:start')
+      await delay(30)
+      order.push('a:end')
+    }),
+    enqueueCodexCli(async () => {
+      order.push('b:start')
+      await delay(5)
+      order.push('b:end')
+    }),
+    enqueueCodexCli(async () => {
+      order.push('c:start')
+      order.push('c:end')
+    }),
+  ])
+
+  // 串行:每个任务必须完整跑完才轮到下一个,不能交错
+  assert.deepEqual(order, ['a:start', 'a:end', 'b:start', 'b:end', 'c:start', 'c:end'])
+})
+
+test('enqueueCodexCli keeps the queue alive after a task fails', async () => {
+  await assert.rejects(() =>
+    enqueueCodexCli(async () => {
+      throw new Error('boom')
+    }),
+  )
+  const value = await enqueueCodexCli(async () => 42)
+  assert.equal(value, 42)
+})
+
+test('startCodexLogin logs out first, then spawns the browser login', async () => {
+  const calls: string[] = []
+  const result = await startCodexLogin({
+    codexPath: 'codex',
+    runCommand: async (_command, args) => {
+      calls.push(`run:${args.join(' ')}`)
+      return { stdout: '', stderr: '' }
+    },
+    spawnLogin: (codexPath) => {
+      calls.push(`spawn:${codexPath} login`)
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.match(result.message, /浏览器/)
+  // 必须先 logout 清掉作废令牌,再拉起登录
+  assert.deepEqual(calls, ['run:logout', 'spawn:codex login'])
+})
+
+test('startCodexLogin still spawns login when logout fails', async () => {
+  const calls: string[] = []
+  const result = await startCodexLogin({
+    codexPath: 'codex',
+    runCommand: async () => {
+      throw new Error('not logged in')
+    },
+    spawnLogin: () => {
+      calls.push('spawn')
+    },
+  })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(calls, ['spawn'])
+})
+
+test('startCodexLogin reports spawn failures', async () => {
+  const result = await startCodexLogin({
+    codexPath: 'codex',
+    runCommand: async () => ({ stdout: '', stderr: '' }),
+    spawnLogin: () => {
+      throw new Error('spawn ENOENT')
+    },
+  })
+
+  assert.equal(result.ok, false)
+  assert.match(result.message, /启动 Codex 登录失败/)
 })

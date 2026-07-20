@@ -85,6 +85,23 @@ export async function getCodexStatus(): Promise<CodexStatus> {
   return (await res.json()) as CodexStatus
 }
 
+export interface CodexLoginStartResult {
+  ok: boolean
+  message: string
+}
+
+/** 一键重新登录：清掉作废令牌并后台拉起浏览器 OAuth 登录 */
+export async function startCodexLogin(): Promise<CodexLoginStartResult> {
+  const res = await fetch('/api/codex/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error(`启动 Codex 登录失败：${res.status} ${res.statusText}`)
+  }
+  return (await res.json()) as CodexLoginStartResult
+}
+
 /**
  * 测试 LLM Provider 连接（不保存配置）。
  * @param settings 当前表单中的 llmBaseUrl、llmModel、llmApiKey 等字段
