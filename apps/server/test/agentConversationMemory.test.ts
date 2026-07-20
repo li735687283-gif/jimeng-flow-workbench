@@ -1,28 +1,48 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildUserMessage } from '../src/services/agent/index'
+import { buildConversationText } from '../src/services/agent/index'
 
-test('Agent user message includes only the current conversation history', () => {
-  const message = buildUserMessage(
-    '继续做成竖版',
-    ['node_1'],
-    'node_2',
-    [
-      { role: 'user', content: '做一张夏日海报' },
-      { role: 'assistant', content: '已经给出第一版提示词' },
-    ],
-  )
+test('renders user and assistant turns as dialogue', () => {
+  const text = buildConversationText([
+    { role: 'user', content: '画一只猫' },
+    { role: 'assistant', content: '好的，我来生成' },
+    { role: 'user', content: '再画一张狗的' },
+  ])
 
-  assert.match(message, /同一对话的最近上下文/)
-  assert.match(message, /用户：做一张夏日海报/)
-  assert.match(message, /助手：已经给出第一版提示词/)
-  assert.match(message, /继续做成竖版/)
-  assert.match(message, /node_1/)
-  assert.match(message, /node_2/)
+  assert.match(text, /用户：画一只猫/)
+  assert.match(text, /助手：好的，我来生成/)
+  assert.match(text, /用户：再画一张狗的/)
 })
 
-test('A new Agent conversation sends no old conversation context', () => {
-  const message = buildUserMessage('从头设计一个角色', [], undefined, [])
-  assert.equal(message, '从头设计一个角色')
-  assert.doesNotMatch(message, /同一对话的最近上下文/)
+test('includes tool calls and tool results in the transcript', () => {
+  const text = buildConversationText([
+    {
+      role: 'assistant',
+      content: '我来创建图片节点',
+      actions: [
+        { id: 'a1', tool: 'generate_image', label: '生成图片：猫', args: {} },
+      ],
+    },
+    {
+      role: 'user',
+      content: '继续',
+      toolResults: [
+        { callId: 'a1', tool: 'generate_image', ok: true, summary: '已创建节点 node_1 并提交生成' },
+      ],
+    },
+  ])
+
+  assert.match(text, /助手请求执行工具：generate_image（生成图片：猫）/)
+  assert.match(text, /工具结果（generate_image）：成功 — 已创建节点 node_1 并提交生成/)
+})
+
+test('keeps only the most recent turns', () => {
+  const history = Array.from({ length: 30 }, (_, index) => ({
+    role: 'user' as const,
+    content: `第 ${index + 1} 条`,
+  }))
+  const text = buildConversationText(history)
+
+  assert.doesNotMatch(text, /第 1 条/)
+  assert.match(text, /第 30 条/)
 })

@@ -1,41 +1,19 @@
-// 即梦 Flow 前端 - Agent 状态 store
-// 管理 Agent 面板的多对话状态与独立上下文记忆。
+// 即梦 Flow 前端 - Agent 对话状态
+// 对话式协议：消息里带 actions（工具调用）与 actionResults（执行结果），
+// 执行模式（手动确认 / 全自动）持久化在 localStorage。
 
-import { create } from 'zustand'
 import type {
-  PromptOptimizeResponse,
+  AgentChatTurn,
   AgentMessage,
-  AgentRole,
+  AgentToolResult,
 } from '@jimeng-flow/shared/agentMessage'
+import { create } from 'zustand'
+
+export type AgentExecutionMode = 'manual' | 'auto'
 
 export interface AgentConversationContext {
-  /** 最近一次生成操作的类型 */
-  lastActionType?: 'image' | 'video' | 'text'
-  /** 最近一次生成的节点 id */
-  lastGeneratedNodeIds?: string[]
-  /** 最近一次生成的 assetIds */
-  lastGeneratedAssetIds?: string[]
-  /** 最近一次使用的提示词 */
   lastPrompt?: string
-  /** 最近一次使用的参数 */
-  lastParams?: Record<string, unknown>
-}
-
-export interface AgentGenerationResult {
-  id: string
-  assetId?: string
-  url?: string
-  type: 'image' | 'video'
-  prompt?: string
-  timestamp: string
-}
-
-interface AgentRequestSnapshot {
-  userIdea: string
-  contextNodeIds: string[]
-  selectedNodeId?: string
-  targetPromptNodeId?: string
-  role?: AgentRole
+  lastGeneratedAssetIds?: string[]
 }
 
 export interface AgentConversation {
@@ -44,130 +22,118 @@ export interface AgentConversation {
   createdAt: string
   updatedAt: string
   messages: AgentMessage[]
-  lastResponse?: PromptOptimizeResponse
-  lastRequest?: AgentRequestSnapshot
   conversationContext: AgentConversationContext
-  generationResults: AgentGenerationResult[]
 }
-
-interface AgentStore {
-  activeProjectId: string | null
-  setActiveProject: (projectId: string | null) => void
-  activeConversationId: string
-  conversations: AgentConversation[]
-  newConversation: () => string
-  openConversation: (conversationId: string) => void
-  deleteConversation: (conversationId: string) => void
-
-  /** 对话消息列表（user 与 assistant 交替） */
-  messages: AgentMessage[]
-  /** 是否正在调用 LLM */
-  loading: boolean
-  /** 最近一次错误（undefined 表示无错误） */
-  error?: string
-  /** 最近一次结构化响应（用于展示和写回） */
-  lastResponse?: PromptOptimizeResponse
-  /** 最近一次请求参数，用于失败后重试 */
-  lastRequest?: AgentRequestSnapshot
-
-  /** 当前 Agent 角色模式 */
-  role: AgentRole
-  /** 同一会话内的对话上下文记忆 */
-  conversationContext: AgentConversationContext
-
-  submitPrompt: (params: {
-    userIdea: string
-    contextNodeIds?: string[]
-    selectedNodeId?: string
-    targetPromptNodeId?: string
-    role?: AgentRole
-  }) => AgentMessage
-  appendAssistant: (response: PromptOptimizeResponse) => void
-  setLoading: (loading: boolean) => void
-  setError: (error?: string) => void
-  setRole: (role: AgentRole) => void
-  setConversationContext: (ctx: Partial<AgentConversationContext>) => void
-
-  generationResults: AgentGenerationResult[]
-  addGenerationResult: (result: {
-    assetId?: string
-    url?: string
-    type: 'image' | 'video'
-    prompt?: string
-  }) => void
-  clearGenerationResults: () => void
-  reset: () => void
-}
-
-const CONVERSATION_STORAGE_KEY = 'jimeng-flow-agent-conversations-v2'
-const DEFAULT_CONVERSATION_TITLE = '新对话'
 
 interface ProjectConversationState {
   activeConversationId: string
   conversations: AgentConversation[]
 }
 
-const projectConversationCache = new Map<string, ProjectConversationState>()
+interface AgentStore {
+  activeProjectId: string | null
+  setActiveProject: (projectId: string | null) => void
 
-let msgSeq = 0
-function nextId(): string {
-  msgSeq += 1
-  return 'agent_msg_' + Date.now() + '_' + msgSeq
+  activeConversationId: string
+  conversations: AgentConversation[]
+  messages: AgentMessage[]
+  loading: boolean
+  error?: string
+  conversationContext: AgentConversationContext
+
+  executionMode: AgentExecutionMode
+  setExecutionMode: (mode: AgentExecutionMode) => void
+
+  newConversation: () => string
+  openConversation: (conversationId: string) => void
+  deleteConversation: (conversationId: string) => void
+  reset: () => void
+
+  addMessage: (message: AgentMessage) => void
+  addActionResults: (messageId: string, results: AgentToolResult[]) => void
+  setLoading: (loading: boolean) => void
+  setError: (error?: string) => void
+  touchConversationTitle: (title: string) => void
+  setConversationContext: (ctx: Partial<AgentConversationContext>) => void
 }
 
-function nextConversationId(): string {
-  return 'agent_conversation_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+const CONVERSATION_STORAGE_KEY = 'jimeng-flow-agent-conversations-v2'
+const EXECUTION_MODE_STORAGE_KEY = 'mok-agent-execution-mode'
+
+const projectConversationCache = new Map<string, ProjectConversationState>()
+
+function createMessageId(): string {
+  return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function conversationTitleFromFirstMessage(messages: AgentMessage[]): string {
+  const firstUser = messages.find((message) => message.role === 'user')
+  const text = firstUser?.content.replace(/\s+/g, ' ').trim() ?? ''
+  return text ? text.slice(0, 24) : '新对话'
 }
 
 function createConversation(): AgentConversation {
-  const timestamp = new Date().toISOString()
+  const now = new Date().toISOString()
   return {
-    id: nextConversationId(),
-    title: DEFAULT_CONVERSATION_TITLE,
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    id: createMessageId().replace('msg', 'conv'),
+    title: '新对话',
+    createdAt: now,
+    updatedAt: now,
     messages: [],
     conversationContext: {},
-    generationResults: [],
   }
 }
 
-function titleFromMessages(messages: AgentMessage[]): string {
-  const firstUserMessage = messages.find((message) => message.role === 'user')
-  const content = firstUserMessage?.content.replace(/\s+/g, ' ').trim()
-  if (!content) return DEFAULT_CONVERSATION_TITLE
-  return content.length > 24 ? content.slice(0, 24) + '…' : content
-}
-
-function isConversation(item: unknown): item is AgentConversation {
-  if (!item || typeof item !== 'object') return false
-  const candidate = item as Partial<AgentConversation>
+function isValidMessage(candidate: unknown): candidate is AgentMessage {
+  if (!candidate || typeof candidate !== 'object') return false
+  const message = candidate as Partial<AgentMessage>
   return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.title === 'string' &&
-    typeof candidate.createdAt === 'string' &&
-    typeof candidate.updatedAt === 'string' &&
-    Array.isArray(candidate.messages) &&
-    Array.isArray(candidate.generationResults) &&
-    !!candidate.conversationContext &&
-    typeof candidate.conversationContext === 'object'
+    typeof message.id === 'string' &&
+    (message.role === 'user' || message.role === 'assistant' || message.role === 'system') &&
+    typeof message.content === 'string' &&
+    typeof message.createdAt === 'string'
   )
 }
 
-function normalizeProjectState(value: unknown): ProjectConversationState | null {
-  if (!value || typeof value !== 'object') return null
-  const candidate = value as Partial<ProjectConversationState>
+function normalizeConversation(candidate: unknown): AgentConversation | null {
+  if (!candidate || typeof candidate !== 'object') return null
+  const value = candidate as Partial<AgentConversation>
   if (
-    typeof candidate.activeConversationId !== 'string' ||
-    !Array.isArray(candidate.conversations)
+    typeof value.id !== 'string' ||
+    typeof value.title !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string' ||
+    !Array.isArray(value.messages) ||
+    !value.messages.every(isValidMessage) ||
+    !value.conversationContext ||
+    typeof value.conversationContext !== 'object'
   ) {
     return null
   }
-  const conversations = candidate.conversations.filter(isConversation)
-  if (!conversations.some((item) => item.id === candidate.activeConversationId)) {
+  return {
+    id: value.id,
+    title: value.title,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    messages: value.messages.map((message) => ({
+      ...message,
+      contextNodeIds: Array.isArray(message.contextNodeIds) ? message.contextNodeIds : [],
+    })),
+    conversationContext: value.conversationContext,
+  }
+}
+
+function normalizeProjectState(candidate: unknown): ProjectConversationState | null {
+  if (!candidate || typeof candidate !== 'object') return null
+  const value = candidate as Partial<ProjectConversationState>
+  if (typeof value.activeConversationId !== 'string' || !Array.isArray(value.conversations)) {
     return null
   }
-  return { activeConversationId: candidate.activeConversationId, conversations }
+  const conversations = value.conversations
+    .map((item) => normalizeConversation(item))
+    .filter((item): item is AgentConversation => !!item)
+  if (!conversations.length) return null
+  return { activeConversationId: value.activeConversationId, conversations }
 }
 
 function loadProjectConversations(projectId: string): ProjectConversationState | null {
@@ -213,6 +179,11 @@ function persistProjectConversations(
   }
 }
 
+function loadExecutionMode(): AgentExecutionMode {
+  if (typeof window === 'undefined') return 'manual'
+  return localStorage.getItem(EXECUTION_MODE_STORAGE_KEY) === 'auto' ? 'auto' : 'manual'
+}
+
 const fallbackConversation = createConversation()
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
@@ -237,237 +208,177 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       messages: activeConversation.messages,
       loading: false,
       error: undefined,
-      lastResponse: activeConversation.lastResponse,
-      lastRequest: activeConversation.lastRequest,
       conversationContext: activeConversation.conversationContext,
-      generationResults: activeConversation.generationResults,
     })
   },
+
   activeConversationId: fallbackConversation.id,
   conversations: [fallbackConversation],
   messages: [],
   loading: false,
   error: undefined,
-  lastResponse: undefined,
-  lastRequest: undefined,
-  role:
-    (typeof window !== 'undefined' &&
-      (localStorage.getItem('agentRole') as AgentRole)) ||
-    'general',
   conversationContext: {},
-  generationResults: [],
+
+  executionMode: loadExecutionMode(),
+  setExecutionMode: (mode) => {
+    set({ executionMode: mode })
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(EXECUTION_MODE_STORAGE_KEY, mode)
+      } catch {
+        // 忽略存储失败
+      }
+    }
+  },
 
   newConversation: () => {
     const conversation = createConversation()
-    const state = get()
-    const conversations =
-      state.messages.length === 0
-        ? state.conversations.filter((item) => item.id !== state.activeConversationId)
-        : state.conversations
-    set({
+    set((state) => ({
       activeConversationId: conversation.id,
-      conversations: [conversation, ...conversations],
+      conversations: [...state.conversations, conversation],
       messages: [],
       loading: false,
       error: undefined,
-      lastResponse: undefined,
-      lastRequest: undefined,
       conversationContext: {},
-      generationResults: [],
-    })
+    }))
     return conversation.id
   },
 
   openConversation: (conversationId) => {
-    const conversation = get().conversations.find(
-      (item) => item.id === conversationId,
-    )
-    if (!conversation || conversation.id === get().activeConversationId) return
+    const conversation = get().conversations.find((item) => item.id === conversationId)
+    if (!conversation) return
     set({
       activeConversationId: conversation.id,
       messages: conversation.messages,
       loading: false,
       error: undefined,
-      lastResponse: conversation.lastResponse,
-      lastRequest: conversation.lastRequest,
       conversationContext: conversation.conversationContext,
-      generationResults: conversation.generationResults,
     })
   },
 
   deleteConversation: (conversationId) => {
     const state = get()
-    const remaining = state.conversations.filter(
-      (item) => item.id !== conversationId,
-    )
-    if (conversationId !== state.activeConversationId) {
+    const remaining = state.conversations.filter((item) => item.id !== conversationId)
+    if (remaining.length === state.conversations.length) return
+    if (state.activeConversationId !== conversationId) {
       set({ conversations: remaining })
       return
     }
-
-    const replacement = remaining[0] ?? createConversation()
+    const replacement = remaining.at(-1) ?? createConversation()
+    const conversations = remaining.length ? remaining : [replacement]
     set({
       activeConversationId: replacement.id,
-      conversations: remaining.length > 0 ? remaining : [replacement],
+      conversations,
       messages: replacement.messages,
       loading: false,
       error: undefined,
-      lastResponse: replacement.lastResponse,
-      lastRequest: replacement.lastRequest,
       conversationContext: replacement.conversationContext,
-      generationResults: replacement.generationResults,
     })
   },
 
-  submitPrompt: ({
-    userIdea,
-    contextNodeIds,
-    selectedNodeId,
-    targetPromptNodeId,
-    role,
-  }) => {
-    const currentRole = role || get().role
-    const userMsg: AgentMessage = {
-      id: nextId(),
-      role: 'user',
-      content: userIdea,
-      contextNodeIds: contextNodeIds ?? [],
-      selectedNodeId,
-      createdAt: new Date().toISOString(),
-    }
-    set((state) => ({
-      messages: [...state.messages, userMsg],
-      loading: true,
-      error: undefined,
-      lastRequest: {
-        userIdea,
-        contextNodeIds: contextNodeIds ?? [],
-        selectedNodeId,
-        targetPromptNodeId,
-        role: currentRole,
-      },
-    }))
-    return userMsg
-  },
-
-  appendAssistant: (response) => {
-    const assistantMsg: AgentMessage = {
-      id: nextId(),
-      role: 'assistant',
-      content: response.reasoning,
-      thinking: response.thinking,
-      intent: response.intent,
-      suggestedParams: response.suggestedParams,
-      storyboard: response.storyboard,
-      contextNodeIds: response.usedContextNodeIds,
-      optimizedPrompt: response.optimizedPrompt,
-      proposedActions: response.proposedActions,
-      createdAt: new Date().toISOString(),
-    }
-    set((state) => ({
-      messages: [...state.messages, assistantMsg],
+  reset: () => {
+    const conversation = createConversation()
+    set({
+      activeConversationId: conversation.id,
+      conversations: [conversation],
+      messages: [],
       loading: false,
       error: undefined,
-      lastResponse: response,
-    }))
+      conversationContext: {},
+    })
   },
 
-  setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ loading: false, error }),
+  addMessage: (message) =>
+    set((state) => ({ messages: [...state.messages, message] })),
 
-  setRole: (role) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('agentRole', role)
-    }
-    set({ role })
+  addActionResults: (messageId, results) =>
+    set((state) => ({
+      messages: state.messages.map((message) =>
+        message.id === messageId
+          ? { ...message, actionResults: [...(message.actionResults ?? []), ...results] }
+          : message,
+      ),
+    })),
+
+  setLoading: (loading) => set({ loading }),
+  setError: (error) => set({ error }),
+
+  touchConversationTitle: (title) => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    set((state) => ({
+      conversations: state.conversations.map((item) =>
+        item.id === state.activeConversationId
+          ? { ...item, title: trimmed.slice(0, 24), updatedAt: new Date().toISOString() }
+          : item,
+      ),
+    }))
   },
 
   setConversationContext: (ctx) =>
     set((state) => ({
       conversationContext: { ...state.conversationContext, ...ctx },
     })),
-
-  addGenerationResult: (result) =>
-    set((state) => ({
-      generationResults: [
-        ...state.generationResults,
-        {
-          id:
-            'gen_result_' +
-            Date.now() +
-            '_' +
-            Math.random().toString(36).slice(2, 7),
-          ...result,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    })),
-
-  clearGenerationResults: () => set({ generationResults: [] }),
-
-  reset: () =>
-    set((state) => ({
-      messages: [],
-      loading: false,
-      error: undefined,
-      lastResponse: undefined,
-      lastRequest: undefined,
-      conversationContext: {},
-      generationResults: [],
-      role: state.role,
-    })),
 }))
 
-let syncingConversation = false
+// 消息或上下文变化时同步回当前会话，并按项目持久化。
 useAgentStore.subscribe((state, previousState) => {
-  const projectChanged = state.activeProjectId !== previousState.activeProjectId
-  const conversationChanged =
-    state.messages !== previousState.messages ||
-    state.lastResponse !== previousState.lastResponse ||
-    state.lastRequest !== previousState.lastRequest ||
-    state.conversationContext !== previousState.conversationContext ||
-    state.generationResults !== previousState.generationResults
-
-  if (!projectChanged && conversationChanged && !syncingConversation) {
-    const current = state.conversations.find(
-      (item) => item.id === state.activeConversationId,
-    )
-    if (current) {
-      const updatedConversation: AgentConversation = {
-        ...current,
-        title:
-          current.title === DEFAULT_CONVERSATION_TITLE
-            ? titleFromMessages(state.messages)
-            : current.title,
-        updatedAt: new Date().toISOString(),
-        messages: state.messages,
-        lastResponse: state.lastResponse,
-        lastRequest: state.lastRequest,
-        conversationContext: state.conversationContext,
-        generationResults: state.generationResults,
-      }
-      syncingConversation = true
-      useAgentStore.setState({
-        conversations: state.conversations.map((item) =>
-          item.id === updatedConversation.id ? updatedConversation : item,
-        ),
-      })
-      syncingConversation = false
-      return
-    }
-  }
-
   if (
-    state.activeProjectId &&
-    (projectChanged ||
-      state.activeConversationId !== previousState.activeConversationId ||
-      state.conversations !== previousState.conversations)
+    state.messages === previousState.messages &&
+    state.conversationContext === previousState.conversationContext
   ) {
+    return
+  }
+  const now = new Date().toISOString()
+  const conversations = state.conversations.map((item) =>
+    item.id === state.activeConversationId
+      ? {
+          ...item,
+          title:
+            item.title === '新对话'
+              ? conversationTitleFromFirstMessage(state.messages)
+              : item.title,
+          updatedAt: now,
+          messages: state.messages,
+          conversationContext: state.conversationContext,
+        }
+      : item,
+  )
+  useAgentStore.setState({ conversations })
+  if (state.activeProjectId) {
     persistProjectConversations(
       state.activeProjectId,
       state.activeConversationId,
-      state.conversations,
+      conversations,
     )
   }
 })
 
+/** 把消息列表整理成发给后端的对话历史（含工具调用与结果）。 */
+export function buildAgentChatHistory(messages: AgentMessage[]): AgentChatTurn[] {
+  const turns: AgentChatTurn[] = []
+  for (const message of messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    // 用户 @ 引用的画布节点必须写进文本里,否则模型只能靠猜——
+    // 引用关系只存在于结构化字段,模型看不到。
+    const mentionSuffix =
+      message.role === 'user' && message.contextNodeIds.length > 0
+        ? `\n（用户引用的画布节点 id：${message.contextNodeIds.join('、')}）`
+        : ''
+    turns.push({
+      role: message.role,
+      content: message.content + mentionSuffix,
+      actions: message.actions,
+    })
+    // 协议约定工具结果放在随后的 user 回合里（服务端也要求最后一条是 user），
+    // 因此助手消息的执行结果转换成一个携带 toolResults 的用户回合。
+    if (message.role === 'assistant' && message.actionResults?.length) {
+      turns.push({
+        role: 'user',
+        content: '（工具执行结果）',
+        toolResults: message.actionResults,
+      })
+    }
+  }
+  return turns
+}

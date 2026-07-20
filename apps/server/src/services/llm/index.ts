@@ -228,11 +228,11 @@ async function callChatCompletions(
       }
       return { role, content }
     })
+    const outputFormat: LlmOutputFormat = opts.outputFormat ?? 'auto'
     const result = await generateCodexCliText(
-      { model, messages: codexMessages },
+      { model, messages: codexMessages, expectJson: outputFormat === 'json' },
       { settings, timeoutMs: opts.timeoutMs },
     )
-    const outputFormat: LlmOutputFormat = opts.outputFormat ?? 'auto'
     const { contentType, promptCandidate } = detectContentTypeAndPrompt(
       result.content,
       outputFormat,

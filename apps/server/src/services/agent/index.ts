@@ -1,14 +1,13 @@
-// 即梦 Flow 后端 - Agent prompt orchestration service
-// 组装系统提示词，调用 LLM provider client，解析结构化 JSON 输出。
-// 参考 PRD 8.7（Agent Prompt 优化流程）、9.4（Agent 数据流）、10.5（接口示例）。
-// 复用 Task 5 的 generateAgentReply client（services/llm）。
+// 即梦 Flow 后端 - Agent 对话服务
+// 对话式协议：模型自由回复自然语言,需要操作画布时输出工具调用,
+// 由前端按执行模式(手动确认/全自动)执行并把结果带回对话。
 
 import type {
-  PromptOptimizeRequest,
-  PromptOptimizeResponse,
-  AgentProposedAction,
-  AgentSuggestedParams,
-  AgentRole,
+  AgentChatRequest,
+  AgentChatResponse,
+  AgentChatTurn,
+  AgentToolCall,
+  AgentToolName,
 } from '@jimeng-flow/shared/agentMessage'
 import { generateAgentReply } from '../llm'
 import { getSettings } from '../settings'
@@ -26,151 +25,57 @@ export class AgentError extends Error {
   }
 }
 
-/* ====== 多角色 Agent 系统提示词 ====== */
+const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set<AgentToolName>([
+  'generate_image',
+  'generate_video',
+  'edit_image',
+  'read_canvas',
+])
 
-const BASE_SYSTEM_PROMPT = `你是一位专业的 AI 图像/视频生成 Prompt 优化专家，服务于一个节点式创作工作台（即梦 Flow）。
-用户会给出一个粗略的创作想法，你需要判断用户的意图，然后整理成适合"即梦"图像或视频生成模型的提示词。
+const SYSTEM_PROMPT = `你是 MO.K 画布的 AI 助手。MO.K 是一个节点式 AI 创作工作台:画布上有图片节点、视频节点和文本节点,节点之间可以连线(图片节点可以作为其他节点的参考输入)。
 
-你必须严格返回一个 JSON 对象（不要包含任何 markdown 代码块标记、不要任何解释性文字），结构如下：
+你可以自由地和用户聊天(创意讨论、问题解答、闲聊都可以),不要强行把话题扯到生成内容上。当用户明确想在画布上生成或修改内容时,你可以请求执行以下工具:
+
+1. generate_image — 生成图片。args:
+   - prompt(必填):详细的视觉提示词,包含主体、场景、风格、光线、构图等,简体中文
+   - aspectRatio(可选):1:1、16:9、9:16、4:3、3:4、3:2、2:3、21:9。根据内容选择合适的比例:横版场景/海报/风景默认 16:9,竖版人像/手机壁纸用 9:16,只有确实需要方形时才用 1:1;不填时默认 16:9
+   - resolution(可选):1K、2K、4K
+   - count(可选):1-4,默认 1
+   - model(可选):从可用的图片模型 id 中选一个,不填用默认
+   - referenceNodeIds(可选):作为参考的图片节点 id 数组
+2. generate_video — 生成视频。args:
+   - prompt(必填):包含画面与动态描述的提示词,简体中文。用户用大白话描述想要的动态时,你要替他改写成专业的视频提示词
+   - mode(可选):text_to_video(无参考图)、image_to_video(有参考图时优先)、first_last_frame
+   - aspectRatio(可选):16:9、9:16、1:1、4:3、3:4、21:9
+   - resolution(可选):480P、720P、1080P
+   - durationSeconds(可选):4-15,默认 5
+   - model(可选):从可用的视频模型 id 中选一个,不填用默认
+   - referenceNodeIds(可选):参考节点 id 数组。用户想把某张图片做成动态视频时,把该图片节点 id 放进来(mode 用 image_to_video);用户想修改/重做某个已生成的视频时,把那个视频节点 id 放进来,新视频会在原节点上重新生成,而不是新建节点
+3. edit_image — 修改已有图片。args:
+   - referenceNodeIds(必填):要修改的图片节点 id 数组(取第一个)
+   - prompt(必填):修改要求;editType 为 remove_bg 时可省略
+   - editType(可选):modify(局部修改)、style_transfer(风格迁移)、remove_bg(去背景)
+   - model(可选):从可用的图片模型 id 中选一个,不填用默认
+4. read_canvas — 读取画布节点列表。当你需要了解画布内容、但对话上下文中信息不足时先调用它,不要凭空猜测节点 id。
+
+输出协议:你必须只返回一个 JSON 对象(不要 markdown 代码块、不要任何其他文字):
 {
-  "reasoning": "简要说明你为什么这样优化（1-2 句话，给用户看）",
-  "thinking": "详细的思考过程：先分析用户意图（生成图片、生成视频、纯文本对话、故事分镜），然后分析画面元素、风格、镜头等，最后给出优化策略（3-5 句话，可折叠展示给用户）",
-  "intent": "image 或 video 或 text 或 image_then_video 或 story_mode 或 edit",
-  "optimizedPrompt": "可直接发送给生成模型的纯视觉提示词，包含主体、场景、风格、镜头、光线、材质、构图等要素，不含角色卡或解释，图片意图最多 800 字符",
-  "negativePrompt": "需要避免的内容，用逗号分隔，例如：多手指, 脸部变形, 低清晰度",
-  "suggestedParams": {
-    "model": "从当前可用模型中选择",
-    "aspectRatio": "1:1 或 16:9 或 9:16 等",
-    "resolution": "图片使用 1K/2K/4K，视频使用 480P/720P/1080P/4K",
-    "count": 2,
-    "mode": "视频可用 text_to_video/image_to_video/all_reference/action_mimic/first_last_frame/image_reference",
-    "durationSeconds": 5,
-    "quality": "standard 或 high",
-    "width": 1024,
-    "height": 1024
-  },
-  "proposedActions": [
-    {
-      "id": "action_1",
-      "type": "create_prompt_node",
-      "label": "创建 Prompt 节点"
-    }
+  "message": "给用户看的回复",
+  "actions": [
+    { "id": "action_1", "tool": "generate_image", "label": "给用户看的动作描述", "args": {} }
   ]
 }
 
-当 intent 为 "story_mode" 时，还必须返回 storyboard 字段：
-{
-  "reasoning": "简要说明",
-  "thinking": "详细思考过程",
-  "intent": "story_mode",
-  "storyboard": {
-    "title": "故事标题",
-    "style": "整体视觉风格描述",
-    "items": [
-      {
-        "shotNumber": 1,
-        "shotDescription": "镜头描述（给用户看）",
-        "prompt": "详细的图片生成提示词"
-      }
-    ]
-  },
-  "optimizedPrompt": "整组分镜的统一生成提示词",
-  "negativePrompt": "低清晰度, 人物不一致",
-  "suggestedParams": {},
-  "proposedActions": []
-}
-
-通用要求：
-1. intent 字段必须严格为以下之一：image、video、text、image_then_video、story_mode、edit
-2. 当用户要求故事/视频/分镜/剧情类内容时，优先使用 "story_mode" 意图
-3. 当 intent 为 "story_mode" 时，必须返回 storyboard 字段（4-8 个镜头）
-4. thinking 字段要详细展示分析过程，包括意图识别、画面拆解、优化策略
-5. optimizedPrompt 要具体、可执行、细节丰富，包含主体、场景、风格、镜头、光线、材质、构图等
-6. negativePrompt 列出常见需要避免的内容
-7. suggestedParams 必须结合用户用途给出合理预选值。图片优先返回 model、aspectRatio、resolution、count；视频优先返回 model、mode、aspectRatio、resolution、durationSeconds、count、quality
-8. model 必须从“当前工作台能力”列出的模型 id 中选择；拿不准时不要返回 model，让前端使用默认值
-9. 竖屏短视频/社交故事优先 9:16，横屏视频优先 16:9，头像/图标优先 1:1；不要只机械返回 1:1
-10. 当 intent 为 "edit" 时，suggestedParams 中必须包含 editType 字段：style_transfer/modify/remove_bg
-11. proposedActions 至少给一个建议动作
-12. 只返回 JSON，不要有任何其他文字。
-13. 当 intent 包含图片生成时，optimizedPrompt 只写可直接出图的视觉提示词，不要输出角色卡、背景故事、标题、解释或 Markdown，最多 800 字符
-14. 图片提示词必须符合主流生成平台的安全要求；将露骨性暗示、裸露和色情化服装改写为成年、非露骨、完整着装的时尚角色设计表达，同时保留人物辨识度和视觉风格。`
-
-const PROMPT_LANGUAGE_REQUIREMENT = `输出语言要求（优先级最高）：optimizedPrompt、negativePrompt、storyboard.style、storyboard.items[].shotDescription 和 storyboard.items[].prompt 必须使用简体中文。即使用户输入英文，也要将这些提示词字段转换为中文；模型 id、品牌名、镜头缩写和无法准确翻译的专有名词可以保留原文。`
-
-const ROLE_PROMPTS: Record<AgentRole, string> = {
-  general: `你是一位全能型 AI 创作助手，服务于一个节点式创作工作台（即梦 Flow）。
-你可以帮助用户进行创意构思、图片生成、视频生成、故事分镜设计等多种创作任务。
-你的风格是灵活适应，根据用户输入自动判断最合适的创作方向。
-
-${BASE_SYSTEM_PROMPT}`,
-
-  director: `你是一位资深创意导演，服务于一个节点式创作工作台（即梦 Flow）。
-你的核心能力是将用户的创意概念转化为可执行的视觉脚本和叙事方案。
-
-你特别擅长：
-- 故事策划与脚本撰写：将用户的创意想法转化为有起承转合的故事结构
-- 分镜设计：为视频/故事内容设计详细的镜头序列，包括景别、运动、构图
-- 角色与世界观设计：为角色设计形象特征、性格标签，构建视觉世界观
-- 创意提案：当用户只有模糊想法时，主动提供 2-3 个不同方向的创意方案
-
-在生成内容时，你的思考风格：
-- 从整体到局部：先把握故事主题和情感基调，再细化到每个镜头
-- 强调叙事节奏：注意镜头之间的逻辑衔接和情感递进
-- 关注一致性：确保角色形象、场景风格、色调氛围在全片中保持一致
-
-当用户要求生成图片或视频时，你依然会提供优化的提示词，但你的思考会更侧重于"这个故事/画面要传达什么"、"观众看到后会感受到什么"。
-
-${BASE_SYSTEM_PROMPT}`,
-
-  visual: `你是一位专业视觉设计师和 Prompt 工程师，服务于一个节点式创作工作台（即梦 Flow）。
-你的核心能力是将任何创意概念转化为高质量的视觉描述，确保生成的图片具有专业级品质。
-
-你特别擅长：
-- 图片生成优化：将模糊描述转化为包含构图、光影、材质、色彩、景深的精确提示词
-- 风格迁移与统一：确保系列图片保持一致的视觉风格（如统一的水彩画风、赛博朋克色调）
-- 图像编辑：为修改/编辑任务提供精确的编辑指令，确保修改结果自然无缝
-- 画面构图分析：主动建议最佳构图方式（三分法、对称、引导线、框架构图等）
-- 色彩与光影设计：根据场景情绪推荐合适的色彩方案（暖色/冷色、高对比/低对比）和光线类型（自然光、布光、霓虹灯等）
-
-在生成提示词时，你的思考风格：
-- 极致细节：每个提示词都包含丰富的视觉细节，如"8K 超清、电影级布光、浅景深、质感纹理"
-- 风格先行：首先确定整体视觉风格，再填充内容元素
-- 技术参数：主动推荐合适的分辨率、宽高比、生成数量
-
-${BASE_SYSTEM_PROMPT}`,
-
-  editor: `你是一位资深视频剪辑师和动态视觉设计师，服务于一个节点式创作工作台（即梦 Flow）。
-你的核心能力是将静态素材串联成具有叙事节奏和视觉流畅度的动态作品。
-
-你特别擅长：
-- 视频生成优化：为视频生成任务提供运动描述、镜头运动、转场建议
-- 镜头时长与节奏控制：为每个镜头建议合适的时长，控制整体节奏（快节奏/慢节奏/张弛有度）
-- 转场设计：建议镜头之间的转场方式（硬切、淡入淡出、叠化、推拉等）
-- 动态构图：描述镜头运动方式（推、拉、摇、移、跟、升、降）以增强画面表现力
-- 音视频配合：建议合适的背景音乐风格和音效设计，强化视频情感
-
-在生成内容时，你的思考风格：
-- 时间意识：始终考虑时间维度，每个镜头都有明确的时长和节奏定位
-- 运动描述：在提示词中详细描述动态元素（如"微风吹动发丝、树叶缓缓飘落、水流潺潺"）
-- 连贯性：确保多个镜头之间的动作、场景、色调无缝衔接
-- 情感节奏：通过镜头长度和运动的快慢控制观众的情绪起伏
-
-${BASE_SYSTEM_PROMPT}`,
-}
-
-/** 根据角色获取对应的系统提示词 */
-function getSystemPrompt(role: AgentRole = 'general'): string {
-  return ROLE_PROMPTS[role] || ROLE_PROMPTS.general
-}
-
-export function buildAgentSystemPrompt(
-  role: AgentRole = 'general',
-  capabilityContext = '',
-  skillContext = '',
-): string {
-  return `${getSystemPrompt(role)}\n\n${capabilityContext}${skillContext ? `\n\n${skillContext}` : ''}\n\n${PROMPT_LANGUAGE_REQUIREMENT}`
-}
+规则:
+1. 纯聊天时 actions 返回空数组 []。
+2. 只有当你确信用户想在画布上执行操作时才输出工具调用;意图不清时在 message 里追问,不要输出 actions。
+3. 一轮可以输出多个工具调用(例如同时生成两张不同风格的图)。
+4. 引用节点时使用上下文中给出的节点 id,不要编造。
+5. 工具的执行结果会以「工具结果」的形式出现在后续对话里;根据结果向用户汇报,不要在结果返回前声称操作已完成。
+6. message 必须使用简体中文,语气自然友好,简洁不说教。
+7. 图片模型和视频模型是两套独立列表,绝不能混用:generate_image/edit_image 只能用图片模型 id,generate_video 只能用视频模型 id。
+8. 用户选中或 @ 了图片节点并说"做成视频/动起来"时,用 generate_video + referenceNodeIds 引用该图片节点;把他的大白话翻译成包含主体、动作、镜头运动的提示词。
+9. 用户对已生成的视频不满意、描述要改的地方时,再次调用 generate_video,referenceNodeIds 里同时带上那个视频节点的 id 和它所用的图片节点 id(这样仍是图生视频,画面不跑偏),prompt 按用户的新要求改写,视频会在原节点上重新生成。`
 
 function isLikelyStringEnd(candidate: string, quoteIndex: number): boolean {
   let nextIndex = quoteIndex + 1
@@ -237,7 +142,7 @@ function normalizeJsonCandidate(candidate: string): string {
 }
 
 function parseDirectJson(candidate: string): unknown | undefined {
-  const value = candidate.trim().replace(/^\uFEFF/, '')
+  const value = candidate.trim().replace(/^﻿/, '')
   for (const attempt of [value, normalizeJsonCandidate(value)]) {
     try {
       return JSON.parse(attempt)
@@ -248,15 +153,8 @@ function parseDirectJson(candidate: string): unknown | undefined {
   return undefined
 }
 
-const AGENT_PAYLOAD_KEYS = new Set([
-  'intent',
-  'optimizedPrompt',
-  'optimized_prompt',
-  'negativePrompt',
-  'negative_prompt',
-  'storyboard',
-])
-const WRAPPER_KEYS = ['content', 'text', 'message', 'result', 'data', 'output', 'response']
+const AGENT_PAYLOAD_KEYS = new Set(['message', 'actions'])
+const WRAPPER_KEYS = ['content', 'text', 'result', 'data', 'output', 'response']
 
 function hasAgentPayloadShape(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -342,253 +240,153 @@ export function extractJson(content: string): unknown {
   throw new AgentError('PARSE_FAILED', '模型返回格式异常，请重试或切换模型。')
 }
 
-/** 安全读取 intent 字段 */
-function parseIntent(v: unknown): PromptOptimizeResponse['intent'] {
-  if (v === 'image' || v === 'video' || v === 'text' || v === 'image_then_video' || v === 'story_mode' || v === 'edit') return v
-  return undefined
-}
-
-/** 安全解析 storyboard 字段 */
-function parseStoryboard(v: unknown): PromptOptimizeResponse['storyboard'] {
-  if (!v || typeof v !== 'object') return undefined
-  const obj = v as Record<string, unknown>
-
-  const title = typeof obj.title === 'string' ? obj.title : ''
-  const style = typeof obj.style === 'string' ? obj.style : ''
-
-  let items: Array<{
-    id: string
-    shotNumber: number
-    shotDescription: string
-    prompt: string
-    imageAssetId?: string
-    videoAssetId?: string
-  }> = []
-  if (Array.isArray(obj.items)) {
-    items = obj.items
-      .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-      .map((item, index) => ({
-        id: typeof item.id === 'string' ? item.id : `shot_${index + 1}`,
-        shotNumber: typeof item.shotNumber === 'number' ? item.shotNumber : index + 1,
-        shotDescription: typeof item.shotDescription === 'string' ? item.shotDescription : '',
-        prompt: typeof item.prompt === 'string' ? item.prompt : '',
-        imageAssetId: typeof item.imageAssetId === 'string' ? item.imageAssetId : undefined,
-        videoAssetId: typeof item.videoAssetId === 'string' ? item.videoAssetId : undefined,
-      }))
-  }
-
-  if (!title && items.length === 0) return undefined
-
-  return { title, style, items }
-}
-
-/** 安全读取字符串字段 */
-function asString(v: unknown, fallback = '', field: string): string {
-  if (typeof v === 'string') return v
-  if (v === undefined || v === null) return fallback
-  throw new AgentError('PARSE_FAILED', `字段 ${field} 应为字符串，实际类型：${typeof v}`)
-}
-
-/** 解析 suggestedParams */
-function parseSuggestedParams(v: unknown): AgentSuggestedParams {
-  if (!v || typeof v !== 'object') return {}
-  const obj = v as Record<string, unknown>
-  const result: AgentSuggestedParams = {}
-  if (typeof obj.width === 'number') result.width = obj.width
-  if (typeof obj.height === 'number') result.height = obj.height
-  if (typeof obj.count === 'number') result.count = obj.count
-  // 透传其他已知字段
-  for (const key of Object.keys(obj)) {
-    if (key === 'width' || key === 'height' || key === 'count') continue
-    const val = obj[key]
-    if (val !== undefined && val !== null) {
-      result[key] = val
-    }
-  }
-  return result
-}
-
-/** 解析 proposedActions */
-function parseProposedActions(v: unknown): AgentProposedAction[] {
-  if (!Array.isArray(v)) return []
-  return v
-    .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-    .map((x, i) => ({
-      id: typeof x.id === 'string' ? x.id : `action_${i + 1}`,
-      type: typeof x.type === 'string' ? x.type : 'unknown',
-      label: typeof x.label === 'string' ? x.label : '未知动作',
-      payload:
-        x.payload && typeof x.payload === 'object'
-          ? (x.payload as Record<string, unknown>)
-          : undefined,
+/** 解析并校验工具调用数组，丢弃非法项 */
+export function parseAgentToolCalls(value: unknown): AgentToolCall[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+    .filter((item) => typeof item.tool === 'string' && AGENT_TOOL_NAMES.has(item.tool))
+    .map((item, index) => ({
+      id: typeof item.id === 'string' && item.id ? item.id : `action_${index + 1}`,
+      tool: item.tool as AgentToolName,
+      label:
+        typeof item.label === 'string' && item.label
+          ? item.label
+          : String(item.tool),
+      args:
+        item.args && typeof item.args === 'object' && !Array.isArray(item.args)
+          ? (item.args as Record<string, unknown>)
+          : {},
     }))
 }
 
-export function buildAgentSkillContext(
-  skills: PromptOptimizeRequest['skills'],
-): string {
-  if (!Array.isArray(skills)) return ''
-  const validSkills = skills
-    .filter((skill) =>
-      skill &&
-      typeof skill.id === 'string' &&
-      typeof skill.label === 'string' &&
-      typeof skill.instruction === 'string',
-    )
-    .slice(0, 3)
-  if (validSkills.length === 0) return ''
-
-  const lines = validSkills.map((skill, index) => {
-    const steps = Array.isArray(skill.steps)
-      ? skill.steps.filter((step): step is string => typeof step === 'string').join(' → ')
-      : ''
-    const io = skill.input && skill.output
-      ? `输入 ${skill.input}，输出 ${skill.output}`
-      : ''
-    return `${index + 1}. ${skill.label}：${skill.instruction}${steps ? `；步骤：${steps}` : ''}${io ? `；${io}` : ''}`
-  })
-  return `用户已启用以下技能链，必须严格按顺序执行，并在 thinking 中说明每个技能如何影响最终方案：\n${lines.join('\n')}`
-}
-
-function firstDefined(obj: Record<string, unknown>, keys: string[]): unknown {
-  for (const key of keys) {
-    if (obj[key] !== undefined && obj[key] !== null) return obj[key]
-  }
-  return undefined
-}
-
-export function parseAgentResponse(
+/** 把解析后的 JSON 整理为标准响应 */
+export function parseAgentChatResponse(
   parsed: unknown,
-  usedContextNodeIds: string[] = [],
   rawLlmResponse = '',
-): PromptOptimizeResponse {
+): AgentChatResponse {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new AgentError('PARSE_FAILED', 'LLM 返回内容不是 JSON 对象')
   }
   const obj = parsed as Record<string, unknown>
-  const response: PromptOptimizeResponse = {
-    reasoning: asString(firstDefined(obj, ['reasoning', 'reason']), '', 'reasoning'),
-    thinking: asString(firstDefined(obj, ['thinking', 'analysis']), '', 'thinking'),
-    intent: parseIntent(firstDefined(obj, ['intent', 'type'])),
-    storyboard: parseStoryboard(firstDefined(obj, ['storyboard', 'story_board'])),
-    optimizedPrompt: asString(firstDefined(obj, ['optimizedPrompt', 'optimized_prompt', 'prompt']), '', 'optimizedPrompt'),
-    negativePrompt: asString(firstDefined(obj, ['negativePrompt', 'negative_prompt']), '', 'negativePrompt'),
-    suggestedParams: parseSuggestedParams(firstDefined(obj, ['suggestedParams', 'suggested_params'])),
-    proposedActions: parseProposedActions(firstDefined(obj, ['proposedActions', 'proposed_actions'])),
-    usedContextNodeIds,
+  const message = typeof obj.message === 'string' ? obj.message.trim() : ''
+  if (!message) {
+    throw new AgentError('PARSE_FAILED', 'LLM 返回的 message 为空')
+  }
+  return {
+    message,
+    actions: parseAgentToolCalls(obj.actions),
     rawLlmResponse,
   }
-
-  if (!response.optimizedPrompt) {
-    throw new AgentError('PARSE_FAILED', 'LLM 返回的 optimizedPrompt 为空')
-  }
-  return response
 }
 
 /**
- * 优化 Prompt：组装上下文 → 调用 LLM → 解析结构化 JSON。
- * 参考 PRD 8.7、9.4、10.5。
- * M0 阶段上下文组装简化：前端传入 userIdea 字符串即可。
- * @param req PromptOptimizeRequest
+ * 解析模型回复；模型完全没按协议输出 JSON（纯文本闲聊）时，
+ * 降级为普通聊天回复而不是报错——自由对话在任何模型下都不能硬失败。
+ * 只有当内容明显是"尝试输出 JSON 但写坏了"时才抛 PARSE_FAILED。
  */
-export async function optimizePrompt(
-  req: PromptOptimizeRequest,
-): Promise<PromptOptimizeResponse> {
-  // 入参校验
-  if (!req || typeof req.userIdea !== 'string' || req.userIdea.trim().length === 0) {
-    throw new AgentError('INVALID_INPUT', 'userIdea 不能为空')
+export function parseAgentChatResponseOrFallback(raw: string): AgentChatResponse {
+  try {
+    return parseAgentChatResponse(extractJson(raw), raw)
+  } catch (err) {
+    if (err instanceof AgentError && err.code === 'PARSE_FAILED') {
+      const fallback = raw.trim()
+      if (fallback && !fallback.startsWith('{') && !fallback.startsWith('```')) {
+        return {
+          message: fallback.slice(0, 4000),
+          actions: [],
+          rawLlmResponse: raw,
+        }
+      }
+    }
+    throw err
+  }
+}
+
+/** 把对话历史(含工具结果)渲染成给模型的文本 */
+export function buildConversationText(history: AgentChatTurn[]): string {
+  return history
+    .slice(-20)
+    .map((turn) => {
+      const lines: string[] = []
+      if (turn.role === 'user') {
+        lines.push(`用户：${turn.content}`)
+        for (const result of turn.toolResults ?? []) {
+          lines.push(
+            `工具结果（${result.tool}）：${result.ok ? '成功' : '失败'} — ${result.summary}`,
+          )
+        }
+      } else {
+        lines.push(`助手：${turn.content}`)
+        for (const action of turn.actions ?? []) {
+          lines.push(`助手请求执行工具：${action.tool}（${action.label}）`)
+        }
+      }
+      return lines.join('\n')
+    })
+    .join('\n')
+}
+
+export function buildCanvasContext(req: AgentChatRequest): string {
+  if (!Array.isArray(req.canvas) || req.canvas.length === 0) {
+    return '当前画布为空（没有任何节点）。'
+  }
+  const lines = req.canvas.slice(0, 40).map((node) => {
+    const parts = [`- 节点 ${node.id}（${node.type}）「${node.title}」`]
+    if (node.prompt) parts.push(`提示词：${node.prompt.slice(0, 200)}`)
+    if (node.status) parts.push(`状态：${node.status}`)
+    return parts.join('，')
+  })
+  return `当前画布节点：\n${lines.join('\n')}`
+}
+
+/**
+ * Agent 对话：组装上下文 → 调用 LLM → 解析 { message, actions }。
+ */
+// Codex CLI 冷启动 + 长上下文经常超过 90s（默认 fetch 60s 更不够），
+// Agent 调用统一放宽到 5 分钟；也可通过环境变量覆盖。
+const AGENT_LLM_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.MOK_AGENT_LLM_TIMEOUT_MS ?? '')
+  return Number.isFinite(raw) && raw > 0 ? raw : 300_000
+})()
+
+export async function chatWithAgent(
+  req: AgentChatRequest,
+): Promise<AgentChatResponse> {
+  if (!req || !Array.isArray(req.history) || req.history.length === 0) {
+    throw new AgentError('INVALID_INPUT', 'history 不能为空')
+  }
+  const lastTurn = req.history.at(-1)
+  if (!lastTurn || lastTurn.role !== 'user' || typeof lastTurn.content !== 'string') {
+    throw new AgentError('INVALID_INPUT', 'history 最后一条必须是用户消息')
   }
 
-  // 读取模型配置（req.model 优先，否则用 settings.llmModel）
   const settings = await getSettings()
   const model = req.model?.trim() || settings.llmModel?.trim()
   if (!model) {
     throw new AgentError('LLM_CONFIG_MISSING', '未配置 LLM 模型，请在设置中配置 llmModel')
   }
 
-  // 组装用户消息（M0 简化：直接把 userIdea 作为用户消息）
-  // contextNodeIds / selectedNodeId 透传到响应，M0 不真正读取节点 data
-  const usedContextNodeIds = Array.isArray(req.contextNodeIds)
-    ? req.contextNodeIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
-    : []
-
-  const userMessage = buildUserMessage(
-    req.userIdea,
-    usedContextNodeIds,
-    req.selectedNodeId,
-    req.conversationHistory,
-  )
-
-  // 调用 LLM provider（根据角色选择对应的系统提示词，强制 json 输出格式，便于解析）
-  let result
   const imageModels = settings.imageModels?.length > 0
     ? settings.imageModels.join(', ')
     : 'jimeng'
   const videoModels = settings.videoModels?.length > 0
     ? settings.videoModels.join(', ')
     : 'seedance-2.0'
-  const capabilityContext = `当前工作台能力：
-- 可用图片模型 id：${imageModels}
-- 图片比例：1:1、16:9、9:16、4:3、3:4、3:2、2:3、21:9
-- 图片清晰度：即梦 5.0 Pro 支持 1K/2K/4K；其他即梦图片模型支持 2K/4K
-- 可用视频模型 id：${videoModels}
-- 视频模式：text_to_video、image_to_video、all_reference、action_mimic、first_last_frame、image_reference
-- 视频比例：Auto、16:9、9:16、4:3、3:4、1:1、21:9
-- 视频分辨率：480P、720P、1080P、4K；时长 4-15 秒`
-  const skillContext = buildAgentSkillContext(req.skills)
-  const systemPrompt = buildAgentSystemPrompt(req.role, capabilityContext, skillContext)
+  const capabilityContext = `当前工作台可用图片模型 id：${imageModels}；可用视频模型 id：${videoModels}。`
+  const systemPrompt = `${SYSTEM_PROMPT}\n\n${capabilityContext}\n\n${buildCanvasContext(req)}`
+  const userMessage = buildConversationText(req.history)
+
+  let result
   try {
     result = await generateAgentReply(model, systemPrompt, userMessage, {
       outputFormat: 'json',
-      timeoutMs: 90_000,
+      timeoutMs: AGENT_LLM_TIMEOUT_MS,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     throw new AgentError('LLM_CALL_FAILED', `LLM 调用失败：${msg}`)
   }
 
-  // 解析结构化 JSON
-  return parseAgentResponse(extractJson(result.content), usedContextNodeIds, result.content)
-}
-
-/**
- * 组装用户消息。
- * M0 简化：只透传 userIdea，附加节点上下文信息（仅 id，不读 data）。
- */
-export function buildUserMessage(
-  userIdea: string,
-  contextNodeIds: string[],
-  selectedNodeId?: string,
-  conversationHistory?: PromptOptimizeRequest['conversationHistory'],
-): string {
-  const lines: string[] = []
-  const history = Array.isArray(conversationHistory)
-    ? conversationHistory
-        .filter(
-          (turn) =>
-            (turn?.role === 'user' || turn?.role === 'assistant') &&
-            typeof turn.content === 'string' &&
-            turn.content.trim().length > 0,
-        )
-        .slice(-12)
-    : []
-  if (history.length > 0) {
-    lines.push(
-      '同一对话的最近上下文：\n' +
-        history
-          .map((turn) => {
-            const speaker = turn.role === 'user' ? '用户' : '助手'
-            return speaker + '：' + turn.content.trim().slice(0, 1200)
-          })
-          .join('\n'),
-    )
-  }
-  lines.push(userIdea)
-  if (selectedNodeId) {
-    lines.push(`（当前选中节点：${selectedNodeId}）`)
-  }
-  if (contextNodeIds.length > 0) {
-    lines.push(`（已提供作为上下文的节点 id：${contextNodeIds.join(', ')}）`)
-  }
-  return lines.join('\n')
+  return parseAgentChatResponseOrFallback(result.content)
 }

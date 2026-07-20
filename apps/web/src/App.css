@@ -6678,6 +6678,109 @@
   font-size: 12px;
 }
 
+/* 空对话提示 */
+.agent-empty-hint {
+  margin: 42px 12px;
+  text-align: center;
+  color: #8f8f8f;
+  font-size: 13px;
+}
+
+.agent-empty-hint svg {
+  opacity: 0.6;
+}
+
+.agent-empty-hint p {
+  margin: 10px 0 0;
+}
+
+.agent-empty-hint-sub {
+  font-size: 12px;
+  color: #6f6f6f;
+}
+
+/* 工具调用卡片与确认条 */
+.agent-action-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-action-card {
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+
+.agent-action-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #ececec;
+}
+
+.agent-action-card.done .agent-action-card-title svg {
+  color: #b8b8b8;
+}
+
+.agent-action-card.failed .agent-action-card-title svg {
+  color: #ff5c5c;
+}
+
+.agent-action-card.pending .agent-action-card-title svg {
+  color: #9a9a9a;
+}
+
+.agent-action-card-result {
+  margin-top: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+  color: #a3a3a3;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* 待确认操作卡上的图片参数选择 */
+.agent-action-params {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-action-pending-icon {
+  animation: icon-spin 1s linear infinite;
+}
+
+.agent-action-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 11px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: #bdbdbd;
+  font-size: 12px;
+}
+
+.agent-action-confirm-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-loading-bubble {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9a9a9a;
+  font-size: 12px;
+}
+
 .agent-image-request {
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -6753,7 +6856,8 @@
   margin: 0 10px 10px;
   padding: 10px;
   flex-shrink: 0;
-  border-radius: 14px;
+  /* 外圆角 28（面板）- 内边距 10 = 18，内外圆角同心 */
+  border-radius: 18px;
   background: #222222;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   transition:

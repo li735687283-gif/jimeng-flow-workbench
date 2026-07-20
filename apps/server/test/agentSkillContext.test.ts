@@ -1,45 +1,38 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildAgentSkillContext } from '../src/services/agent/index'
+import { parseAgentToolCalls } from '../src/services/agent/index'
 
-test('builds an ordered and bounded skill execution context', () => {
-  const context = buildAgentSkillContext([
-    {
-      id: 'prompt-polish',
-      label: '提示词增强',
-      instruction: '补齐生成细节',
-      input: 'text',
-      output: 'prompt',
-      steps: ['澄清目标', '补齐细节'],
-    },
-    {
-      id: 'shot-design',
-      label: '镜头设计',
-      instruction: '设计镜头语言',
-      input: 'text',
-      output: 'prompt',
-      steps: ['设计镜头', '补充光线'],
-    },
-    {
-      id: 'storyboard',
-      label: '分镜拆解',
-      instruction: '拆成连续镜头',
-    },
-    {
-      id: 'ignored',
-      label: '不应出现',
-      instruction: '超过技能上限',
-    },
+test('keeps valid tool calls and fills defaults', () => {
+  const calls = parseAgentToolCalls([
+    { id: 'a1', tool: 'generate_image', label: '生成图片：猫', args: { prompt: '猫' } },
+    { tool: 'read_canvas' },
   ])
 
-  assert.match(context, /1\. 提示词增强/)
-  assert.match(context, /2\. 镜头设计/)
-  assert.match(context, /3\. 分镜拆解/)
-  assert.match(context, /澄清目标 → 补齐细节/)
-  assert.doesNotMatch(context, /不应出现/)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls[0], {
+    id: 'a1',
+    tool: 'generate_image',
+    label: '生成图片：猫',
+    args: { prompt: '猫' },
+  })
+  assert.equal(calls[1].id, 'action_2')
+  assert.equal(calls[1].label, 'read_canvas')
+  assert.deepEqual(calls[1].args, {})
 })
 
-test('ignores malformed skill selections', () => {
-  assert.equal(buildAgentSkillContext(undefined), '')
-  assert.equal(buildAgentSkillContext([]), '')
+test('drops unknown tools and malformed entries', () => {
+  const calls = parseAgentToolCalls([
+    { id: 'a1', tool: 'delete_everything', label: '危险操作' },
+    'not an object',
+    null,
+    { id: 'a2', tool: 'edit_image', label: '修改图片', args: { referenceNodeIds: ['n1'] } },
+  ])
+
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].tool, 'edit_image')
+})
+
+test('non-array input yields no calls', () => {
+  assert.deepEqual(parseAgentToolCalls(undefined), [])
+  assert.deepEqual(parseAgentToolCalls({ tool: 'generate_image' }), [])
 })

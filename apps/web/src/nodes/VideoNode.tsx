@@ -10,7 +10,6 @@ import { VideoActionCard } from '../components/VideoActionCard'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
 import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
-import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
@@ -27,7 +26,6 @@ import {
   joinUpstreamTextPrompts,
   resolveImageGenerationPrompt,
 } from '../utils/imageGenerationInputs'
-import { applyAgentStoryboardVideoRestoreResult } from '../utils/agentVideoGeneration'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
@@ -668,12 +666,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       error: run.error,
       updatedAt: new Date().toISOString(),
     } as unknown as Partial<BaseNodeData>)
-    useAgentStore.setState((agentState) => ({
-      messages: applyAgentStoryboardVideoRestoreResult(agentState.messages, {
-        videoNodeId: id,
-        videoAssetId: item.assetId,
-      }),
-    }))
     void useFlowStore.getState().saveCurrent().catch(() => undefined)
   }
 

@@ -1,10 +1,10 @@
 // 即梦 Flow 前端 - Agent API client
-// 封装 Agent 相关的 fetch 调用。Vite proxy 已把 /api 转发到后端 8787。
-// 参考 PRD 8.7、10.5、12.2（错误处理）。
+// 对话式协议：POST /api/agent/chat，模型自由回复并返回工具调用，
+// 工具由前端按执行模式（手动确认 / 全自动）执行后再把结果带回对话。
 
 import type {
-  PromptOptimizeRequest,
-  PromptOptimizeResponse,
+  AgentChatRequest,
+  AgentChatResponse,
 } from '@jimeng-flow/shared/agentMessage'
 
 export function getAgentApiErrorMessage(
@@ -24,11 +24,11 @@ export function getAgentApiErrorMessage(
   }
 }
 
-/** POST /api/agent/prompt-optimize - 优化 Prompt */
-export async function optimizePrompt(
-  req: PromptOptimizeRequest,
-): Promise<PromptOptimizeResponse> {
-  const res = await fetch('/api/agent/prompt-optimize', {
+/** POST /api/agent/chat - 一轮 Agent 对话，返回回复与待执行的工具调用 */
+export async function sendAgentChat(
+  req: AgentChatRequest,
+): Promise<AgentChatResponse> {
+  const res = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
@@ -37,5 +37,5 @@ export async function optimizePrompt(
     const text = await res.text().catch(() => '')
     throw new Error(getAgentApiErrorMessage(res.status, res.statusText, text))
   }
-  return (await res.json()) as PromptOptimizeResponse
+  return (await res.json()) as AgentChatResponse
 }

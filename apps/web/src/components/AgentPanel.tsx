@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import {
   ArrowUp,
@@ -6,163 +6,49 @@ import {
   Bot,
   Check,
   ChevronDown,
-  ChevronRight,
-  Clapperboard,
-  Image as ImageIcon,
-  LayoutTemplate,
-  LocateFixed,
-  Loader2,
-  Mountain,
-  PanelsTopLeft,
-  PenTool,
-  Plus,
-  RefreshCw,
-  Scissors,
-  Sparkles,
-  UserRound,
-  Video,
-  Wand2,
-  X,
-  Film,
   History,
-  Blocks,
+  Loader2,
   MousePointer2,
-  type LucideIcon,
+  Plus,
+  X,
 } from 'lucide-react'
 import type {
-  PromptOptimizeRequest,
   AgentMessage,
-  StoryboardData,
-  AgentRole,
-  AgentConversationTurn,
-  AgentTemplate,
+  AgentToolCall,
 } from '@jimeng-flow/shared/agentMessage'
-import { AGENT_ROLES, AGENT_TEMPLATES } from '@jimeng-flow/shared/agentMessage'
-import {
-  IMAGE_COUNTS,
-  type GenerationRequest,
-  type GenerationResult,
-  type GenerationResponse,
-} from '@jimeng-flow/shared/generateNode'
-import {
-  VIDEO_MODES,
-  VIDEO_ASPECT_RATIOS,
-  VIDEO_RESOLUTIONS,
-  VIDEO_DURATIONS,
-  VIDEO_COUNTS,
-  type VideoGenerationRequest,
-  type VideoAspectRatio,
-  type VideoResolution,
-  type VideoMode,
-  type VideoNodeData,
-} from '@jimeng-flow/shared/videoNode'
-import { optimizePrompt } from '../api/agent'
-import { createGeneration, createEditGeneration, subscribeGeneration } from '../api/generations'
+import { sendAgentChat } from '../api/agent'
 import { AgentConversationHistory } from './AgentConversationHistory'
 import { SecondaryMenuSelect } from './menus/SecondaryMenuSelect'
-import { useAgentStore } from '../state/agentStore'
+import { buildAgentChatHistory, useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
-import { useGenerateStore } from '../state/generateStore'
+import { useFlowStore } from '../state/flowStore'
 import { useSettingsStore } from '../state/settingsStore'
-import type { BaseNodeData } from '../types/nodeTypes'
+import {
+  AGENT_DEFAULT_IMAGE_ASPECT_RATIO,
+  executeAgentToolCall,
+  summarizeCanvasNodes,
+} from '../utils/agentTools'
+import {
+  AGENT_IMAGE_ASPECT_RATIOS,
+  getAgentImageResolutionOptions,
+} from '../utils/agentGenerationPlan'
+import { getConfiguredChatModels } from '../utils/chatModels'
 import {
   getConfiguredDefaultImageModel,
   getConfiguredImageModels,
-  shouldRequireJimengCliForImageModel,
 } from '../utils/imageModels'
-import {
-  shouldBlockAgentImageEditGeneration,
-} from '../utils/agentImageNodes'
-import {
-  applyAgentStoryboardVideoResult,
-  buildAgentStoryboardVideoMedia,
-  buildAgentVideoCompletionPatch,
-  buildAgentVideoRunningPatch,
-  buildAgentVideoReferences,
-  getAgentVideoGeneratedAssetIds,
-  getAgentVideoInputImageNodes,
-  getAgentStoryboardVideoSource,
-  getAgentStoryboardVideoTargetNodeId,
-  getAgentStoryboardItemMediaStatus,
-  getAgentStoryboardVideoActionLabel,
-  getAgentStoryboardVideoLocateLabel,
-  getAgentStoryboardVideoReferenceSources,
-  resolveAgentVideoMode,
-  selectAgentVideoTargetNodeId,
-} from '../utils/agentVideoGeneration'
 import {
   getConfiguredDefaultVideoModel,
   getConfiguredVideoModels,
-  getUnsupportedVideoModelMessage,
-  videoModelNeedsJimeng,
 } from '../utils/videoModels'
-import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
-import { resolveGenerationFlowId } from '../utils/generationFlow'
-import { getConfiguredChatModels } from '../utils/chatModels'
-import {
-  AGENT_IMAGE_ASPECT_RATIOS,
-  getAgentImageDimensions,
-  getAgentImageResolutionOptions,
-  resolveAgentImageGenerationParams,
-  resolveAgentVideoGenerationParams,
-  type AgentImageAspectRatio,
-  type AgentImageGenerationParams,
-  type AgentImageResolution,
-  type AgentVideoGenerationParams,
-} from '../utils/agentGenerationPlan'
-import { prepareAgentImagePrompt } from '../utils/agentImagePrompt'
-import {
-  AGENT_SKILLS,
-  AGENT_SKILL_CATEGORIES,
-  AGENT_SKILL_INPUT_LABELS,
-  AGENT_SKILL_OUTPUT_LABELS,
-  MAX_ACTIVE_AGENT_SKILLS,
-  getAgentSkillById,
-  getAgentSkillInputIssue,
-  getRecommendedAgentSkillIds,
-  toAgentSkillSelections,
-  type AgentSkillDefinition,
-} from '../utils/agentSkills'
 
 const MIN_PANEL_WIDTH = 360
 const MAX_PANEL_WIDTH_RATIO = 2 / 3
-const AGENT_ROLE_ICONS: Record<AgentRole, LucideIcon> = {
-  general: Sparkles,
-  director: Clapperboard,
-  visual: PenTool,
-  editor: Scissors,
-}
-const AGENT_TEMPLATE_ICONS: Record<string, LucideIcon> = {
-  product_poster: ImageIcon,
-  storyboard: PanelsTopLeft,
-  character_design: UserRound,
-  social_cover: LayoutTemplate,
-  product_video: Video,
-  scene_concept: Mountain,
-}
+/** 一轮对话里最多自动来回的次数，防止模型不停调用工具 */
+const MAX_AGENT_ROUNDS = 3
 
 interface AgentPanelProps {
   onClose?: () => void
-}
-
-interface PendingImageRequest {
-  id: string
-  prompt: string
-  contextNodeIds: string[]
-}
-
-interface PendingVideoRequest {
-  id: string
-  prompt: string
-  contextNodeIds: string[]
-  sourceImageNodeIds?: string[]
-}
-
-interface PendingEditRequest {
-  id: string
-  prompt: string
-  editType: 'style_transfer' | 'modify' | 'remove_bg'
-  contextNodeIds: string[]
 }
 
 function uniqueModels(models: string[]): string[] {
@@ -179,47 +65,30 @@ function nodeTitle(node: { id: string; type?: string; data: unknown }): string {
 }
 
 function getMentionQuery(value: string): string | null {
-  const match = value.match(/(?:^|\s)@([\u4e00-\u9fa5\w-]*)$/)
+  const match = value.match(/(?:^|\s)@([一-龥\w-]*)$/)
   return match ? match[1] : null
 }
 
-function conversationHistoryForRequest(userIdea: string): AgentConversationTurn[] {
-  const messages = useAgentStore.getState().messages
-  const lastMessage = messages.at(-1)
-  const priorMessages =
-    lastMessage?.role === 'user' && lastMessage.content.trim() === userIdea.trim()
-      ? messages.slice(0, -1)
-      : messages
+function createMessageId(): string {
+  return `agent_msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
 
-  return priorMessages.slice(-12).flatMap<AgentConversationTurn>((message) => {
-    if (message.role !== 'user' && message.role !== 'assistant') return []
-    const content =
-      message.role === 'assistant' && message.optimizedPrompt
-        ? message.content + '\n已给出的提示词：' + message.optimizedPrompt
-        : message.content
-    return [{ role: message.role, content }]
-  })
+/** 还没有执行结果的工具调用（手动模式下等待确认的就是这些） */
+function pendingActionsOf(message: AgentMessage): AgentToolCall[] {
+  const doneIds = new Set((message.actionResults ?? []).map((result) => result.callId))
+  return (message.actions ?? []).filter((action) => !doneIds.has(action.id))
 }
 
 export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const nodes = useCanvasStore((s) => s.nodes)
-  const edges = useCanvasStore((s) => s.edges)
   const selectedNodeId = useCanvasStore((s) => s.selectedNodeId)
-  const addNode = useCanvasStore((s) => s.addNode)
-  const updateNodeData = useCanvasStore((s) => s.updateNodeData)
-  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
-  const onConnect = useCanvasStore((s) => s.onConnect)
   const messages = useAgentStore((s) => s.messages)
   const loading = useAgentStore((s) => s.loading)
   const error = useAgentStore((s) => s.error)
-  const role = useAgentStore((s) => s.role)
-  const setRole = useAgentStore((s) => s.setRole)
-  const appendAssistant = useAgentStore((s) => s.appendAssistant)
   const setLoading = useAgentStore((s) => s.setLoading)
   const setError = useAgentStore((s) => s.setError)
-  const generationResults = useAgentStore((s) => s.generationResults)
-  const addGenerationResult = useAgentStore((s) => s.addGenerationResult)
-  const clearGenerationResults = useAgentStore((s) => s.clearGenerationResults)
+  const executionMode = useAgentStore((s) => s.executionMode)
+  const setExecutionMode = useAgentStore((s) => s.setExecutionMode)
   const activeConversationId = useAgentStore((s) => s.activeConversationId)
   const conversations = useAgentStore((s) => s.conversations)
   const newConversation = useAgentStore((s) => s.newConversation)
@@ -228,14 +97,37 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const setActiveProject = useAgentStore((s) => s.setActiveProject)
   const currentFlowId = useFlowStore((s) => s.currentFlowId)
   const settings = useSettingsStore((s) => s.settings)
-  const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
-  const { screenToFlowPosition, setCenter } = useReactFlow()
-  const imageModelOptions = useMemo(
-    () => getConfiguredImageModels(settings?.imageModels, undefined, settings?.modelConfigs),
-    [settings?.imageModels, settings?.modelConfigs],
-  )
-  const defaultImageModelId = useMemo(
+  const { screenToFlowPosition } = useReactFlow()
+
+  const [draft, setDraft] = useState('')
+  const [panelWidth, setPanelWidth] = useState(420)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [modelOpen, setModelOpen] = useState(false)
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
+  const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
+  const [pickingCanvasNode, setPickingCanvasNode] = useState(false)
+  const [executingMessageId, setExecutingMessageId] = useState<string | null>(null)
+  // 手动模式下，待确认的图片参数覆盖（模型/比例/清晰度），key 为 action id
+  const [paramOverrides, setParamOverrides] = useState<
+    Record<string, { aspectRatio?: string; resolution?: string; model?: string }>
+  >({})
+  const [openParamSelect, setOpenParamSelect] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  const configuredCurrentModel = settings?.llmModel || ''
+  const models = useMemo(() => {
+    const configured = getConfiguredChatModels(
+      settings?.llmModels,
+      configuredCurrentModel,
+      settings?.modelConfigs,
+    )
+    return uniqueModels(configured)
+  }, [configuredCurrentModel, settings?.llmModels, settings?.modelConfigs])
+  const currentModel = models.includes(configuredCurrentModel)
+    ? configuredCurrentModel
+    : models[0] ?? ''
+  const defaultImageModel = useMemo(
     () =>
       getConfiguredDefaultImageModel(
         settings?.imageModels,
@@ -245,230 +137,94 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       ),
     [settings?.defaultModel, settings?.imageModels, settings?.modelConfigs],
   )
+  // 图片/视频模型列表来自设置,两套严格分开,绝不混用
+  const imageModelOptions = useMemo(
+    () =>
+      getConfiguredImageModels(
+        settings?.imageModels,
+        undefined,
+        settings?.modelConfigs,
+      ).map((option) => ({ value: option.id, label: option.label })),
+    [settings?.imageModels, settings?.modelConfigs],
+  )
   const videoModelOptions = useMemo(
-    () => getConfiguredVideoModels(settings?.videoModels, settings?.modelConfigs),
+    () =>
+      getConfiguredVideoModels(
+        settings?.videoModels,
+        settings?.modelConfigs,
+      ).map((option) => ({ value: option.id, label: option.label })),
     [settings?.videoModels, settings?.modelConfigs],
   )
-  const defaultVideoModelId = useMemo(
+  const defaultVideoModel = useMemo(
     () =>
       getConfiguredDefaultVideoModel(
         settings?.videoModels,
         settings?.defaultVideoModel,
         settings?.modelConfigs,
       ),
-    [settings?.defaultVideoModel, settings?.videoModels, settings?.modelConfigs],
+    [settings?.videoModels, settings?.defaultVideoModel, settings?.modelConfigs],
   )
-  const [draft, setDraft] = useState('')
-  const [panelWidth, setPanelWidth] = useState(420)
-  const [rolePickerOpen, setRolePickerOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [templatePickerOpen, setTemplatePickerOpen] = useState(false)
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
-  const [modelOpen, setModelOpen] = useState(false)
-  const [models, setModels] = useState<string[]>([])
-  const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
-  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
-  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([])
-  const [pickingCanvasNode, setPickingCanvasNode] = useState(false)
-  const [pendingImageRequest, setPendingImageRequest] =
-    useState<PendingImageRequest | null>(null)
-  const [imageGenerationParams, setImageGenerationParams] =
-    useState<AgentImageGenerationParams>({
-      model: defaultImageModelId,
-      aspectRatio: '1:1',
-      resolution: '2K',
-      count: 1,
-    })
-  const [openImageParamMenu, setOpenImageParamMenu] =
-    useState<'model' | 'ratio' | 'resolution' | 'count' | null>(null)
-  const selectedAgentImageModel = imageModelOptions.find(
-    (model) => model.id === imageGenerationParams.model,
+  const imageModelIds = useMemo(
+    () => imageModelOptions.map((option) => option.value),
+    [imageModelOptions],
   )
-  const activeAgentImageModelNeedsJimeng =
-    shouldRequireJimengCliForImageModel(imageGenerationParams.model)
-  const [imageGenerationStatus, setImageGenerationStatus] = useState('')
-  const [pendingVideoRequest, setPendingVideoRequest] =
-    useState<PendingVideoRequest | null>(null)
-  const [videoGenerationParams, setVideoGenerationParams] =
-    useState<AgentVideoGenerationParams>({
-      model: defaultVideoModelId,
-      mode: 'image_to_video',
-      aspectRatio: '16:9',
-      resolution: '720P',
-      durationSeconds: 5,
-      count: 1,
-      quality: 'standard',
-    })
-  const unsupportedAgentVideoModelMessage = useMemo(
-    () => getUnsupportedVideoModelMessage(videoGenerationParams.model),
-    [videoGenerationParams.model],
+  const videoModelIds = useMemo(
+    () => videoModelOptions.map((option) => option.value),
+    [videoModelOptions],
   )
-  const activeAgentVideoModelNeedsJimeng = videoModelNeedsJimeng(
-    videoGenerationParams.model,
-  )
-  const [videoGenerationStatus, setVideoGenerationStatus] = useState('')
-  const [pendingEditRequest, setPendingEditRequest] =
-    useState<PendingEditRequest | null>(null)
-  const [editGenerationStatus, setEditGenerationStatus] = useState('')
-  const [skillStep, setSkillStep] = useState<'idle' | 'loading' | 'image' | 'video' | 'story' | 'edit' | 'done'>('idle')
-  const [expandedThinkingIds, setExpandedThinkingIds] = useState<Set<string>>(new Set())
-  const [voiceStatus, setVoiceStatus] = useState('')
-  const selectedTemplate = AGENT_TEMPLATES.find(
-    (template) => template.id === selectedTemplateId,
+  const aspectRatioOptions = useMemo(
+    () => AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => ({ value: ratio, label: ratio })),
+    [],
   )
 
-  const resetConversationUi = useCallback(() => {
-    setDraft('')
-    setMentionedNodeIds([])
-    setPendingImageRequest(null)
-    setPendingVideoRequest(null)
-    setPendingEditRequest(null)
-    setImageGenerationStatus('')
-    setOpenImageParamMenu(null)
-    setVideoGenerationStatus('')
-    setEditGenerationStatus('')
-    setSkillStep('idle')
-    setExpandedThinkingIds(new Set())
-    setVoiceStatus('')
-    setRolePickerOpen(false)
-    setTemplatePickerOpen(false)
-    setSelectedTemplateId(null)
-    setModelOpen(false)
-    setSkillPickerOpen(false)
-    setPickingCanvasNode(false)
-  }, [])
-
-  useEffect(() => {
-    setActiveProject(currentFlowId)
-    resetConversationUi()
-    setHistoryOpen(false)
-  }, [currentFlowId, resetConversationUi, setActiveProject])
-
-  const configuredCurrentModel = settings?.llmModel || ''
-  const preferredModels = useMemo(() => {
-    const configured = getConfiguredChatModels(
-      settings?.llmModels,
-      configuredCurrentModel,
-      settings?.modelConfigs,
-    )
-    return uniqueModels(configured)
-  }, [configuredCurrentModel, settings?.llmModels, settings?.modelConfigs])
-  const currentModel = preferredModels.includes(configuredCurrentModel)
-    ? configuredCurrentModel
-    : preferredModels[0] ?? ''
-  const mentionQuery = getMentionQuery(draft)
   const maxPanelWidth =
     typeof window === 'undefined'
       ? 1120
       : Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth * MAX_PANEL_WIDTH_RATIO))
 
   useEffect(() => {
-    setModels(preferredModels)
-  }, [currentModel, preferredModels])
-
-  useEffect(() => {
     setPanelWidth((value) => clamp(value, MIN_PANEL_WIDTH, maxPanelWidth))
   }, [maxPanelWidth])
 
   useEffect(() => {
-    const [defaultWidth, defaultHeight] = (settings?.defaultSize ?? '')
-      .split('x')
-      .map(Number)
-    setImageGenerationParams((params) => {
-      const model = imageModelOptions.some((option) => option.id === params.model)
-        ? params.model
-        : defaultImageModelId
-      return resolveAgentImageGenerationParams(
-        { ...params, model },
-        {
-          width: Number.isFinite(defaultWidth) ? defaultWidth : undefined,
-          height: Number.isFinite(defaultHeight) ? defaultHeight : undefined,
-        },
-        imageModelOptions.map((option) => option.id),
-      )
-    })
-  }, [defaultImageModelId, imageModelOptions, settings?.defaultSize])
+    setActiveProject(currentFlowId)
+    setMentionedNodeIds([])
+    setPickingCanvasNode(false)
+    setHistoryOpen(false)
+  }, [currentFlowId, setActiveProject])
 
+  // 新消息或加载状态变化时滚动到底部
   useEffect(() => {
-    setVideoGenerationParams((params) => ({
-      ...params,
-      model: videoModelOptions.some((model) => model.id === params.model)
-        ? params.model
-        : defaultVideoModelId,
-    }))
-  }, [defaultVideoModelId, videoModelOptions])
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages, loading])
 
-  // 点击外部关闭角色选择器
+  // 点击面板外部时关闭模型菜单与执行模式菜单
   useEffect(() => {
-    if (!rolePickerOpen) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.agent-role-dropdown') && !target.closest('.agent-role-pill')) {
-        setRolePickerOpen(false)
-      }
+    if (!modelOpen && !modeMenuOpen) return
+    const closeMenus = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      if (target?.closest('.agent-model-picker')) return
+      setModelOpen(false)
+      setModeMenuOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [rolePickerOpen])
-
-  useEffect(() => {
-    if (!modelOpen) return
-    const closeModel = (event: MouseEvent) => {
-      const target = event.target as HTMLElement
-      if (!target.closest('.agent-model-picker')) {
-        setModelOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', closeModel)
-    return () => document.removeEventListener('mousedown', closeModel)
-  }, [modelOpen])
+    document.addEventListener('mousedown', closeMenus)
+    return () => document.removeEventListener('mousedown', closeMenus)
+  }, [modelOpen, modeMenuOpen])
 
   useEffect(() => {
     if (!historyOpen) return
     const closeHistory = (event: MouseEvent) => {
-      const target = event.target as HTMLElement
-      if (
-        !target.closest('.agent-conversation-history') &&
-        !target.closest('.agent-history-btn')
-      ) {
-        setHistoryOpen(false)
-      }
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setHistoryOpen(false)
+      const target = event.target as Element | null
+      if (target?.closest('.agent-conversation-history')) return
+      if (target?.closest('.agent-history-btn')) return
+      setHistoryOpen(false)
     }
     document.addEventListener('mousedown', closeHistory)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('mousedown', closeHistory)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
+    return () => document.removeEventListener('mousedown', closeHistory)
   }, [historyOpen])
 
-  useEffect(() => {
-    if (!templatePickerOpen) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('.agent-template-dropdown') && !target.closest('.agent-template-btn')) {
-        setTemplatePickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [templatePickerOpen])
-
-  useEffect(() => {
-    if (!skillPickerOpen) return
-    const handler = (event: MouseEvent) => {
-      const target = event.target as HTMLElement
-      if (!target.closest('.agent-action-picker')) {
-        setSkillPickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [skillPickerOpen])
-
+  const mentionQuery = getMentionQuery(draft)
   const mentionOptions = useMemo(() => {
     const query = (mentionQuery ?? '').toLowerCase()
     return nodes
@@ -479,40 +235,11 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       .slice(0, 8)
   }, [mentionQuery, nodes])
 
-  const activeSkills = useMemo(() => {
-    return activeSkillIds
-      .map(getAgentSkillById)
-      .filter((skill): skill is AgentSkillDefinition => !!skill)
-  }, [activeSkillIds])
-
   const selectedMentionNodes = useMemo(() => {
     return mentionedNodeIds
       .map((id) => nodes.find((node) => node.id === id))
       .filter((node): node is (typeof nodes)[number] => !!node)
   }, [mentionedNodeIds, nodes])
-
-  const contextNodeTypes = useMemo(() => {
-    const ids = mentionedNodeIds.length > 0
-      ? mentionedNodeIds
-      : selectedNodeId
-        ? [selectedNodeId]
-        : []
-    return ids
-      .map((id) => nodes.find((node) => node.id === id)?.type)
-      .filter((type): type is string => typeof type === 'string')
-  }, [mentionedNodeIds, nodes, selectedNodeId])
-
-  const recommendedSkillIds = useMemo(
-    () => getRecommendedAgentSkillIds(draft, contextNodeTypes),
-    [contextNodeTypes, draft],
-  )
-
-  const activeSkillInputIssue = useMemo(
-    () => activeSkills
-      .map((skill) => getAgentSkillInputIssue(skill, contextNodeTypes))
-      .find((issue): issue is string => !!issue) ?? null,
-    [activeSkills, contextNodeTypes],
-  )
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -533,7 +260,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     if (!node) return
     const title = nodeTitle(node)
     setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
-    setDraft((value) => value.replace(/(?:^|\s)@[\u4e00-\u9fa5\w-]*$/, (match) => {
+    setDraft((value) => value.replace(/(?:^|\s)@[一-龥\w-]*$/, (match) => {
       const prefix = match.startsWith(' ') ? ' ' : ''
       return `${prefix}@${title} `
     }))
@@ -543,48 +270,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     setMentionedNodeIds((ids) => ids.filter((id) => id !== nodeId))
   }
 
-  const toggleSkill = (skillId: string) => {
-    if (activeSkillIds.includes(skillId)) {
-      setActiveSkillIds((ids) => ids.filter((id) => id !== skillId))
-      setVoiceStatus('')
-      setError(undefined)
-      return
-    }
-    if (activeSkillIds.length >= MAX_ACTIVE_AGENT_SKILLS) {
-      setVoiceStatus(`一次最多组合 ${MAX_ACTIVE_AGENT_SKILLS} 个技能`)
-      return
-    }
-    const skill = getAgentSkillById(skillId)
-    if (!skill) return
-    setActiveSkillIds((ids) => [...ids, skillId])
-    const issue = getAgentSkillInputIssue(skill, contextNodeTypes)
-    setVoiceStatus(
-      issue
-        ? `${skill.label}已加入技能链，${issue.replace(`${skill.label}需要`, '还需要')}`
-        : `${skill.label}已加入技能链`,
-    )
-  }
-
-  const removeSkill = (skillId: string) => {
-    setActiveSkillIds((ids) => ids.filter((id) => id !== skillId))
-    setVoiceStatus('')
-    setError(undefined)
-  }
-
   const attachCanvasNode = useCallback((nodeId: string) => {
     const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId)
     if (!node) return
-
     setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
-    setDraft((value) =>
-      value.trim() ? value : '请结合引用的画布节点继续创作：',
-    )
-    setVoiceStatus(`已选择 ${nodeTitle(node)}，可继续选择其他节点`)
+    setDraft((value) => (value.trim() ? value : '请结合引用的画布节点继续创作：'))
   }, [])
 
+  // 画布点选模式：点击任意节点即加入引用，Esc 退出
   useEffect(() => {
     document.body.classList.toggle('agent-pick-node-active', pickingCanvasNode)
-
     if (!pickingCanvasNode) {
       return () => {
         document.body.classList.remove('agent-pick-node-active')
@@ -595,23 +290,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       const target = event.target as Element | null
       const wrapper = target?.closest('[data-flow-node-id]') as HTMLElement | null
       if (!wrapper) return
-
       event.preventDefault()
       event.stopPropagation()
       const nodeId = wrapper.dataset.flowNodeId
       if (nodeId) attachCanvasNode(nodeId)
     }
-
     const handleCancel = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPickingCanvasNode(false)
-        setVoiceStatus('')
-      }
+      if (event.key === 'Escape') setPickingCanvasNode(false)
     }
 
     document.addEventListener('click', handlePick, true)
     window.addEventListener('keydown', handleCancel)
-
     return () => {
       document.body.classList.remove('agent-pick-node-active')
       document.removeEventListener('click', handlePick, true)
@@ -619,39 +308,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     }
   }, [attachCanvasNode, pickingCanvasNode])
 
-  const currentContextNodeIds = () =>
-    mentionedNodeIds.length > 0
-      ? mentionedNodeIds
-      : selectedNodeId
-        ? [selectedNodeId]
-        : []
-
-  const appendUserMessage = (
-    message: string,
-    contextNodeIds: string[],
-    requestIdea = message,
-  ) => {
-    useAgentStore.setState((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          id: `agent_msg_${Date.now()}_${state.messages.length}`,
-          role: 'user' as const,
-          content: message,
-          contextNodeIds,
-          selectedNodeId: selectedNodeId ?? undefined,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-      lastRequest: {
-        userIdea: requestIdea,
-        contextNodeIds,
-        selectedNodeId: selectedNodeId ?? undefined,
-      },
-    }))
-  }
-
-  const getCanvasDropPosition = () => {
+  const getDropPosition = useCallback(() => {
     const canvasEl = document.querySelector('.react-flow') as HTMLElement | null
     if (!canvasEl) return { x: 260, y: 220 }
     const rect = canvasEl.getBoundingClientRect()
@@ -659,1166 +316,175 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       x: rect.left + rect.width * 0.5,
       y: rect.top + rect.height * 0.48,
     })
-  }
-
-  const createAdditionalImageNodes = (
-    sourceNodeId: string,
-    results: GenerationResult[],
-    startIndex: number = 1,
-  ) => {
-    const current = useCanvasStore
-      .getState()
-      .nodes.find((node) => node.id === sourceNodeId)
-    const baseX = (current?.position?.x ?? 0) + 300
-    const baseY = current?.position?.y ?? 0
-    const nodeIds: string[] = []
-    const assetIds: string[] = []
-    results.slice(startIndex).forEach((result, index) => {
-      if (!result.assetId) return
-      assetIds.push(result.assetId)
-      const imageNodeId = addNode('image', {
-        x: baseX + index * 260,
-        y: baseY,
-      })
-      if (!imageNodeId) return
-      updateNodeData(imageNodeId, {
-        assetId: result.assetId,
-      } as unknown as Partial<BaseNodeData>)
-      onConnect({
-        source: sourceNodeId,
-        target: imageNodeId,
-        sourceHandle: null,
-        targetHandle: null,
-      })
-      nodeIds.push(imageNodeId)
-    })
-    return { assetIds, nodeIds }
-  }
-
-  const startAgentImageGeneration = async (generate = true) => {
-    if (!pendingImageRequest) return
-    if (!selectedAgentImageModel) {
-      setImageGenerationStatus('请先在设置中添加并选择图片生成模型')
-      return
-    }
-    if (generate && activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
-      setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
-      return
-    }
-
-    const size = getAgentImageDimensions(
-      imageGenerationParams.aspectRatio,
-      imageGenerationParams.resolution,
-    )
-    const contextNodes = pendingImageRequest.contextNodeIds
-      .map((id) => nodes.find((node) => node.id === id))
-      .filter((node): node is (typeof nodes)[number] => !!node)
-    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
-    const inputImageAssetIds = imageContextNodes
-      .map((node) => (node.data as { assetId?: string }).assetId)
-      .filter((assetId): assetId is string => !!assetId)
-    const skillHint =
-      activeSkills.length > 0
-        ? `\n\n技能要求：${activeSkills
-            .map((skill) => `${skill.label}：${skill.instruction}`)
-            .join('；')}`
-        : ''
-    const prompt = prepareAgentImagePrompt(`${pendingImageRequest.prompt}${skillHint}`)
-
-    const dropPosition = getCanvasDropPosition()
-    const imageNodeId = addNode('image', dropPosition)
-    if (!imageNodeId) return
-
-    imageContextNodes.forEach((node) => {
-      onConnect({
-        source: node.id,
-        target: imageNodeId,
-        sourceHandle: null,
-        targetHandle: null,
-      })
-    })
-
-    const request: GenerationRequest = {
-      flowId: resolveGenerationFlowId(getCurrentFlowId()),
-      nodeId: imageNodeId,
-      mediaType: 'image',
-      prompt,
-      inputImages: inputImageAssetIds,
-      model: imageGenerationParams.model,
-      width: size.width,
-      height: size.height,
-      count: imageGenerationParams.count,
-      seed: null,
-    }
-
-    const generateStore = useGenerateStore.getState()
-    generateStore.setLastRequest(imageNodeId, request)
-    generateStore.setStatus(imageNodeId, generate ? 'queued' : 'idle')
-    generateStore.setError(imageNodeId, undefined)
-    updateNodeData(imageNodeId, {
-      prompt,
-      model: imageGenerationParams.model,
-      width: size.width,
-      height: size.height,
-      count: imageGenerationParams.count,
-      seed: null,
-      inputImageAssetIds,
-      status: generate ? 'running' : 'idle',
-      error: undefined,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
-    if (!generate) {
-      setSelectedNode(imageNodeId)
-      setPendingImageRequest(null)
-      setImageGenerationStatus('')
-      setSkillStep('done')
-      setVoiceStatus('已发送图片节点到画布，可在节点上继续生成')
-      return
-    }
-
-
-    setImageGenerationStatus('已在画布创建图片节点，正在生成...')
-
-    try {
-      const response = await createGeneration(request)
-      generateStore.setGenerationId(imageNodeId, response.id)
-
-      // 订阅 SSE 实时获取状态更新
-      const unsubscribe = subscribeGeneration(response.id, {
-        onUpdate: (data) => {
-          generateStore.setStatus(imageNodeId, data.status)
-          if (data.error) generateStore.setError(imageNodeId, data.error)
-          updateNodeData(imageNodeId, {
-            status: data.status,
-            error: data.error,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          const statusText =
-            data.status === 'queued' ? '已排队...' :
-            data.status === 'running' ? '生成中...' :
-            data.status === 'success' ? '生成完成' :
-            data.status === 'error' ? '生成失败' : '处理中'
-          setImageGenerationStatus(statusText)
-        },
-        onComplete: (data) => {
-          const results = data.results ?? []
-          const firstAssetId = results[0]?.assetId
-          const outputAssetIds = results.map(r => r.assetId).filter((id): id is string => !!id)
-          const additionalNodes = createAdditionalImageNodes(imageNodeId, results)
-          const allNodeIds = [imageNodeId, ...additionalNodes.nodeIds]
-
-          generateStore.setStatus(imageNodeId, data.status)
-          if (data.error) generateStore.setError(imageNodeId, data.error)
-          updateNodeData(imageNodeId, {
-            status: data.status,
-            error: data.error,
-            assetId: firstAssetId,
-            outputAssetIds,
-            generationId: data.id,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          setPendingImageRequest(null)
-          setImageGenerationStatus('已生成并写入画布')
-
-          // 添加结果到画廊
-          outputAssetIds.forEach((assetId) => {
-            addGenerationResult({ assetId, type: 'image', prompt: pendingImageRequest.prompt })
-          })
-          if (outputAssetIds.length > 0) {
-            useAgentStore.getState().setConversationContext({
-              lastGeneratedAssetIds: outputAssetIds,
-            })
-          }
-
-          // 如果 intent 是 image_then_video，图片生成完成后自动触发视频生成
-          const lastIntent = useAgentStore.getState().lastResponse?.intent
-          if (lastIntent === 'image_then_video') {
-            setTimeout(() => {
-              setPendingVideoRequest({
-                id: `video_auto_${Date.now()}`,
-                prompt: pendingImageRequest.prompt,
-                contextNodeIds: pendingImageRequest.contextNodeIds,
-                sourceImageNodeIds: allNodeIds,
-              })
-              setVideoGenerationStatus('')
-              setSkillStep('video')
-            }, 400)
-          }
-          unsubscribe()
-        },
-        onError: (error) => {
-          generateStore.setError(imageNodeId, error)
-          updateNodeData(imageNodeId, {
-            status: 'error',
-            error,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          setImageGenerationStatus(error)
-          unsubscribe()
-        },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      generateStore.setError(imageNodeId, message)
-      updateNodeData(imageNodeId, {
-        status: 'error',
-        error: message,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setImageGenerationStatus(message)
-    }
-  }
-
-  const startAgentVideoGeneration = async (generate = true) => {
-    if (!pendingVideoRequest) return
-    if (generate && activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
-      setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
-      return
-    }
-    if (generate && unsupportedAgentVideoModelMessage) {
-      setVideoGenerationStatus(unsupportedAgentVideoModelMessage)
-      return
-    }
-
-    const {
-      nodes: inputImageNodes,
-      assetIds: inputImageAssetIds,
-    } = getAgentVideoInputImageNodes({
-      contextNodeIds: pendingVideoRequest.contextNodeIds,
-      sourceImageNodeIds: pendingVideoRequest.sourceImageNodeIds,
-      nodes,
-    })
-
-    const skillHint =
-      activeSkills.length > 0
-        ? `\n\n技能要求：${activeSkills
-            .map((skill) => `${skill.label}：${skill.instruction}`)
-            .join('；')}`
-        : ''
-    const prompt = `${pendingVideoRequest.prompt}${skillHint}`
-
-    const existingVideoNodeId = selectAgentVideoTargetNodeId(
-      pendingVideoRequest.contextNodeIds,
-      nodes,
-    )
-    const videoNodeId =
-      existingVideoNodeId ?? addNode('video', getCanvasDropPosition())
-    if (!videoNodeId) return
-
-    inputImageNodes.forEach((node) => {
-      const hasExistingEdge = edges.some(
-        (edge) => edge.source === node.id && edge.target === videoNodeId,
-      )
-      if (hasExistingEdge) return
-      onConnect({
-        source: node.id,
-        target: videoNodeId,
-        sourceHandle: null,
-        targetHandle: null,
-      })
-    })
-
-    const videoMode = resolveAgentVideoMode(
-      videoGenerationParams.mode,
-      inputImageAssetIds,
-    )
-    const request: VideoGenerationRequest = {
-      flowId: resolveGenerationFlowId(getCurrentFlowId()),
-      nodeId: videoNodeId,
-      mediaType: 'video',
-      mode: videoMode,
-      prompt,
-      inputImages: inputImageAssetIds,
-      references: buildAgentVideoReferences(videoGenerationParams.mode, inputImageAssetIds),
-      model: videoGenerationParams.model,
-      aspectRatio: videoGenerationParams.aspectRatio,
-      resolution: videoGenerationParams.resolution,
-      quality: videoGenerationParams.quality,
-      durationSeconds: videoGenerationParams.durationSeconds,
-      count: videoGenerationParams.count,
-      generateAudio: true,
-    }
-
-    const generateStore = useGenerateStore.getState()
-    generateStore.setLastRequest(videoNodeId, request)
-    generateStore.setStatus(videoNodeId, generate ? 'running' : 'idle')
-    generateStore.setError(videoNodeId, undefined)
-    const latestVideoData = useCanvasStore
-      .getState()
-      .nodes.find((node) => node.id === videoNodeId)
-      ?.data as Partial<VideoNodeData> | undefined
-    const videoNodePatch = buildAgentVideoRunningPatch(
-      request,
-      latestVideoData ?? {},
-    )
-    updateNodeData(
-      videoNodeId,
-      {
-        ...videoNodePatch,
-        status: generate ? 'running' : 'idle',
-      } as unknown as Partial<BaseNodeData>,
-    )
-
-    if (!generate) {
-      setSelectedNode(videoNodeId)
-      setPendingVideoRequest(null)
-      setVideoGenerationStatus('')
-      setSkillStep('done')
-      setVoiceStatus('已发送视频节点到画布，可在节点上继续生成')
-      return
-    }
-
-    setVideoGenerationStatus(
-      existingVideoNodeId
-        ? '已使用当前视频节点继续抽卡...'
-        : '已在画布创建视频节点，正在生成...',
-    )
-
-    try {
-      const response = await createGeneration(request)
-      generateStore.setGenerationId(videoNodeId, response.id)
-
-      // 订阅 SSE 实时获取状态更新
-      const unsubscribe = subscribeGeneration(response.id, {
-        onUpdate: (data) => {
-          generateStore.setStatus(videoNodeId, data.status)
-          if (data.error) generateStore.setError(videoNodeId, data.error)
-          updateNodeData(videoNodeId, {
-            status: data.status,
-            error: data.error,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          const statusText =
-            data.status === 'queued' ? '已排队...' :
-            data.status === 'running' ? '生成中...' :
-            data.status === 'success' ? '生成完成' :
-            data.status === 'error' ? '生成失败' : '处理中'
-          setVideoGenerationStatus(statusText)
-        },
-        onComplete: (data) => {
-          const latestVideoData = useCanvasStore
-            .getState()
-            .nodes.find((node) => node.id === videoNodeId)
-            ?.data as { assetIds?: unknown; generationRuns?: unknown } | undefined
-          const currentAssetIds = Array.isArray(latestVideoData?.assetIds)
-            ? latestVideoData.assetIds.filter(
-                (assetId): assetId is string => typeof assetId === 'string',
-              )
-            : []
-          const completionPatch = buildAgentVideoCompletionPatch(
-            data,
-            request,
-            latestVideoData?.generationRuns,
-            undefined,
-            currentAssetIds,
-          )
-
-          generateStore.setStatus(videoNodeId, data.status)
-          if (data.error) generateStore.setError(videoNodeId, data.error)
-          updateNodeData(
-            videoNodeId,
-            completionPatch as unknown as Partial<BaseNodeData>,
-          )
-          setPendingVideoRequest(null)
-          setVideoGenerationStatus('已生成并写入画布')
-          setSkillStep('done')
-
-          // 添加结果到画廊
-          getAgentVideoGeneratedAssetIds(data).forEach((assetId) => {
-            addGenerationResult({ assetId, type: 'video', prompt: pendingVideoRequest.prompt })
-          })
-          unsubscribe()
-        },
-        onError: (error) => {
-          generateStore.setError(videoNodeId, error)
-          updateNodeData(videoNodeId, {
-            status: 'error',
-            error,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          setVideoGenerationStatus(error)
-          unsubscribe()
-        },
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      generateStore.setError(videoNodeId, message)
-      updateNodeData(videoNodeId, {
-        status: 'error',
-        error: message,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setVideoGenerationStatus(message)
-    }
-  }
-
-  const startAgentEditGeneration = async () => {
-    if (!pendingEditRequest) return
-    if (
-      shouldBlockAgentImageEditGeneration(
-        imageGenerationParams.model,
-        isJimengConfigured,
-      )
-    ) {
-      setEditGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
-      return
-    }
-
-    const contextNodes = pendingEditRequest.contextNodeIds
-      .map((id) => nodes.find((node) => node.id === id))
-      .filter((node): node is (typeof nodes)[number] => !!node)
-    const imageContextNodes = contextNodes.filter((node) => node.type === 'image')
-    const inputImageAssetIds = imageContextNodes
-      .map((node) => (node.data as { assetId?: string }).assetId)
-      .filter((assetId): assetId is string => !!assetId)
-
-    if (inputImageAssetIds.length === 0) {
-      setEditGenerationStatus('未找到输入图片，请先引用画布上的图片节点')
-      return
-    }
-
-    const inputImageAssetId = inputImageAssetIds[0]
-
-    const imageNodeId = addNode('image', getCanvasDropPosition())
-    if (!imageNodeId) return
-
-    imageContextNodes.forEach((node) => {
-      onConnect({
-        source: node.id,
-        target: imageNodeId,
-        sourceHandle: null,
-        targetHandle: null,
-      })
-    })
-
-    const size = getAgentImageDimensions(
-      imageGenerationParams.aspectRatio,
-      imageGenerationParams.resolution,
-    )
-
-    const generateStore = useGenerateStore.getState()
-    generateStore.setStatus(imageNodeId, 'queued')
-    generateStore.setError(imageNodeId, undefined)
-    updateNodeData(imageNodeId, {
-      prompt: pendingEditRequest.prompt,
-      model: imageGenerationParams.model,
-      width: size.width,
-      height: size.height,
-      count: 1,
-      seed: null,
-      inputImageAssetIds,
-      status: 'queued',
-      error: undefined,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
-
-    setEditGenerationStatus('已在画布创建图片节点，正在生成...')
-
-    try {
-      const response = await createEditGeneration({
-        inputImage: inputImageAssetId,
-        editType: pendingEditRequest.editType,
-        prompt: pendingEditRequest.editType === 'remove_bg' ? undefined : pendingEditRequest.prompt,
-        model: imageGenerationParams.model,
-        width: size.width,
-        height: size.height,
-        flowId: resolveGenerationFlowId(getCurrentFlowId()),
-        nodeId: imageNodeId,
-      })
-      generateStore.setGenerationId(imageNodeId, response.id)
-      const results = response.results ?? []
-      const firstAssetId = results[0]?.assetId
-      const outputAssetIds = results.map(r => r.assetId).filter((id): id is string => !!id)
-      createAdditionalImageNodes(imageNodeId, results)
-
-      generateStore.setStatus(imageNodeId, response.status)
-      if (response.error) generateStore.setError(imageNodeId, response.error)
-      updateNodeData(imageNodeId, {
-        status: response.status,
-        error: response.error,
-        assetId: firstAssetId,
-        outputAssetIds,
-        generationId: response.id,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setPendingEditRequest(null)
-      setEditGenerationStatus('已生成并写入画布')
-      setSkillStep('done')
-
-      // 添加结果到画廊
-      outputAssetIds.forEach((assetId) => {
-        addGenerationResult({ assetId, type: 'image', prompt: pendingEditRequest.prompt })
-      })
-
-      if (outputAssetIds.length > 0) {
-        useAgentStore.getState().setConversationContext({
-          lastGeneratedAssetIds: outputAssetIds,
-        })
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      generateStore.setError(imageNodeId, message)
-      updateNodeData(imageNodeId, {
-        status: 'error',
-        error: message,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-      setEditGenerationStatus(message)
-    }
-  }
-
-  const startBatchImageGeneration = async (storyboard: StoryboardData) => {
-    if (activeAgentImageModelNeedsJimeng && !isJimengConfigured) {
-      setImageGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
-      return
-    }
-
-    const size = getAgentImageDimensions(
-      imageGenerationParams.aspectRatio,
-      imageGenerationParams.resolution,
-    )
-    const basePos = getCanvasDropPosition()
-    const imageNodeIds: string[] = []
-
-    // 1. 为每个镜头创建 image 节点
-    storyboard.items.forEach((item, index) => {
-      const nodeId = addNode('image', {
-        x: basePos.x + index * 260,
-        y: basePos.y,
-      })
-      if (nodeId) {
-        imageNodeIds.push(nodeId)
-        updateNodeData(nodeId, {
-          prompt: item.prompt,
-          model: imageGenerationParams.model,
-          width: size.width,
-          height: size.height,
-          count: 1,
-          seed: null,
-          status: 'queued',
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-      }
-    })
-
-    const generateStore = useGenerateStore.getState()
-    const newImageAssetIds: string[] = []
-
-    // 辅助函数：等待 SSE 完成
-    const waitForGeneration = (id: string): Promise<GenerationResponse> => {
-      return new Promise((resolve, reject) => {
-        const unsubscribe = subscribeGeneration(id, {
-          onComplete: (data) => { resolve(data); unsubscribe() },
-          onError: (error) => { reject(new Error(error)); unsubscribe() },
-        })
-      })
-    }
-
-    // 2. 串行生成每个镜头
-    for (let i = 0; i < storyboard.items.length; i++) {
-      const item = storyboard.items[i]
-      const currentImageNodeId = imageNodeIds[i]
-      if (!currentImageNodeId) continue
-
-      const inputImages: string[] = []
-
-      const request: GenerationRequest = {
-        flowId: resolveGenerationFlowId(getCurrentFlowId()),
-        nodeId: currentImageNodeId,
-        mediaType: 'image',
-        prompt: item.prompt,
-        inputImages,
-        model: imageGenerationParams.model,
-        width: size.width,
-        height: size.height,
-        count: 1,
-        seed: null,
-      }
-
-      generateStore.setLastRequest(currentImageNodeId, request)
-      generateStore.setStatus(currentImageNodeId, 'queued')
-      generateStore.setError(currentImageNodeId, undefined)
-      updateNodeData(currentImageNodeId, {
-        prompt: item.prompt,
-        model: imageGenerationParams.model,
-        width: size.width,
-        height: size.height,
-        count: 1,
-        seed: null,
-        inputImageAssetIds: inputImages,
-        status: 'running',
-        error: undefined,
-        updatedAt: new Date().toISOString(),
-      } as unknown as Partial<BaseNodeData>)
-
-      try {
-        const response = await createGeneration(request)
-        generateStore.setGenerationId(currentImageNodeId, response.id)
-
-        // 等待 SSE 完成
-        const finalResponse = await waitForGeneration(response.id)
-        const results = finalResponse.results ?? []
-        const firstAssetId = results[0]?.assetId
-        const assetIds = results
-          .map((result) => result.assetId)
-          .filter((assetId): assetId is string => !!assetId)
-
-        generateStore.setStatus(currentImageNodeId, finalResponse.status)
-        if (finalResponse.error) generateStore.setError(currentImageNodeId, finalResponse.error)
-
-        // 直接设置 assetId 到当前 image 节点
-        if (firstAssetId) {
-          updateNodeData(currentImageNodeId, {
-            status: finalResponse.status,
-            error: finalResponse.error,
-            assetId: firstAssetId,
-            outputAssetIds: assetIds,
-            generationId: finalResponse.id,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-          newImageAssetIds[i] = firstAssetId
-          // 添加结果到画廊
-          addGenerationResult({ assetId: firstAssetId, type: 'image', prompt: item.prompt })
-        } else {
-          updateNodeData(currentImageNodeId, {
-            status: finalResponse.status,
-            error: finalResponse.error,
-            outputAssetIds: assetIds,
-            generationId: finalResponse.id,
-            updatedAt: new Date().toISOString(),
-          } as unknown as Partial<BaseNodeData>)
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        generateStore.setError(currentImageNodeId, message)
-        updateNodeData(currentImageNodeId, {
-          status: 'error',
-          error: message,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-      }
-    }
-
-    // 3. 更新消息中的 storyboard imageAssetId
-    if (newImageAssetIds.length > 0) {
-      const lastMsg = useAgentStore.getState().messages[useAgentStore.getState().messages.length - 1]
-      if (lastMsg?.role === 'assistant' && lastMsg.storyboard) {
-        const updatedItems = lastMsg.storyboard.items.map((item, index) => ({
-          ...item,
-          imageAssetId: newImageAssetIds[index] ?? item.imageAssetId,
-          imageNodeId: imageNodeIds[index] ?? item.imageNodeId,
-        }))
-        useAgentStore.setState((state) => ({
-          messages: state.messages.map((msg) =>
-            msg.id === lastMsg.id
-              ? { ...msg, storyboard: { ...msg.storyboard!, items: updatedItems } }
-              : msg
-          ),
-        }))
-      }
-    }
-
-    setImageGenerationStatus('分镜图片已生成并写入画布')
-  }
-
-  const startBatchVideoGeneration = async (storyboard: StoryboardData) => {
-    if (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) {
-      setVideoGenerationStatus('未配置 dreamina CLI，请先在设置中配置后再生成')
-      return
-    }
-
-    const basePos = getCanvasDropPosition()
-    const videoNodeIds: string[] = []
-    const storyboardItemIds = storyboard.items.map((item) => item.id).join('|')
-    const storyboardMessageId = [...useAgentStore.getState().messages]
-      .reverse()
-      .find(
-        (message) =>
-          message.role === 'assistant' &&
-          message.storyboard?.items.map((item) => item.id).join('|') ===
-            storyboardItemIds,
-      )?.id
-
-    // 为每个有 imageAssetId 的镜头创建视频节点
-    for (let i = 0; i < storyboard.items.length; i++) {
-      const item = storyboard.items[i]
-      const currentNodes = useCanvasStore.getState().nodes
-      const source = getAgentStoryboardVideoSource({
-        imageAssetId: item.imageAssetId,
-        imageNodeId: item.imageNodeId,
-        nodes: currentNodes,
-      })
-      if (!source) continue
-      const nextItem = storyboard.items[i + 1]
-      const tailSource = nextItem
-        ? getAgentStoryboardVideoSource({
-            imageAssetId: nextItem.imageAssetId,
-            imageNodeId: nextItem.imageNodeId,
-            nodes: currentNodes,
-          })
-        : null
-      const referenceSources =
-        videoGenerationParams.mode === 'all_reference' ||
-        videoGenerationParams.mode === 'image_reference'
-          ? getAgentStoryboardVideoReferenceSources({
-              items: storyboard.items,
-              nodes: currentNodes,
-            })
-          : []
-
-      const existingVideoNodeId = getAgentStoryboardVideoTargetNodeId({
-        videoNodeId: item.videoNodeId,
-        nodes: currentNodes,
-      })
-      const videoNodeId =
-        existingVideoNodeId ??
-        addNode('video', {
-          x: basePos.x + i * 260,
-          y: basePos.y + 300,
-        })
-      if (!videoNodeId) continue
-
-      videoNodeIds.push(videoNodeId)
-      const media = buildAgentStoryboardVideoMedia({
-        requestedMode: videoGenerationParams.mode,
-        sourceAssetId: source.assetId,
-        tailAssetId: tailSource?.assetId,
-        referenceAssetIds: referenceSources.map((item) => item.assetId),
-      })
-      const candidateSources = [source, tailSource, ...referenceSources].filter(
-        (item): item is { assetId: string; nodeId: string | null } => !!item,
-      )
-      const sourceNodeIds = media.inputImages
-        .map(
-          (assetId) =>
-            candidateSources.find((item) => item.assetId === assetId)?.nodeId,
-        )
-        .filter((nodeId): nodeId is string => !!nodeId)
-      const uniqueSourceNodeIds = [...new Set(sourceNodeIds)]
-      uniqueSourceNodeIds.forEach((sourceNodeId) => {
-        const hasExistingEdge = useCanvasStore
-          .getState()
-          .edges.some(
-            (edge) => edge.source === sourceNodeId && edge.target === videoNodeId,
-          )
-        if (!hasExistingEdge) {
-          onConnect({
-            source: sourceNodeId,
-            target: videoNodeId,
-            sourceHandle: null,
-            targetHandle: null,
-          })
-        }
-      })
-
-      const request: VideoGenerationRequest = {
-        flowId: resolveGenerationFlowId(getCurrentFlowId()),
-        nodeId: videoNodeId,
-        mediaType: 'video',
-        mode: media.mode,
-        prompt: item.shotDescription,
-        inputImages: media.inputImages,
-        references: media.references,
-        model: videoGenerationParams.model,
-        aspectRatio: videoGenerationParams.aspectRatio,
-        resolution: videoGenerationParams.resolution,
-        quality: videoGenerationParams.quality,
-        durationSeconds: videoGenerationParams.durationSeconds,
-        count: 1,
-        generateAudio: true,
-      }
-
-      const generateStore = useGenerateStore.getState()
-      generateStore.setLastRequest(videoNodeId, request)
-      generateStore.setStatus(videoNodeId, 'running')
-      generateStore.setError(videoNodeId, undefined)
-      const latestVideoData = useCanvasStore
-        .getState()
-        .nodes.find((node) => node.id === videoNodeId)
-        ?.data as Partial<VideoNodeData> | undefined
-      updateNodeData(
-        videoNodeId,
-        buildAgentVideoRunningPatch(
-          request,
-          latestVideoData ?? {},
-        ) as unknown as Partial<BaseNodeData>,
-      )
-
-      try {
-        const response = await createGeneration(request)
-        generateStore.setGenerationId(videoNodeId, response.id)
-
-        // 等待 SSE 完成
-        const finalResponse = await new Promise<GenerationResponse>((resolve, reject) => {
-          const unsubscribe = subscribeGeneration(response.id, {
-            onComplete: (data) => { resolve(data); unsubscribe() },
-            onError: (error) => { reject(new Error(error)); unsubscribe() },
-          })
-        })
-        const latestVideoData = useCanvasStore
-          .getState()
-          .nodes.find((node) => node.id === videoNodeId)
-          ?.data as { assetIds?: unknown; generationRuns?: unknown } | undefined
-        const currentAssetIds = Array.isArray(latestVideoData?.assetIds)
-          ? latestVideoData.assetIds.filter(
-              (assetId): assetId is string => typeof assetId === 'string',
-            )
-          : []
-        const completionPatch = buildAgentVideoCompletionPatch(
-          finalResponse,
-          request,
-          latestVideoData?.generationRuns,
-          undefined,
-          currentAssetIds,
-        )
-
-        generateStore.setStatus(videoNodeId, finalResponse.status)
-        if (finalResponse.error) generateStore.setError(videoNodeId, finalResponse.error)
-        updateNodeData(
-          videoNodeId,
-          completionPatch as unknown as Partial<BaseNodeData>,
-        )
-        const generatedVideoAssetIds = getAgentVideoGeneratedAssetIds(finalResponse)
-        // 添加结果到画廊
-        generatedVideoAssetIds.forEach((assetId) => {
-          addGenerationResult({ assetId, type: 'video', prompt: item.shotDescription })
-        })
-        if (storyboardMessageId && generatedVideoAssetIds[0]) {
-          useAgentStore.setState((state) => ({
-            messages: state.messages.map((message) =>
-              message.id === storyboardMessageId && message.storyboard
-                ? {
-                    ...message,
-                    storyboard: {
-                      ...message.storyboard,
-                      items: applyAgentStoryboardVideoResult(
-                        message.storyboard.items,
-                        i,
-                        {
-                          videoAssetId: generatedVideoAssetIds[0],
-                          videoNodeId,
-                        },
-                      ),
-                    },
-                  }
-                : message,
-            ),
-          }))
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        generateStore.setError(videoNodeId, message)
-        updateNodeData(videoNodeId, {
-          status: 'error',
-          error: message,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-      }
-    }
-
-    if (videoNodeIds.length > 0) {
-      setVideoGenerationStatus('视频生成已提交到画布')
-      setSkillStep('done')
-    }
-  }
-
-  const locateStoryboardVideoNode = (videoNodeId?: string) => {
-    const targetId = videoNodeId?.trim()
-    if (!targetId) return
-    const node = useCanvasStore
-      .getState()
-      .nodes.find((item) => item.id === targetId && item.type === 'video')
-    if (!node) return
-
-    setSelectedNode(node.id)
-    void setCenter(node.position.x + 310, node.position.y + 180, {
-      zoom: 1,
-      duration: 420,
-    })
-  }
-
-  const retryLastRequest = async (modelOverride?: string) => {
-    const lastReq = useAgentStore.getState().lastRequest
-    if (!lastReq) return
-    const requestProjectId = useAgentStore.getState().activeProjectId
-
-    const model = modelOverride || currentModel
-
-    clearGenerationResults()
-    setPendingImageRequest(null)
-    setPendingVideoRequest(null)
-    setPendingEditRequest(null)
-    setImageGenerationStatus('')
-    setVideoGenerationStatus('')
-    setEditGenerationStatus('')
+  }, [screenToFlowPosition])
+
+  /**
+   * 对话循环：发送历史 → 追加模型回复 → 立即执行无需确认的工具
+   * （read_canvas 任何模式都直接执行；全自动模式下所有工具都直接执行），
+   * 有结果后带回去继续下一轮，直到模型不再请求工具或达到轮数上限。
+   */
+  const runAgentLoop = useCallback(async (actionsAlreadyExecuted = false) => {
     setLoading(true)
     setError(undefined)
-    setSkillStep('loading')
-
+    // 本轮循环里是否已经有工具真的执行过——若是,后续 LLM 调用失败
+    // 不该吓用户(画布操作其实已经生效),提示语要说明这一点
+    let executedAnyAction = actionsAlreadyExecuted
     try {
-      const request: PromptOptimizeRequest = {
-        userIdea: lastReq.userIdea,
-        conversationHistory: conversationHistoryForRequest(lastReq.userIdea),
-        contextNodeIds: lastReq.contextNodeIds,
-        selectedNodeId: lastReq.selectedNodeId,
-        model,
-        role: lastReq.role || 'general',
-        skills: toAgentSkillSelections(activeSkills),
-      }
-
-      const response = await optimizePrompt(request)
-      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
-      appendAssistant(response)
-
-      const intent = response.intent
-      if (intent === 'image' || intent === 'image_then_video') {
-        setImageGenerationParams((params) =>
-          resolveAgentImageGenerationParams(
-            params,
-            response.suggestedParams,
-            imageModelOptions.map((option) => option.id),
-          ),
-        )
-        if (intent === 'image_then_video') {
-          setVideoGenerationParams((params) =>
-            resolveAgentVideoGenerationParams(
-              params,
-              response.suggestedParams,
-              videoModelOptions.map((option) => option.id),
-            ),
-          )
-        }
-        setSkillStep('image')
-        setPendingImageRequest({
-          id: `image_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || lastReq.userIdea,
-          contextNodeIds: lastReq.contextNodeIds,
+      for (let round = 0; round < MAX_AGENT_ROUNDS; round += 1) {
+        const state = useAgentStore.getState()
+        const mode = state.executionMode
+        const response = await sendAgentChat({
+          history: buildAgentChatHistory(state.messages),
+          canvas: summarizeCanvasNodes(useCanvasStore.getState().nodes),
+          model: currentModel || undefined,
         })
-        setImageGenerationStatus('')
-        if (intent === 'image_then_video') {
-          setTimeout(() => setSkillStep('video'), 600)
-        } else {
-          setTimeout(() => setSkillStep('done'), 600)
-        }
-      } else if (intent === 'video') {
-        setVideoGenerationParams((params) =>
-          resolveAgentVideoGenerationParams(
-            params,
-            response.suggestedParams,
-            videoModelOptions.map((option) => option.id),
-          ),
-        )
-        setSkillStep('video')
-        setPendingVideoRequest({
-          id: `video_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || lastReq.userIdea,
-          contextNodeIds: lastReq.contextNodeIds,
-        })
-        setVideoGenerationStatus('')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else if (intent === 'edit') {
-        setSkillStep('edit')
-        const editType = response.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg' | undefined
-        setPendingEditRequest({
-          id: `edit_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || lastReq.userIdea,
-          editType: editType || 'modify',
-          contextNodeIds: lastReq.contextNodeIds,
-        })
-        setEditGenerationStatus('')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else if (intent === 'story_mode') {
-        setSkillStep('story')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else {
-        setSkillStep('done')
-      }
-    } catch (err) {
-      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
-      setSkillStep('idle')
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
 
-  const submit = async (overrideDraft?: string) => {
-    const userSupplement = (overrideDraft ?? draft).trim()
-    const userIdea = selectedTemplate
-      ? `${selectedTemplate.prompt}${
-          userSupplement ? `\n\n用户补充要求：${userSupplement}` : ''
-        }`
-      : userSupplement
-    if (!userIdea || loading) return
-    const visibleUserIdea = selectedTemplate
-      ? `使用「${selectedTemplate.name}」${
-          userSupplement ? `：${userSupplement}` : ''
-        }`
-      : userIdea
-    const requestProjectId = useAgentStore.getState().activeProjectId
-
-    if (activeSkillInputIssue) {
-      setError(activeSkillInputIssue)
-      setVoiceStatus(activeSkillInputIssue)
-      return
-    }
-    const contextNodeIds = currentContextNodeIds()
-
-    appendUserMessage(visibleUserIdea, contextNodeIds, userIdea)
-    setDraft('')
-    setSelectedTemplateId(null)
-    setMentionedNodeIds([])
-    setVoiceStatus('')
-    setSkillStep('idle')
-
-    // 自动执行关键词检测（仅在有 pending 请求时生效）
-    const normalizedIdea = userIdea.toLowerCase().replace(/[。.，,!！?？\s]/g, '')
-    const confirmKeywords = ['确认', '可以', '好', '继续', '生成', '开始', 'ok', 'yes', '是']
-    const cancelKeywords = ['不', '算了', '取消', '不要', 'no', '否', '停止']
-    const isConfirm = confirmKeywords.some((k) => normalizedIdea === k.toLowerCase())
-    const isCancel = cancelKeywords.some((k) => normalizedIdea === k.toLowerCase())
-
-    if (pendingImageRequest || pendingVideoRequest || pendingEditRequest) {
-      if (isConfirm) {
-        if (pendingImageRequest) {
-          void startAgentImageGeneration()
-          return
-        }
-        if (pendingVideoRequest) {
-          void startAgentVideoGeneration()
-          return
-        }
-        if (pendingEditRequest) {
-          void startAgentEditGeneration()
-          return
-        }
-      }
-      if (isCancel) {
-        setPendingImageRequest(null)
-        setPendingVideoRequest(null)
-        setPendingEditRequest(null)
-        setSkillStep('idle')
-        const cancelMsg: AgentMessage = {
-          id: `agent_cancel_${Date.now()}`,
+        const assistantMessage: AgentMessage = {
+          id: createMessageId(),
           role: 'assistant',
-          content: '已取消当前操作。',
+          content: response.message,
           contextNodeIds: [],
+          actions: response.actions.length > 0 ? response.actions : undefined,
           createdAt: new Date().toISOString(),
         }
-        useAgentStore.setState((state) => ({
-          messages: [...state.messages, cancelMsg],
-        }))
-        return
-      }
-    }
+        useAgentStore.getState().addMessage(assistantMessage)
 
-    // 这是一个新的创作请求：旧预览和旧待执行计划不能继续挂在新消息下面。
-    clearGenerationResults()
-    setPendingImageRequest(null)
-    setPendingVideoRequest(null)
-    setPendingEditRequest(null)
-    setImageGenerationStatus('')
-    setVideoGenerationStatus('')
-    setEditGenerationStatus('')
-    // 先走 LLM 优化，由 LLM 判断意图
-    const request: PromptOptimizeRequest = {
-      userIdea,
-      conversationHistory: conversationHistoryForRequest(visibleUserIdea),
-      contextNodeIds,
-      selectedNodeId: selectedNodeId ?? undefined,
-      model: currentModel,
-      role: useAgentStore.getState().role,
-      skills: toAgentSkillSelections(activeSkills),
-    }
+        if (response.actions.length === 0) break
 
-    setLoading(true)
-    setError(undefined)
-    setSkillStep('loading')
+        const immediateActions = mode === 'auto'
+          ? response.actions
+          : response.actions.filter((action) => action.tool === 'read_canvas')
+        if (immediateActions.length === 0) break
 
-    try {
-      const response = await optimizePrompt(request)
-      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
-      appendAssistant(response)
-
-      // 根据后端返回的 intent 决定加载哪种技能
-      const intent = response.intent
-      if (intent === 'image' || intent === 'image_then_video') {
-        setSkillStep('image')
-        setImageGenerationParams((params) =>
-          resolveAgentImageGenerationParams(
-            params,
-            response.suggestedParams,
-            imageModelOptions.map((option) => option.id),
-          ),
-        )
-        if (intent === 'image_then_video') {
-          setVideoGenerationParams((params) =>
-            resolveAgentVideoGenerationParams(
-              params,
-              response.suggestedParams,
-              videoModelOptions.map((option) => option.id),
-            ),
-          )
+        const results = []
+        for (const action of immediateActions) {
+          results.push(await executeAgentToolCall(action, { getDropPosition }))
         }
-        setPendingImageRequest({
-          id: `image_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || userIdea,
-          contextNodeIds,
-        })
-        setImageGenerationStatus('')
-        // 如果是 image_then_video，在图片生成完成后会自动触发视频
-        if (intent === 'image_then_video') {
-          // 延迟显示技能切换状态
-          setTimeout(() => setSkillStep('video'), 600)
-        } else {
-          setTimeout(() => setSkillStep('done'), 600)
-        }
-      } else if (intent === 'video') {
-        setSkillStep('video')
-        setVideoGenerationParams((params) =>
-          resolveAgentVideoGenerationParams(
-            params,
-            response.suggestedParams,
-            videoModelOptions.map((option) => option.id),
-          ),
+        executedAnyAction = true
+        useAgentStore.getState().addActionResults(assistantMessage.id, results)
+
+        // 手动模式下还有未确认的写操作：停下来等用户确认
+        const hasPendingWrites = response.actions.some(
+          (action) => action.tool !== 'read_canvas',
         )
-        setPendingVideoRequest({
-          id: `video_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || userIdea,
-          contextNodeIds,
-        })
-        setVideoGenerationStatus('')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else if (intent === 'edit') {
-        setSkillStep('edit')
-        const editType = response.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg' | undefined
-        setPendingEditRequest({
-          id: `edit_intent_${Date.now()}`,
-          prompt: response.optimizedPrompt || userIdea,
-          editType: editType || 'modify',
-          contextNodeIds,
-        })
-        setEditGenerationStatus('')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else if (intent === 'story_mode') {
-        setSkillStep('story')
-        setTimeout(() => setSkillStep('done'), 600)
-      } else {
-        // text 纯文本对话，不需要生成
-        setSkillStep('done')
+        if (mode !== 'auto' && hasPendingWrites) break
       }
     } catch (err) {
-      if (useAgentStore.getState().activeProjectId !== requestProjectId) return
-      setSkillStep('idle')
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(executedAnyAction ? `画布操作已执行，但后续回复失败：${message}` : message)
+    } finally {
+      setLoading(false)
     }
+  }, [currentModel, getDropPosition, setError, setLoading])
+
+  const submit = async () => {
+    const text = draft.trim()
+    if (!text || loading || !currentModel) return
+    const contextNodeIds = mentionedNodeIds.length > 0
+      ? mentionedNodeIds
+      : selectedNodeId
+        ? [selectedNodeId]
+        : []
+    useAgentStore.getState().addMessage({
+      id: createMessageId(),
+      role: 'user',
+      content: text,
+      contextNodeIds,
+      selectedNodeId: selectedNodeId ?? undefined,
+      createdAt: new Date().toISOString(),
+    })
+    setDraft('')
+    setMentionedNodeIds([])
+    setPickingCanvasNode(false)
+    await runAgentLoop()
   }
 
-  const applyTemplate = (template: AgentTemplate) => {
-    if (loading || !currentModel) return
-    setTemplatePickerOpen(false)
-    if (template.defaultRole) setRole(template.defaultRole)
-    setSelectedTemplateId(template.id)
-    setVoiceStatus(`已选择「${template.name}」，可继续选择画布素材`)
-    setError(undefined)
+  const handleConfirmActions = async (message: AgentMessage) => {
+    const pending = pendingActionsOf(message)
+    if (pending.length === 0 || loading) return
+    setExecutingMessageId(message.id)
+    try {
+      const results = []
+      for (const action of pending) {
+        results.push(await executeAgentToolCall(applyParamOverrides(action), { getDropPosition }))
+      }
+      useAgentStore.getState().addActionResults(message.id, results)
+    } finally {
+      setExecutingMessageId(null)
+    }
+    await runAgentLoop(true)
+  }
+
+  /** 卡片生效的图片模型：用户覆盖 > 模型指定(须在配置列表内) > 设置默认 */
+  const effectiveImageModel = (action: AgentToolCall): string => {
+    const override = paramOverrides[action.id]?.model
+    if (override && imageModelIds.includes(override)) return override
+    const arg = action.args.model
+    if (typeof arg === 'string' && imageModelIds.includes(arg.trim())) return arg.trim()
+    return defaultImageModel
+  }
+
+  /** 卡片生效的视频模型(只从视频模型列表里取,绝不混图片模型) */
+  const effectiveVideoModel = (action: AgentToolCall): string => {
+    const override = paramOverrides[action.id]?.model
+    if (override && videoModelIds.includes(override)) return override
+    const arg = action.args.model
+    if (typeof arg === 'string' && videoModelIds.includes(arg.trim())) return arg.trim()
+    return defaultVideoModel
+  }
+
+  /** 待确认的图片参数：用户覆盖 > 模型参数 > 默认（16:9 / 模型默认清晰度） */
+  const imageParamValue = (
+    action: AgentToolCall,
+    key: 'aspectRatio' | 'resolution',
+  ): string => {
+    const override = paramOverrides[action.id]?.[key]
+    if (override) return override
+    const arg = action.args[key]
+    if (typeof arg === 'string' && arg.trim()) {
+      return key === 'resolution' ? arg.trim().toUpperCase() : arg.trim()
+    }
+    if (key === 'aspectRatio') return AGENT_DEFAULT_IMAGE_ASPECT_RATIO
+    return getAgentImageResolutionOptions(effectiveImageModel(action))[0]
+  }
+
+  const setImageParam = (
+    action: AgentToolCall,
+    key: 'aspectRatio' | 'resolution' | 'model',
+    value: string,
+  ) => {
+    setParamOverrides((prev) => {
+      const next = { ...prev[action.id], [key]: value }
+      // 切换模型后,已选清晰度若不被新模型支持,清掉让该模型的默认值接管
+      if (
+        key === 'model' &&
+        next.resolution &&
+        !(getAgentImageResolutionOptions(value) as string[]).includes(next.resolution)
+      ) {
+        delete next.resolution
+      }
+      return { ...prev, [action.id]: next }
+    })
+  }
+
+  function applyParamOverrides(action: AgentToolCall): AgentToolCall {
+    const override = paramOverrides[action.id]
+    if (!override) return action
+    return { ...action, args: { ...action.args, ...override } }
+  }
+
+  const handleCancelActions = (message: AgentMessage) => {
+    const pending = pendingActionsOf(message)
+    if (pending.length === 0) return
+    useAgentStore.getState().addActionResults(
+      message.id,
+      pending.map((action) => ({
+        callId: action.id,
+        tool: action.tool,
+        ok: false,
+        summary: '用户取消了该操作。',
+      })),
+    )
   }
 
   const changeModel = (model: string) => {
@@ -1831,7 +497,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const handleNewConversation = () => {
     if (loading) return
     newConversation()
-    resetConversationUi()
+    setMentionedNodeIds([])
+    setPickingCanvasNode(false)
     setHistoryOpen(false)
   }
 
@@ -1841,19 +508,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       return
     }
     openConversation(conversationId)
-    resetConversationUi()
+    setMentionedNodeIds([])
+    setPickingCanvasNode(false)
     setHistoryOpen(false)
   }
 
   const handleDeleteConversation = (conversationId: string) => {
     if (loading && conversationId === activeConversationId) return
-    const deletingActiveConversation = conversationId === activeConversationId
     deleteConversation(conversationId)
-    if (deletingActiveConversation) resetConversationUi()
   }
 
-  const activeRole = AGENT_ROLES.find((item) => item.id === role)
-  const ActiveRoleIcon = AGENT_ROLE_ICONS[role]
   return (
     <aside className="agent-chat-panel" style={{ width: panelWidth }}>
       <div
@@ -1866,47 +530,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         <div className="agent-title">
           <Bot size={15} />
           <span>AI创作搭档</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setRolePickerOpen((v) => !v)}
-            className="agent-role-pill"
-            aria-expanded={rolePickerOpen}
-            aria-haspopup="menu"
-            title="切换 Agent 角色"
-          >
-            <ActiveRoleIcon className="agent-role-pill-icon" size={13} strokeWidth={1.8} />
-            <span>{activeRole?.name}</span>
-            <ChevronDown size={10} />
-          </button>
-          {rolePickerOpen && (
-            <div className="agent-role-dropdown" role="menu">
-              {AGENT_ROLES.map((r) => {
-                const RoleIcon = AGENT_ROLE_ICONS[r.id]
-                return (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => {
-                      setRole(r.id)
-                      setRolePickerOpen(false)
-                    }}
-                    className={`agent-role-option${role === r.id ? ' selected' : ''}`}
-                    role="menuitemradio"
-                    aria-checked={role === r.id}
-                  >
-                    <span className="agent-role-option-icon"><RoleIcon size={16} strokeWidth={1.7} /></span>
-                    <div className="agent-role-option-copy">
-                      <div className="agent-role-option-label">{r.name}</div>
-                      <div className="agent-role-option-description">{r.description}</div>
-                    </div>
-                    {role === r.id && <Check size={12} style={{ color: '#f2f2f2', flexShrink: 0 }} />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
         </div>
         <div className="agent-header-actions">
           <button
@@ -1926,10 +549,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             aria-label="历史对话"
             aria-expanded={historyOpen}
             aria-haspopup="dialog"
-            onClick={() => {
-              setRolePickerOpen(false)
-              setHistoryOpen((open) => !open)
-            }}
+            onClick={() => setHistoryOpen((open) => !open)}
           >
             <History size={14} />
           </button>
@@ -1953,714 +573,148 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         </div>
       </header>
 
-      <div className="agent-chat-scroll">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`agent-bubble ${message.role === 'user' ? 'user' : 'assistant'}`}
-          >
-            <p>{message.content}</p>
-            {message.role === 'assistant' && message.thinking && (
-              <div>
-                <button
-                  type="button"
-                  className={`agent-thinking-header ${expandedThinkingIds.has(message.id) ? 'expanded' : ''}`}
-                  onClick={() => {
-                    setExpandedThinkingIds((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(message.id)) {
-                        next.delete(message.id)
-                      } else {
-                        next.add(message.id)
-                      }
-                      return next
-                    })
-                  }}
-                >
-                  <ChevronRight size={12} />
-                  思考过程
-                </button>
-                {expandedThinkingIds.has(message.id) && (
-                  <div className="agent-thinking-content">{message.thinking}</div>
-                )}
-              </div>
-            )}
-            {message.optimizedPrompt && (
-              <div className="agent-result-card">
-                <span>优化后的 Prompt</span>
-                <p>{message.optimizedPrompt}</p>
-              </div>
-            )}
-            {message.intent === 'story_mode' && message.storyboard && (
-              <div className="agent-storyboard-card">
-                <div className="agent-storyboard-title">
-                  <Film size={14} />
-                  <span>{message.storyboard.title}</span>
-                  <span className="agent-storyboard-style">{message.storyboard.style}</span>
-                </div>
-                <div className="agent-storyboard-items">
-                  {message.storyboard.items.map((item) => (
-                    <div key={item.id} className="agent-storyboard-item">
-                      <div className="agent-shot-head">
-                        <span className="agent-shot-number">镜头 {item.shotNumber}</span>
-                        <span className="agent-shot-media-status">
-                          {getAgentStoryboardItemMediaStatus(item)}
-                        </span>
+      <div className="agent-chat-scroll" ref={scrollRef}>
+        {messages.length === 0 && (
+          <div className="agent-empty-hint">
+            <Bot size={22} strokeWidth={1.6} />
+            <p>和我聊聊，或直接告诉我你想画什么。</p>
+            <p className="agent-empty-hint-sub">
+              例如「画一张夏日海边的海报」，我可以在画布上创建节点并生成。
+            </p>
+          </div>
+        )}
+        {messages.map((message) => {
+          const pending = message.role === 'assistant' ? pendingActionsOf(message) : []
+          return (
+            <div
+              key={message.id}
+              className={`agent-bubble ${message.role === 'user' ? 'user' : 'assistant'}`}
+            >
+              <p>{message.content}</p>
+              {message.role === 'assistant' && (message.actions ?? []).length > 0 && (
+                <div className="agent-action-list">
+                  {(message.actions ?? []).map((action) => {
+                    const result = (message.actionResults ?? []).find(
+                      (item) => item.callId === action.id,
+                    )
+                    const pendingImageCard =
+                      !result && (action.tool === 'generate_image' || action.tool === 'edit_image')
+                    const pendingVideoCard = !result && action.tool === 'generate_video'
+                    return (
+                      <div
+                        key={action.id}
+                        className={`agent-action-card${
+                          result ? (result.ok ? ' done' : ' failed') : ' pending'
+                        }`}
+                      >
+                        <div className="agent-action-card-title">
+                          {result
+                            ? result.ok
+                              ? <Check size={12} />
+                              : <X size={12} />
+                            : <Loader2 size={12} className="agent-action-pending-icon" />}
+                          <span>{action.label}</span>
+                        </div>
+                        {pendingImageCard && (
+                          <div className="agent-action-params">
+                            {imageModelOptions.length > 0 && (
+                              <SecondaryMenuSelect
+                                label="模型"
+                                value={effectiveImageModel(action)}
+                                options={imageModelOptions}
+                                open={openParamSelect === `${action.id}:model`}
+                                onOpenChange={(open) =>
+                                  setOpenParamSelect(open ? `${action.id}:model` : null)
+                                }
+                                onChange={(value) => setImageParam(action, 'model', value)}
+                              />
+                            )}
+                            <SecondaryMenuSelect
+                              label="画面比例"
+                              value={imageParamValue(action, 'aspectRatio')}
+                              options={aspectRatioOptions}
+                              open={openParamSelect === `${action.id}:aspectRatio`}
+                              onOpenChange={(open) =>
+                                setOpenParamSelect(open ? `${action.id}:aspectRatio` : null)
+                              }
+                              onChange={(value) => setImageParam(action, 'aspectRatio', value)}
+                            />
+                            <SecondaryMenuSelect
+                              label="清晰度"
+                              value={imageParamValue(action, 'resolution')}
+                              options={getAgentImageResolutionOptions(
+                                effectiveImageModel(action),
+                              ).map((item) => ({ value: item, label: item }))}
+                              open={openParamSelect === `${action.id}:resolution`}
+                              onOpenChange={(open) =>
+                                setOpenParamSelect(open ? `${action.id}:resolution` : null)
+                              }
+                              onChange={(value) => setImageParam(action, 'resolution', value)}
+                            />
+                          </div>
+                        )}
+                        {pendingVideoCard && videoModelOptions.length > 0 && (
+                          <div className="agent-action-params">
+                            <SecondaryMenuSelect
+                              label="模型"
+                              value={effectiveVideoModel(action)}
+                              options={videoModelOptions}
+                              open={openParamSelect === `${action.id}:model`}
+                              onOpenChange={(open) =>
+                                setOpenParamSelect(open ? `${action.id}:model` : null)
+                              }
+                              onChange={(value) => setImageParam(action, 'model', value)}
+                            />
+                          </div>
+                        )}
+                        {result && (
+                          <div className="agent-action-card-result">{result.summary}</div>
+                        )}
                       </div>
-                      <span className="agent-shot-desc">{item.shotDescription}</span>
-                      <span className="agent-shot-prompt">{item.prompt}</span>
-                      {getAgentStoryboardVideoLocateLabel(item) ? (
+                    )
+                  })}
+                  {pending.length > 0 && (
+                    <div className="agent-action-confirm">
+                      <span>
+                        {executionMode === 'manual'
+                          ? `等待确认：${pending.length} 项画布操作`
+                          : '待执行'}
+                      </span>
+                      <div className="agent-action-confirm-btns">
                         <button
                           type="button"
-                          className="agent-shot-locate-video"
-                          onClick={() => locateStoryboardVideoNode(item.videoNodeId)}
+                          className="agent-card-secondary"
+                          disabled={loading || executingMessageId === message.id}
+                          onClick={() => handleCancelActions(message)}
                         >
-                          <LocateFixed size={11} strokeWidth={1.7} />
-                          {getAgentStoryboardVideoLocateLabel(item)}
+                          取消
                         </button>
-                      ) : null}
+                        <button
+                          type="button"
+                          className="agent-card-primary"
+                          disabled={loading || executingMessageId === message.id}
+                          onClick={() => void handleConfirmActions(message)}
+                        >
+                          {executingMessageId === message.id ? '执行中...' : '执行'}
+                        </button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="agent-storyboard-actions">
-                  {message.storyboard.items.every((item) => item.imageAssetId) ? (
-                    <button
-                      type="button"
-                      onClick={() => startBatchVideoGeneration(message.storyboard!)}
-                    >
-                      <Film size={12} />{' '}
-                      {getAgentStoryboardVideoActionLabel(message.storyboard.items)}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => startBatchImageGeneration(message.storyboard!)}
-                    >
-                      <Sparkles size={12} /> 开始生成分镜图
-                    </button>
                   )}
                 </div>
-              </div>
-            )}
-            {message.role === 'assistant' && (
-              <div className="agent-message-actions">
-                {(message.intent === 'image' || message.intent === 'image_then_video') && (
-                  <>
-                    <button
-                      type="button"
-                      className="agent-msg-action-btn"
-                      onClick={() => {
-                        setPendingVideoRequest({
-                          id: `video_continue_${Date.now()}`,
-                          prompt: message.optimizedPrompt || message.content,
-                          contextNodeIds: message.contextNodeIds,
-                        })
-                      }}
-                    >
-                      <Film size={12} /> 继续生成视频
-                    </button>
-                    <button
-                      type="button"
-                      className="agent-msg-action-btn"
-                      onClick={() => {
-                        setPendingImageRequest({
-                          id: `image_more_${Date.now()}`,
-                          prompt: message.optimizedPrompt || message.content,
-                          contextNodeIds: message.contextNodeIds,
-                        })
-                      }}
-                    >
-                      <Sparkles size={12} /> 生成更多图片
-                    </button>
-                  </>
-                )}
-                {message.intent === 'video' && (
-                  <button
-                    type="button"
-                    className="agent-msg-action-btn"
-                    onClick={() => {
-                      setPendingVideoRequest({
-                        id: `video_more_${Date.now()}`,
-                        prompt: message.optimizedPrompt || message.content,
-                        contextNodeIds: message.contextNodeIds,
-                      })
-                    }}
-                  >
-                    <Film size={12} /> 生成更多视频
-                  </button>
-                )}
-                {message.intent === 'edit' && (
-                  <button
-                    type="button"
-                    className="agent-msg-action-btn"
-                    onClick={() => {
-                      setPendingEditRequest({
-                        id: `edit_more_${Date.now()}`,
-                        prompt: message.optimizedPrompt || message.content,
-                        editType: (message.suggestedParams?.editType as 'style_transfer' | 'modify' | 'remove_bg') || 'modify',
-                        contextNodeIds: message.contextNodeIds,
-                      })
-                    }}
-                  >
-                    <Sparkles size={12} /> 编辑更多图片
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-
+              )}
+            </div>
+          )
+        })}
         {loading && (
-          <div className="agent-bubble assistant compact">
-            <Loader2 size={14} className="animate-spin" />
-            正在思考...
+          <div className="agent-bubble assistant agent-loading-bubble">
+            <Loader2 size={14} className="agent-action-pending-icon" />
+            <span>正在思考...</span>
           </div>
         )}
-
-        {/* 技能加载状态 */}
-        {skillStep !== 'idle' && skillStep !== 'done' && (
-          <div className="agent-skill-status">
-            <span className="agent-skill-status-dot done" />
-            <span className="agent-skill-status-label">加载技能</span>
-            <span className="agent-skill-status-state">完成</span>
-          </div>
-        )}
-        {skillStep === 'image' && (
-          <div className="agent-skill-status">
-            <span className="agent-skill-status-dot running" />
-            <span className="agent-skill-status-label">生成图片</span>
-            <span className="agent-skill-status-state">执行中...</span>
-          </div>
-        )}
-        {skillStep === 'video' && (
-          <div className="agent-skill-status">
-            <span className="agent-skill-status-dot running" />
-            <span className="agent-skill-status-label">生成视频</span>
-            <span className="agent-skill-status-state">执行中...</span>
-          </div>
-        )}
-        {skillStep === 'story' && (
-          <div className="agent-skill-status">
-            <span className="agent-skill-status-dot running" />
-            <span className="agent-skill-status-label">生成故事分镜</span>
-            <span className="agent-skill-status-state">执行中...</span>
-          </div>
-        )}
-        {skillStep === 'edit' && (
-          <div className="agent-skill-status">
-            <span className="agent-skill-status-dot running" />
-            <span className="agent-skill-status-label">编辑图片</span>
-            <span className="agent-skill-status-state">执行中...</span>
-          </div>
-        )}
-
-        {error && (
-          <div className="agent-error">
-            {error}
-            <div className="agent-error-actions">
-              <button
-                type="button"
-                className="agent-msg-action-btn"
-                onClick={() => void retryLastRequest()}
-              >
-                <RefreshCw size={12} /> 重试
-              </button>
-              <button
-                type="button"
-                className="agent-msg-action-btn"
-                onClick={() => {
-                  const currentIndex = models.findIndex((m) => m === currentModel)
-                  const nextModel = models[(currentIndex + 1) % models.length] ?? currentModel
-                  void saveSettings({ llmModel: nextModel }).catch((err: unknown) => {
-                    setError(err instanceof Error ? err.message : String(err))
-                  })
-                  void retryLastRequest(nextModel)
-                }}
-              >
-                <Wand2 size={12} /> 切换 Agent 模型
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* 生成结果预览画廊 */}
-        {generationResults.length > 0 && (
-          <div className="agent-generation-gallery">
-            <div className="agent-gallery-header">
-              <span>生成结果</span>
-              <button
-                type="button"
-                className="agent-gallery-clear-btn"
-                onClick={clearGenerationResults}
-                title="清除预览"
-              >
-                <X size={12} />
-              </button>
-            </div>
-            <div className="agent-gallery-grid">
-              {generationResults.map((result) => (
-                <div key={result.id} className="agent-gallery-item">
-                  {result.type === 'image' ? (
-                    <img
-                      src={`/api/assets/${result.assetId}/file`}
-                      alt={result.prompt || '生成图片'}
-                      className="agent-gallery-thumb"
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none'
-                      }}
-                    />
-                  ) : (
-                    <video
-                      src={`/api/assets/${result.assetId}/file`}
-                      className="agent-gallery-thumb"
-                      preload="metadata"
-                      muted
-                      onMouseEnter={(e) => e.currentTarget.play().catch(() => {})}
-                      onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
-                    />
-                  )}
-                  <div className="agent-gallery-item-type">
-                    {result.type === 'image' ? <ImageIcon size={10} /> : <Film size={10} />}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {pendingImageRequest && (
-          <div className="agent-bubble assistant agent-image-request">
-            <div className="agent-card-title">
-              <Sparkles size={14} />
-              <span>Agent 推荐的图片计划</span>
-            </div>
-            <p className="agent-card-desc">
-              Agent 模型负责理解任务；图片生成模型负责实际出图。你可以修改参数后再生成。
-            </p>
-            <div className="agent-image-params" aria-label="图片生成参数">
-              <SecondaryMenuSelect
-                className="agent-image-model-select"
-                label="图片模型"
-                value={imageGenerationParams.model}
-                options={
-                  imageModelOptions.length > 0
-                    ? imageModelOptions.map((model) => ({
-                        value: model.id,
-                        label: model.label,
-                      }))
-                    : [{
-                        value: '',
-                        label: '未配置图片生成模型',
-                        disabled: true,
-                      }]
-                }
-                open={openImageParamMenu === 'model'}
-                disabled={imageModelOptions.length === 0}
-                onOpenChange={(open) =>
-                  setOpenImageParamMenu(open ? 'model' : null)
-                }
-                onChange={(model) =>
-                  setImageGenerationParams((params) =>
-                    resolveAgentImageGenerationParams(
-                      params,
-                      { model },
-                      imageModelOptions.map((option) => option.id),
-                    ),
-                  )
-                }
-              />
-
-              <SecondaryMenuSelect
-                className="agent-image-ratio-select"
-                label="画面比例"
-                value={imageGenerationParams.aspectRatio}
-                options={AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => ({
-                  value: ratio,
-                  label: ratio,
-                }))}
-                open={openImageParamMenu === 'ratio'}
-                onOpenChange={(open) =>
-                  setOpenImageParamMenu(open ? 'ratio' : null)
-                }
-                onChange={(aspectRatio) =>
-                  setImageGenerationParams((params) => ({
-                    ...params,
-                    aspectRatio: aspectRatio as AgentImageAspectRatio,
-                  }))
-                }
-              />
-
-              <SecondaryMenuSelect
-                className="agent-image-resolution-select"
-                label="清晰度"
-                value={imageGenerationParams.resolution}
-                options={getAgentImageResolutionOptions(
-                  imageGenerationParams.model,
-                ).map((resolution) => ({
-                  value: resolution,
-                  label: resolution,
-                }))}
-                open={openImageParamMenu === 'resolution'}
-                onOpenChange={(open) =>
-                  setOpenImageParamMenu(open ? 'resolution' : null)
-                }
-                onChange={(resolution) =>
-                  setImageGenerationParams((params) => ({
-                    ...params,
-                    resolution: resolution as AgentImageResolution,
-                  }))
-                }
-              />
-
-              <SecondaryMenuSelect
-                className="agent-image-count-select"
-                label="生成数量"
-                value={String(imageGenerationParams.count)}
-                options={IMAGE_COUNTS.map((count) => ({
-                  value: String(count),
-                  label: String(count),
-                }))}
-                open={openImageParamMenu === 'count'}
-                align="end"
-                onOpenChange={(open) =>
-                  setOpenImageParamMenu(open ? 'count' : null)
-                }
-                onChange={(count) =>
-                  setImageGenerationParams((params) => ({
-                    ...params,
-                    count: Number(count),
-                  }))
-                }
-              />
-            </div>
-
-            {!selectedAgentImageModel && (
-              <div className="agent-skill-plan-warning">
-                尚未配置图片生成模型。请先在设置中添加 GPT Image（OpenAI CLI）或即梦 5.0 Pro。
-              </div>
-            )}
-            {pendingImageRequest.contextNodeIds.length > 0 && (
-              <div className="agent-card-context">
-                已引用 {pendingImageRequest.contextNodeIds.length} 个画布节点
-              </div>
-            )}
-
-            {imageGenerationStatus && (
-              <div className="agent-card-status">{imageGenerationStatus}</div>
-            )}
-
-            <div className="agent-card-actions">
-              <button
-                type="button"
-                className="agent-card-secondary"
-                onClick={() => setPendingImageRequest(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="agent-card-secondary"
-                onClick={() => void startAgentImageGeneration(false)}
-                disabled={!selectedAgentImageModel}
-              >
-                发送至画布
-              </button>
-              <button
-                type="button"
-                className="agent-card-primary"
-                onClick={() => void startAgentImageGeneration(true)}
-                disabled={
-                  !selectedAgentImageModel ||
-                  (activeAgentImageModelNeedsJimeng && !isJimengConfigured)
-                }
-                title={
-                  !selectedAgentImageModel
-                    ? '请先选择图片生成模型'
-                    : activeAgentImageModelNeedsJimeng && !isJimengConfigured
-                    ? '未配置 dreamina CLI'
-                    : '发送并生成'
-                }
-              >
-                发送并生成
-              </button>
-            </div>
-          </div>
-        )}
-
-        {pendingVideoRequest && (
-          <div className="agent-bubble assistant agent-video-request">
-            <div className="agent-card-title">
-              <Film size={14} />
-              <span>Agent 推荐的视频计划</span>
-            </div>
-            <p className="agent-video-desc">
-              {pendingVideoRequest.prompt}。你可以调整参数后只发送节点，或直接开始生成。
-            </p>
-
-            <div className="agent-video-params">
-              <span className="agent-video-param-tag">
-                <strong>模式</strong> {VIDEO_MODES.find((m) => m.id === videoGenerationParams.mode)?.label ?? videoGenerationParams.mode}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>模型</strong> {videoModelOptions.find((m) => m.id === videoGenerationParams.model)?.label ?? videoGenerationParams.model}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>比例</strong> {videoGenerationParams.aspectRatio}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>分辨率</strong> {videoGenerationParams.resolution}
-              </span>
-              <span className="agent-video-param-tag">
-                <strong>时长</strong> {videoGenerationParams.durationSeconds}s
-              </span>
-            </div>
-
-            <div className="agent-video-fields" style={{ marginTop: 10 }}>
-              <label>
-                <span>模式</span>
-                <select
-                  value={videoGenerationParams.mode}
-                  onChange={(event) =>
-                    setVideoGenerationParams((params) => ({
-                      ...params,
-                      mode: event.target.value as VideoMode,
-                    }))
-                  }
-                >
-                  {VIDEO_MODES.map((mode) => (
-                    <option key={mode.id} value={mode.id}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>模型</span>
-                <select
-                  value={videoGenerationParams.model}
-                  onChange={(event) =>
-                    setVideoGenerationParams((params) => ({
-                      ...params,
-                      model: event.target.value,
-                    }))
-                  }
-                >
-                  {videoModelOptions.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>比例</span>
-                <select
-                  value={videoGenerationParams.aspectRatio}
-                  onChange={(event) =>
-                    setVideoGenerationParams((params) => ({
-                      ...params,
-                      aspectRatio: event.target.value as VideoAspectRatio,
-                    }))
-                  }
-                >
-                  {VIDEO_ASPECT_RATIOS.map((ratio) => (
-                    <option key={ratio} value={ratio}>
-                      {ratio}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>分辨率</span>
-                <select
-                  value={videoGenerationParams.resolution}
-                  onChange={(event) =>
-                    setVideoGenerationParams((params) => ({
-                      ...params,
-                      resolution: event.target.value as VideoResolution,
-                    }))
-                  }
-                >
-                  {VIDEO_RESOLUTIONS.map((res) => (
-                    <option key={res} value={res}>
-                      {res}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>时长</span>
-                <select
-                  value={videoGenerationParams.durationSeconds}
-                  onChange={(event) =>
-                    setVideoGenerationParams((params) => ({
-                      ...params,
-                      durationSeconds: Number(event.target.value),
-                    }))
-                  }
-                >
-                  {VIDEO_DURATIONS.map((dur) => (
-                    <option key={dur} value={dur}>
-                      {dur}s
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="agent-video-count-field">
-                <span>数量</span>
-                <div>
-                  {VIDEO_COUNTS.map((count) => (
-                    <button
-                      key={count}
-                      type="button"
-                      className={
-                        videoGenerationParams.count === count ? 'active' : ''
-                      }
-                      onClick={() =>
-                        setVideoGenerationParams((params) => ({
-                          ...params,
-                          count,
-                        }))
-                      }
-                    >
-                      {count}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {pendingVideoRequest.contextNodeIds.length > 0 && (
-              <div className="agent-card-context">
-                已引用 {pendingVideoRequest.contextNodeIds.length} 个画布节点
-              </div>
-            )}
-
-            {videoGenerationStatus && (
-              <div className="agent-card-status">{videoGenerationStatus}</div>
-            )}
-
-            {unsupportedAgentVideoModelMessage && (
-              <div className="agent-card-status">
-                {unsupportedAgentVideoModelMessage}
-              </div>
-            )}
-
-            <div className="agent-card-actions">
-              <button
-                type="button"
-                className="agent-card-secondary"
-                onClick={() => setPendingVideoRequest(null)}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="agent-card-secondary"
-                onClick={() => void startAgentVideoGeneration(false)}
-              >
-                发送至画布
-              </button>
-              <button
-                type="button"
-                className="agent-card-primary"
-                onClick={() => void startAgentVideoGeneration(true)}
-                disabled={
-                  (activeAgentVideoModelNeedsJimeng && !isJimengConfigured) ||
-                  !!unsupportedAgentVideoModelMessage
-                }
-                title={
-                  unsupportedAgentVideoModelMessage ||
-                  (activeAgentVideoModelNeedsJimeng && !isJimengConfigured
-                    ? '未配置 dreamina CLI'
-                    : '发送并生成')
-                }
-              >
-                发送并生成
-              </button>
-            </div>
-          </div>
-        )}
-
-        {pendingEditRequest && (
-          <div className="agent-bubble assistant agent-edit-request">
-            <div className="agent-card-title">
-              <Sparkles size={14} />
-              <span>
-                {pendingEditRequest.editType === 'remove_bg' && '背景消除确认'}
-                {pendingEditRequest.editType === 'style_transfer' && '风格迁移确认'}
-                {pendingEditRequest.editType === 'modify' && '图片编辑确认'}
-              </span>
-            </div>
-            <p className="agent-card-desc">
-              {pendingEditRequest.editType === 'remove_bg' && '我将去除图片背景，保留主体。'}
-              {pendingEditRequest.editType === 'style_transfer' && `我将把图片转换为以下风格：${pendingEditRequest.prompt}`}
-              {pendingEditRequest.editType === 'modify' && `我将按以下要求修改图片：${pendingEditRequest.prompt}`}
-            </p>
-            {editGenerationStatus && (
-              <div className="agent-card-status">{editGenerationStatus}</div>
-            )}
-            <div className="agent-card-actions">
-              <button type="button" className="agent-card-secondary" onClick={() => setPendingEditRequest(null)}>取消</button>
-              <button type="button" className="agent-card-primary" onClick={() => void startAgentEditGeneration()}>生成到画布</button>
-            </div>
-          </div>
-        )}
+        {error && <div className="agent-error">{error}</div>}
       </div>
 
       <footer className="agent-composer">
-        {activeSkills.length > 0 && (
-          <div className="agent-skill-plan">
-            <div className="agent-skill-plan-header">
-              <span>
-                <Wand2 size={12} />
-                技能链 · {activeSkills.length} 步
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSkillIds([])
-                  setVoiceStatus('')
-                  setError(undefined)
-                }}
-              >
-                清空
-              </button>
-            </div>
-            <div className="agent-skill-plan-steps">
-              {activeSkills.map((skill, index) => (
-                <div className="agent-skill-plan-step" key={skill.id}>
-                  <span className="agent-skill-plan-index">{index + 1}</span>
-                  <span className="agent-skill-plan-copy">
-                    <strong>{skill.label}</strong>
-                    <small>
-                      {AGENT_SKILL_INPUT_LABELS[skill.input]}
-                      <ChevronRight size={10} />
-                      {AGENT_SKILL_OUTPUT_LABELS[skill.output]}
-                    </small>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeSkill(skill.id)}
-                    aria-label={`移除${skill.label}`}
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            {activeSkillInputIssue && (
-              <div className="agent-skill-plan-warning">{activeSkillInputIssue}</div>
-            )}
-          </div>
-        )}
-
         {selectedMentionNodes.length > 0 && (
           <div className="mention-chips">
             {selectedMentionNodes.map((node) => (
@@ -2696,41 +750,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
         )}
 
-        {selectedTemplate && (
-          <div className="agent-active-template">
-            <span className="agent-active-template-icon">
-              {(() => {
-                const TemplateIcon =
-                  AGENT_TEMPLATE_ICONS[selectedTemplate.id] ?? LayoutTemplate
-                return <TemplateIcon size={15} strokeWidth={1.7} />
-              })()}
-            </span>
-            <span className="agent-active-template-copy">
-              <strong>{selectedTemplate.name}</strong>
-              <small>已启用 · 可选择图片或文本，也可补充要求</small>
-            </span>
-            <button
-              type="button"
-              className="agent-active-template-remove"
-              onClick={() => {
-                setSelectedTemplateId(null)
-                setVoiceStatus('')
-              }}
-              aria-label={`取消${selectedTemplate.name}`}
-            >
-              <X size={12} />
-            </button>
-            <button
-              type="button"
-              className="agent-template-start"
-              onClick={() => void submit()}
-              disabled={loading || !currentModel || !!activeSkillInputIssue}
-            >
-              开始创作
-            </button>
-          </div>
-        )}
-
         <textarea
           className="agent-input"
           value={draft}
@@ -2741,9 +760,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               void submit()
             }
           }}
-          placeholder={
-            selectedTemplate ? '补充创作要求（可选），使用 @ 引用画布节点...' : '描述操作使用 @ 引用...'
-          }
+          placeholder="和我聊聊，或描述想要的画面，使用 @ 引用画布节点..."
           disabled={loading}
         />
 
@@ -2755,106 +772,58 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               title={pickingCanvasNode ? '结束选择节点' : '从画布选择节点'}
               aria-label={pickingCanvasNode ? '结束选择节点' : '从画布选择节点'}
               aria-pressed={pickingCanvasNode}
-              onClick={() => {
-                const nextPicking = !pickingCanvasNode
-                setPickingCanvasNode(nextPicking)
-                setSkillPickerOpen(false)
-                setVoiceStatus('')
-              }}
+              onClick={() => setPickingCanvasNode((picking) => !picking)}
             >
               <MousePointer2 size={14} />
             </button>
+          </div>
+
+          <div className="agent-model-picker agent-mode-picker">
             <button
               type="button"
-              className={`agent-round-btn ${skillPickerOpen ? 'active' : ''}`}
-              title="打开技能库"
-              aria-label="打开技能库"
-              aria-expanded={skillPickerOpen}
-              aria-haspopup="dialog"
+              className="agent-model-btn"
               onClick={() => {
-                const nextOpen = !skillPickerOpen
-                setSkillPickerOpen(nextOpen)
-                if (nextOpen) {
-                  setPickingCanvasNode(false)
-                  setVoiceStatus('')
-                }
+                setModeMenuOpen((open) => !open)
+                setModelOpen(false)
               }}
+              title={executionMode === 'auto'
+                ? '全自动执行：模型直接操作画布，不再逐一确认'
+                : '手动执行：操作画布前先询问，确认后才执行'}
+              aria-expanded={modeMenuOpen}
+              aria-haspopup="menu"
+              aria-label="执行模式"
             >
-              <Blocks size={14} />
+              {executionMode === 'auto' ? '全自动' : '手动'}
+              <ChevronDown size={13} />
             </button>
-
-            {skillPickerOpen && (
-              <div className="agent-skill-library" role="dialog" aria-label="技能库">
-                <div className="agent-skill-library-header">
-                  <span>
-                    <strong>技能库</strong>
-                    <small>最多组合 {MAX_ACTIVE_AGENT_SKILLS} 个，按选择顺序执行</small>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSkillPickerOpen(false)}
-                    aria-label="关闭技能库"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-
-                <div className="agent-skill-recommended">
-                  <span>智能推荐</span>
-                  <div>
-                    {recommendedSkillIds.map((skillId) => {
-                      const skill = getAgentSkillById(skillId)
-                      if (!skill) return null
-                      return (
-                        <button
-                          type="button"
-                          key={skill.id}
-                          className={activeSkillIds.includes(skill.id) ? 'selected' : ''}
-                          onClick={() => toggleSkill(skill.id)}
-                        >
-                          <Sparkles size={10} />
-                          {skill.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div className="agent-skill-library-list">
-                  {AGENT_SKILL_CATEGORIES.map((category) => (
-                    <section key={category}>
-                      <h4>{category}</h4>
-                      {AGENT_SKILLS.filter((skill) => skill.category === category).map((skill) => {
-                        const selected = activeSkillIds.includes(skill.id)
-                        const issue = getAgentSkillInputIssue(skill, contextNodeTypes)
-                        return (
-                          <button
-                            type="button"
-                            key={skill.id}
-                            className={`agent-skill-library-item ${selected ? 'selected' : ''}`}
-                            onClick={() => toggleSkill(skill.id)}
-                            aria-pressed={selected}
-                          >
-                            <span className="agent-skill-library-icon"><Wand2 size={13} /></span>
-                            <span className="agent-skill-library-copy">
-                              <strong>{skill.label}</strong>
-                              <small>{skill.description}</small>
-                              <span className="agent-skill-library-meta">
-                                {AGENT_SKILL_INPUT_LABELS[skill.input]}
-                                <ChevronRight size={10} />
-                                {AGENT_SKILL_OUTPUT_LABELS[skill.output]}
-                                {issue && <em>缺少输入</em>}
-                              </span>
-                            </span>
-                            <span className="agent-skill-library-state">
-                              {selected ? <Check size={13} /> : <Plus size={13} />}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </section>
-                  ))}
-                </div>
+            {modeMenuOpen && (
+              <div className="agent-model-menu" role="menu" aria-label="执行模式选项">
+                <button
+                  type="button"
+                  className="agent-model-option"
+                  role="menuitemradio"
+                  aria-checked={executionMode === 'manual'}
+                  onClick={() => {
+                    setExecutionMode('manual')
+                    setModeMenuOpen(false)
+                  }}
+                >
+                  <span>手动执行</span>
+                  {executionMode === 'manual' && <Check size={13} />}
+                </button>
+                <button
+                  type="button"
+                  className="agent-model-option"
+                  role="menuitemradio"
+                  aria-checked={executionMode === 'auto'}
+                  onClick={() => {
+                    setExecutionMode('auto')
+                    setModeMenuOpen(false)
+                  }}
+                >
+                  <span>全自动执行</span>
+                  {executionMode === 'auto' && <Check size={13} />}
+                </button>
               </div>
             )}
           </div>
@@ -2863,7 +832,10 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             <button
               type="button"
               className="agent-model-btn"
-              onClick={() => setModelOpen((open) => !open)}
+              onClick={() => {
+                setModelOpen((open) => !open)
+                setModeMenuOpen(false)
+              }}
               disabled={models.length === 0}
               title={models.length === 0 ? '请先在设置中添加大语言模型' : '切换 Agent 模型'}
             >
@@ -2887,59 +859,12 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             )}
           </div>
 
-          <span className="voice-status">{voiceStatus}</span>
-          <button
-            type="button"
-            className={`agent-round-btn agent-template-btn ${templatePickerOpen ? 'active' : ''}`}
-            onClick={() => setTemplatePickerOpen((open) => !open)}
-            title="创作模板"
-            aria-label="创作模板"
-            aria-expanded={templatePickerOpen}
-            aria-haspopup="menu"
-          >
-            <Wand2 size={14} />
-          </button>
-          {templatePickerOpen && (
-            <div className="agent-template-dropdown" role="menu" aria-label="创作模板">
-              <div className="agent-template-title">创作模板</div>
-              {AGENT_TEMPLATES.map((template) => {
-                const TemplateIcon = AGENT_TEMPLATE_ICONS[template.id] ?? LayoutTemplate
-                return (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className="agent-template-option"
-                    role="menuitem"
-                    disabled={loading || !currentModel}
-                    onClick={() => applyTemplate(template)}
-                  >
-                    <span className="agent-template-option-icon">
-                      <TemplateIcon size={16} strokeWidth={1.7} />
-                    </span>
-                    <span className="agent-template-option-copy">
-                      <strong>{template.name}</strong>
-                      <small>{template.description}</small>
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <button
             type="button"
             className="agent-send-btn"
             onClick={() => void submit()}
-            disabled={
-              (!draft.trim() && !selectedTemplate) ||
-              loading ||
-              !currentModel ||
-              !!activeSkillInputIssue
-            }
-            title={
-              activeSkillInputIssue ??
-              (currentModel ? '发送' : '请先在设置中添加大语言模型')
-            }
+            disabled={!draft.trim() || loading || !currentModel}
+            title={currentModel ? '发送' : '请先在设置中添加大语言模型'}
           >
             <ArrowUp size={15} />
           </button>

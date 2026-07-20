@@ -37,14 +37,11 @@ test('project rules require the unified secondary-menu template', () => {
     'apps/web/src/components/AgentPanel.tsx',
     'utf8',
   )
-  const imagePlan = source.slice(
-    source.indexOf('<div className="agent-image-params"'),
-    source.indexOf('{!selectedAgentImageModel'),
-  )
 
   assert.match(rules, /所有用户可见的二级菜单、下拉菜单和参数选择菜单/)
   assert.match(rules, /SecondaryMenuSelect/)
   assert.match(rules, /不得使用原生 `<select>`/)
-  assert.equal((imagePlan.match(/<SecondaryMenuSelect/g) ?? []).length, 4)
-  assert.equal(imagePlan.includes('<select'), false)
+  // Agent 确认卡上的参数选择（画面比例/清晰度）必须走统一模板，禁止原生 select
+  assert.equal(source.includes('<select'), false)
+  assert.equal((source.match(/<SecondaryMenuSelect/g) ?? []).length >= 2, true)
 })

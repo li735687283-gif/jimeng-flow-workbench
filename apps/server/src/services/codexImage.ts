@@ -69,6 +69,8 @@ export interface CodexTextMessage {
 export interface CodexTextRequest {
   model: string
   messages: CodexTextMessage[]
+  /** 为 true 时不再要求"输出纯文本"（调用方需要 JSON 等结构化输出） */
+  expectJson?: boolean
 }
 
 export interface CodexTextResult {
@@ -661,7 +663,7 @@ async function getOutputDir(deps: CodexImageDeps): Promise<string> {
   return resolveOutputDir(settings.outputDir)
 }
 
-function buildCodexTextPrompt(messages: CodexTextMessage[]): string {
+function buildCodexTextPrompt(messages: CodexTextMessage[], expectJson = false): string {
   const parts: string[] = []
   for (const message of messages) {
     const content = message.content?.trim()
@@ -674,7 +676,11 @@ function buildCodexTextPrompt(messages: CodexTextMessage[]): string {
       parts.push(`用户：\n${content}`)
     }
   }
-  parts.push('请直接回答用户，输出纯文本，不要修改项目文件。')
+  parts.push(
+    expectJson
+      ? '请直接回答用户，严格遵守系统要求中的输出格式，不要修改项目文件。'
+      : '请直接回答用户，输出纯文本，不要修改项目文件。',
+  )
   return parts.join('\n\n')
 }
 
@@ -713,7 +719,7 @@ export async function generateCodexCliText(
   try {
     result = await runCommand(codexPath, args, {
       cwd,
-      input: buildCodexTextPrompt(req.messages),
+      input: buildCodexTextPrompt(req.messages, req.expectJson === true),
       timeoutMs,
     })
   } catch (err) {
