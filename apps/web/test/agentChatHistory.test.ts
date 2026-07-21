@@ -47,6 +47,9 @@ test('buildAgentChatHistory carries tool calls and results', () => {
   assert.equal(history[0]?.actions?.[0]?.tool, 'generate_image')
   assert.equal(history[1]?.role, 'user')
   assert.equal(history[1]?.toolResults?.[0]?.summary, '已创建节点 n1')
+  // 回执必须明确标注"不是用户的新消息",否则模型会把已执行的工具再执行一遍
+  assert.match(history[1]?.content, /工具执行回执/)
+  assert.match(history[1]?.content, /不是用户的新消息/)
 })
 
 test('buildAgentChatHistory drops system messages', () => {

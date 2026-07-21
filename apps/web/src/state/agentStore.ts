@@ -372,10 +372,12 @@ export function buildAgentChatHistory(messages: AgentMessage[]): AgentChatTurn[]
     })
     // 协议约定工具结果放在随后的 user 回合里（服务端也要求最后一条是 user），
     // 因此助手消息的执行结果转换成一个携带 toolResults 的用户回合。
+    // 内容必须明确标注"这是回执、不是用户的新请求",否则模型会把最后一条
+    // user 回合当成新指令,把刚执行过的工具再执行一遍（重复生成）。
     if (message.role === 'assistant' && message.actionResults?.length) {
       turns.push({
         role: 'user',
-        content: '（工具执行结果）',
+        content: '（工具执行回执：以下是刚才工具的执行结果，不是用户的新消息）',
         toolResults: message.actionResults,
       })
     }

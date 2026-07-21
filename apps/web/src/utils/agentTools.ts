@@ -83,6 +83,29 @@ function fail(call: AgentToolCall, summary: string): AgentToolResult {
   return { callId: call.id, tool: call.tool, ok: false, summary }
 }
 
+/**
+ * Agent 提交的生成任务如果在后台失败(提交成功、但生成过程挂了),
+ * 画布节点上只有一个不显眼的红点,用户会以为"已提交=迟早出图"。
+ * 这里往 Agent 当前会话追加一条失败说明,让失败可见、可追问。
+ * 只在用户仍停留在该项目的会话里时追加,避免串到别的项目的对话。
+ */
+function notifyAgentGenerationFailure(
+  flowId: string,
+  mediaLabel: string,
+  error: string,
+): void {
+  const agentState = useAgentStore.getState()
+  if (resolveGenerationFlowId(agentState.activeProjectId) !== flowId) return
+  const trimmed = error.trim()
+  agentState.addMessage({
+    id: `agent-gen-fail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role: 'assistant',
+    content: `刚才提交的${mediaLabel}生成失败了：${trimmed || '未知错误'}\n你可以让我重试一次，或者换一个模型再试（在设置里可以调整默认模型）。`,
+    contextNodeIds: [],
+    createdAt: new Date().toISOString(),
+  })
+}
+
 function stringArg(args: Record<string, unknown>, key: string): string {
   const value = args[key]
   return typeof value === 'string' ? value.trim() : ''
@@ -427,6 +450,13 @@ async function runGenerateImage(
             lastGeneratedAssetIds: outputAssetIds,
           })
         }
+        if (data.status === 'error') {
+          notifyAgentGenerationFailure(
+            request.flowId ?? 'local',
+            '图片',
+            data.error ?? '生成任务返回了错误状态',
+          )
+        }
       },
       onError: (sseError) => {
         generateStore.setError(imageNodeId, sseError)
@@ -435,6 +465,7 @@ async function runGenerateImage(
           error: sseError,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
+        notifyAgentGenerationFailure(request.flowId ?? 'local', '图片', sseError)
       },
     })
 
@@ -612,6 +643,13 @@ async function runGenerateVideo(
             lastGeneratedAssetIds: generatedAssetIds,
           })
         }
+        if (data.status === 'error') {
+          notifyAgentGenerationFailure(
+            request.flowId ?? 'local',
+            '视频',
+            data.error ?? '生成任务返回了错误状态',
+          )
+        }
       },
       onError: (sseError) => {
         generateStore.setError(videoNodeId, sseError)
@@ -620,6 +658,7 @@ async function runGenerateVideo(
           error: sseError,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
+        notifyAgentGenerationFailure(request.flowId ?? 'local', '视频', sseError)
       },
     })
 

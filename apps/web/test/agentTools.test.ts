@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   AGENT_DEFAULT_IMAGE_ASPECT_RATIO,
   buildAgentVideoReferences,
@@ -138,6 +139,7 @@ test('pickAgentConfiguredModel only accepts models from the configured list', ()
 })
 
 test('summarizeCanvasNodes truncates prompts and caps the list', () => {
+
   const nodes = [
     {
       id: 'n1',
@@ -160,4 +162,17 @@ test('summarizeCanvasNodes truncates prompts and caps the list', () => {
     data: {},
   }))
   assert.equal(summarizeCanvasNodes(many).length, 40)
+})
+
+test('agent-created generations notify the chat when they fail in the background', () => {
+  // 提交成功但后台跑挂时,不能只在画布节点上留个红点——用户会以为迟早出图。
+  // 图片和视频两条路径都要在失败时往当前会话追加一条失败说明。
+  const source = readFileSync('apps/web/src/utils/agentTools.ts', 'utf8')
+  assert.match(source, /function notifyAgentGenerationFailure\(/)
+  assert.match(source, /刚才提交的\$\{mediaLabel\}生成失败了/)
+  // 用户切到别的项目时不追加,避免消息串会话
+  assert.match(source, /resolveGenerationFlowId\(agentState\.activeProjectId\) !== flowId/)
+  // 完成回调里的 error 状态和 SSE onError 都要覆盖(图片 + 视频)
+  assert.equal((source.match(/data\.status === 'error'/g) ?? []).length >= 2, true)
+  assert.equal((source.match(/notifyAgentGenerationFailure\(/g) ?? []).length >= 5, true)
 })

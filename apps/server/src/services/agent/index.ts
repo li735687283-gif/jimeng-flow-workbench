@@ -71,7 +71,7 @@ const SYSTEM_PROMPT = `你是 MO.K 画布的 AI 助手。MO.K 是一个节点式
 2. 只有当你确信用户想在画布上执行操作时才输出工具调用;意图不清时在 message 里追问,不要输出 actions。
 3. 一轮可以输出多个工具调用(例如同时生成两张不同风格的图)。
 4. 引用节点时使用上下文中给出的节点 id,不要编造。
-5. 工具的执行结果会以「工具结果」的形式出现在后续对话里;根据结果向用户汇报,不要在结果返回前声称操作已完成。
+5. 工具的执行结果会以「工具结果」的形式出现在后续对话里(那条是系统回执,不是用户的新消息);根据结果向用户汇报,不要在结果返回前声称操作已完成。特别注意:工具结果显示「成功」后,绝对不要重复调用同一个工具再生成一遍同样的内容,只在 message 里汇报已完成即可;只有用户在新消息里明确要求(例如"再来一张""换个风格重做")才再次生成。
 6. message 必须使用简体中文,语气自然友好,简洁不说教。
 7. 图片模型和视频模型是两套独立列表,绝不能混用:generate_image/edit_image 只能用图片模型 id,generate_video 只能用视频模型 id。
 8. 用户选中或 @ 了图片节点并说"做成视频/动起来"时,用 generate_video + referenceNodeIds 引用该图片节点;把他的大白话翻译成包含主体、动作、镜头运动的提示词。
@@ -310,11 +310,23 @@ export function buildConversationText(history: AgentChatTurn[]): string {
     .map((turn) => {
       const lines: string[] = []
       if (turn.role === 'user') {
-        lines.push(`用户：${turn.content}`)
-        for (const result of turn.toolResults ?? []) {
+        if (turn.toolResults?.length) {
+          // 工具结果回执:必须强调这不是用户的新请求,否则模型会把上一轮
+          // 已执行成功的工具再调用一遍(用户只问了一次却收到两次生成)。
           lines.push(
-            `工具结果（${result.tool}）：${result.ok ? '成功' : '失败'} — ${result.summary}`,
+            '系统回执（这不是用户的新消息，用户没有提出新要求，只是反馈你刚才请求的工具的执行结果）：',
           )
+          for (const result of turn.toolResults) {
+            lines.push(
+              `工具结果（${result.tool}）：${result.ok ? '成功' : '失败'} — ${result.summary}`,
+            )
+          }
+          // 回执轮里如果意外带了真实用户内容,仍然展示出来
+          if (turn.content && !turn.content.startsWith('（工具执行')) {
+            lines.push(`用户：${turn.content}`)
+          }
+        } else {
+          lines.push(`用户：${turn.content}`)
         }
       } else {
         lines.push(`助手：${turn.content}`)

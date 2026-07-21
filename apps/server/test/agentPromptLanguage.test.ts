@@ -53,4 +53,6 @@ test('agent system prompt documents model args and video workflows', () => {
   assert.match(source, /替他改写成专业的视频提示词/)
   assert.match(source, /新视频会在原节点上重新生成/)
   assert.match(source, /视频会在原节点上重新生成/)
+  // 工具成功后只汇报,不得重复调用同一工具再生成一遍
+  assert.match(source, /绝对不要重复调用同一个工具再生成一遍同样的内容/)
 })
