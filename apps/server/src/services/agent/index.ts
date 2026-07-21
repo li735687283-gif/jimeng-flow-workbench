@@ -55,6 +55,7 @@ const SYSTEM_PROMPT = `你是 MO.K 画布的 AI 助手。MO.K 是一个节点式
    - referenceNodeIds(必填):要修改的图片节点 id 数组(取第一个)
    - prompt(必填):修改要求;editType 为 remove_bg 时可省略
    - editType(可选):modify(局部修改)、style_transfer(风格迁移)、remove_bg(去背景)
+   - resolution(可选):1K、2K、4K,不填用模型默认档
    - model(可选):从可用的图片模型 id 中选一个,不填用默认
 4. read_canvas — 读取画布节点列表。当你需要了解画布内容、但对话上下文中信息不足时先调用它,不要凭空猜测节点 id。
 

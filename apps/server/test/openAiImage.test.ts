@@ -77,6 +77,27 @@ test('getOpenAiCompatibleImagePayload uses APIMart async image parameters', () =
   })
 })
 
+test('getOpenAiCompatibleImagePayload maps unified size table to APIMart resolution labels', () => {
+  const base = {
+    flowId: 'local',
+    nodeId: 'image-1',
+    mediaType: 'image' as const,
+    prompt: 'city skyline',
+    model: 'qwen-image-2.0',
+    count: 1,
+  }
+  const payloadAt = (width: number, height: number) =>
+    getOpenAiCompatibleImagePayload(
+      { ...base, width, height },
+      'https://api.apimart.ai/v1',
+    )
+
+  // 统一尺寸表：长边 1024/2048/4096 → 1k/2k/4k（2048 不再被误标为 4k）
+  assert.equal(payloadAt(1024, 576).resolution, '1k')
+  assert.equal(payloadAt(2048, 1152).resolution, '2k')
+  assert.equal(payloadAt(4096, 2304).resolution, '4k')
+})
+
 test('generateOpenAiCompatibleImage fans out APIMart Gemini multi-image requests', async () => {
   let submitted = 0
   const requestedCounts: number[] = []

@@ -719,7 +719,9 @@ async function runEditImage(
     ? ratioArg as AgentImageAspectRatio
     : closestAgentImageAspectRatio(sourceData.width, sourceData.height)
       ?? AGENT_DEFAULT_IMAGE_ASPECT_RATIO
-  const size = getAgentImageDimensions(editRatio, getAgentImageResolutionOptions(model)[0])
+  // 清晰度与文生图同一套解析：用户覆盖/模型指定优先，缺省回退到该模型的默认档
+  const { resolution: editResolution } = resolveAgentImageParams(call, model)
+  const size = getAgentImageDimensions(editRatio, editResolution)
   const imageNodeId = canvas.addNode('image', context.getDropPosition())
   if (!imageNodeId) return fail(call, '创建图片节点失败。')
   inputImageNodes.forEach((node) => connectNodes(node.id, imageNodeId))

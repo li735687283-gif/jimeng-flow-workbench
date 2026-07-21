@@ -137,8 +137,9 @@ function getRatioSize(width: number, height: number): string {
 }
 
 function getResolution(width: number, height: number): string {
+  // 与统一尺寸表对齐（长边 1024/2048/4096）：2048 是 2k，4096 才是 4k
   const longSide = Math.max(width || 0, height || 0)
-  if (longSide >= 2048) return '4k'
+  if (longSide >= 3000) return '4k'
   if (longSide >= 1400) return '2k'
   return '1k'
 }

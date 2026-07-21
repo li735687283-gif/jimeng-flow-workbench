@@ -25,6 +25,10 @@
 - 持久化：本地 JSON 与媒体文件；异步生成状态通过 HTTP 查询和 SSE 推送。
 - 外部能力：Dreamina/即梦 CLI、Codex CLI，以及 OpenAI 兼容的文本、图片、视频接口。具体可用模型以运行时设置和服务端路由为准。
 
+## 外部 CLI 参考
+
+- 即梦（Dreamina）CLI 体验指南：https://bytedance.larkoffice.com/wiki/FVTwwm0bGiishxkKOoScdHR2nsg 。修复或更新即梦 CLI 相关内容（命令参数、模型版本、resolution_type 等）前，优先核对这份指南；指南与本机行为不一致时，以 `dreamina <子命令> -h` 的实际输出为准。
+
 ## 仓库结构与模块边界
 
 ### `apps/web`

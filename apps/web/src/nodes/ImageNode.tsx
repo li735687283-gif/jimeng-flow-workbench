@@ -35,6 +35,7 @@ import {
   upscaleImageAsset,
 } from '../api/assets'
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
+import { getImageDimensionsByRatio } from '../utils/agentGenerationPlan'
 import { getCodexStatus, testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
 import {
@@ -192,39 +193,12 @@ interface ImageGenerationSubmitOptions {
 }
 
 function getSizeFromRatio(ratio: string, resolution: string) {
-  const longSide = resolution === '4K' ? 2048 : resolution === '2K' ? 1536 : 1024
-  const shortSide = resolution === '4K' ? 1152 : resolution === '2K' ? 864 : 576
-
-  switch (ratio) {
-    case '9:16':
-      return { width: shortSide, height: longSide }
-    case '16:9':
-      return { width: longSide, height: shortSide }
-    case '1:2':
-      return { width: shortSide, height: shortSide * 2 }
-    case '2:1':
-      return { width: shortSide * 2, height: shortSide }
-    case '3:4':
-      return { width: shortSide, height: Math.round((shortSide * 4) / 3) }
-    case '4:3':
-      return { width: Math.round((shortSide * 4) / 3), height: shortSide }
-    case '3:2':
-      return { width: Math.round((shortSide * 3) / 2), height: shortSide }
-    case '2:3':
-      return { width: shortSide, height: Math.round((shortSide * 3) / 2) }
-    case '5:4':
-      return { width: Math.round((shortSide * 5) / 4), height: shortSide }
-    case '4:5':
-      return { width: shortSide, height: Math.round((shortSide * 5) / 4) }
-    case '21:9':
-      return { width: longSide, height: Math.round((longSide * 9) / 21) }
-    case '9:21':
-      return { width: Math.round((longSide * 9) / 21), height: longSide }
-    case '1:1':
-    case '自适应':
-    default:
-      return { width: longSide, height: longSide }
-  }
+  // 尺寸表与 Agent 生图共用（agentGenerationPlan）：清晰度档位 = 长边像素，
+  // 「自适应」等无法解析的比例按方形处理
+  const res = RESOLUTION_OPTIONS.includes(resolution as (typeof RESOLUTION_OPTIONS)[number])
+    ? resolution as (typeof RESOLUTION_OPTIONS)[number]
+    : '2K'
+  return getImageDimensionsByRatio(ratio, res)
 }
 
 function getDisplayFrameStyle(size: { width: number; height: number }): CSSProperties {

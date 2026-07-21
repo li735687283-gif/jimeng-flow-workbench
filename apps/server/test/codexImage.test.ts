@@ -9,9 +9,43 @@ import {
   generateCodexCliText,
   getCodexImageProviderStatus,
   isCodexImageModel,
+  normalizeCodexImageSize,
   startCodexLogin,
 } from '../src/services/codexImage'
 import { getAssetFilePath, saveUploadFile } from '../src/services/assets'
+
+test('normalizeCodexImageSize keeps already-valid gpt-image-2 sizes', () => {
+  assert.deepEqual(normalizeCodexImageSize(1024, 1024), { width: 1024, height: 1024 })
+  assert.deepEqual(normalizeCodexImageSize(1536, 1024), { width: 1536, height: 1024 })
+  assert.deepEqual(normalizeCodexImageSize(2048, 1152), { width: 2048, height: 1152 })
+  assert.deepEqual(normalizeCodexImageSize(3840, 2160), { width: 3840, height: 2160 })
+})
+
+test('normalizeCodexImageSize clamps 4K requests to gpt-image-2 limits', () => {
+  // 统一尺寸表 4K = 长边 4096，超出 gpt-image-2 的 3840 上限，等比压回
+  const landscape = normalizeCodexImageSize(4096, 2304)
+  assert.deepEqual(landscape, { width: 3840, height: 2160 })
+
+  // 方形 4096x4096 总像素超上限，压到像素上限内且仍是 16 的倍数
+  const square = normalizeCodexImageSize(4096, 4096)
+  assert.ok(square.width <= 3840 && square.height <= 3840)
+  assert.ok(square.width * square.height <= 8_294_400)
+  assert.equal(square.width % 16, 0)
+  assert.equal(square.height % 16, 0)
+
+  // 21:9 等比缩放后短边也要对齐 16
+  const ultrawide = normalizeCodexImageSize(4096, 1752)
+  assert.equal(ultrawide.width, 3840)
+  assert.equal(ultrawide.height % 16, 0)
+})
+
+test('normalizeCodexImageSize scales up sizes below the pixel floor', () => {
+  // 1K 16:9（1024x576 = 589,824 px）低于 655,360 下限，放大到达标
+  const small = normalizeCodexImageSize(1024, 576)
+  assert.ok(small.width * small.height >= 655_360)
+  assert.equal(small.width % 16, 0)
+  assert.equal(small.height % 16, 0)
+})
 
 test('isCodexImageModel only claims explicit Codex image models', () => {
   assert.equal(isCodexImageModel('$imagegen'), true)
@@ -166,6 +200,44 @@ test('generateCodexCliImage runs codex exec and returns newly created image file
   assert.equal(calls[0].cwd, 'F:\\repo')
   assert.match(calls[0].input ?? '', /\$imagegen/)
   assert.match(calls[0].input ?? '', /cinematic city skyline/)
+})
+
+test('generateCodexCliImage normalizes oversized requests in the prompt', async () => {
+  const inputs: string[] = []
+
+  await generateCodexCliImage(
+    {
+      flowId: 'local',
+      nodeId: 'image-1',
+      mediaType: 'image',
+      prompt: 'a cat',
+      model: 'codex:gpt-5.5',
+      width: 4096,
+      height: 2304,
+      count: 1,
+    },
+    {
+      codexPath: 'codex',
+      cwd: 'F:\\repo',
+      outputDir: 'F:\\repo\\workspace\\outputs',
+      now: () => 1_000,
+      runCommand: async (_command, _args, options) => {
+        inputs.push(options.input ?? '')
+        return { stdout: '', stderr: '' }
+      },
+      listImageFiles: async () => [
+        {
+          path: 'F:\\repo\\workspace\\outputs\\codex-image.png',
+          mtimeMs: 1_200,
+          size: 10,
+        },
+      ],
+    },
+  )
+
+  // 4K 请求（4096 长边）被规范化为 gpt-image-2 合法的 3840x2160，并要求严格按尺寸出图
+  assert.match(inputs[0] ?? '', /3840x2160/)
+  assert.match(inputs[0] ?? '', /严格使用这个精确尺寸/)
 })
 
 test('generateCodexCliText runs codex exec and returns the last message', async () => {

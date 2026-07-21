@@ -717,6 +717,48 @@ function extractImageResultsFromText(text: string): GenerationResult[] {
   return results
 }
 
+/**
+ * gpt-image-2 的硬性尺寸约束（见 Codex CLI imagegen 技能文档）：
+ * 长边 ≤ 3840、两条边都是 16 的倍数、总像素 655,360 ~ 8,294,400、长短边比 ≤ 3:1。
+ * 画布/Agent 的统一尺寸表是 1024/2048/4096，4096 超出上限，
+ * 这里把请求尺寸规范化为合法值，让 2K/4K 真正生效而不是被模型自由发挥成小图。
+ */
+export function normalizeCodexImageSize(
+  width: number,
+  height: number,
+): { width: number; height: number } {
+  const MAX_EDGE = 3840
+  const MIN_PIXELS = 655_360
+  const MAX_PIXELS = 8_294_400
+
+  let w = Number.isFinite(width) && width > 0 ? width : 1024
+  let h = Number.isFinite(height) && height > 0 ? height : 1024
+
+  const longSide = Math.max(w, h)
+  if (longSide > MAX_EDGE) {
+    const scale = MAX_EDGE / longSide
+    w *= scale
+    h *= scale
+  }
+
+  const round16 = (value: number) => Math.max(16, Math.round(value / 16) * 16)
+  w = round16(w)
+  h = round16(h)
+
+  if (w * h < MIN_PIXELS) {
+    const scale = Math.sqrt(MIN_PIXELS / (w * h))
+    w = Math.ceil((w * scale) / 16) * 16
+    h = Math.ceil((h * scale) / 16) * 16
+  }
+  if (w * h > MAX_PIXELS) {
+    const scale = Math.sqrt(MAX_PIXELS / (w * h))
+    w = Math.floor((w * scale) / 16) * 16
+    h = Math.floor((h * scale) / 16) * 16
+  }
+
+  return { width: w, height: h }
+}
+
 function buildCodexImagePrompt(
   req: GenerationRequest,
   outputDir: string,
@@ -724,13 +766,14 @@ function buildCodexImagePrompt(
   const refs = req.inputImages?.length
     ? `参考图数量：${req.inputImages.length} 张。\n`
     : ''
+  const size = normalizeCodexImageSize(req.width, req.height)
   return [
     '$imagegen',
     '',
     `任务：${req.prompt}`,
     '',
     refs,
-    `尺寸：${req.width}x${req.height}。`,
+    `尺寸：${size.width}x${size.height}。必须严格使用这个精确尺寸生成，不要输出更小的尺寸。`,
     `生成张数：${Math.max(1, req.count ?? 1)}。`,
     `请把最终图片保存到这个本地目录：${outputDir}`,
     '只输出最终图片文件路径和一句简短说明；不要修改项目代码，不要创建额外文档。',
