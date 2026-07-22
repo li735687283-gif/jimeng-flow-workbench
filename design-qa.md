@@ -101,8 +101,8 @@ final result: blocked
 
 # Design QA — 文本节点运行反馈（2026-07-22）
 
-- Source visual truth: `C:\tmp\mok-text-node-status-reference.png` (1200 × 921)
-- Implementation capture: `C:\Users\Lzw\AppData\Local\Temp\mok-text-node-loading-verified.png` (1280 × 720)
+- Source visual truth: 用户在任务中提供的截图（1200 × 921；会话内核对）
+- Implementation capture: 本地延迟 mock 的运行态截图（1280 × 720；会话内核对，临时文件已清理）
 - State verified: text request running against a delayed local mock API
 
 ## Full-view review

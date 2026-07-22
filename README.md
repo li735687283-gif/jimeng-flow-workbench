@@ -66,6 +66,7 @@ workspace/        本地配置、工作流和生成资产（Git 忽略）
 ## 文档
 
 - `AGENTS.md`：项目协作硬规则。
+- `docs/user-guide.md`：项目管理、文本节点和第三方模型配置的当前使用说明。
 - `docs/windows-desktop-release.md`：Windows 构建、版本升级、GitHub Release、自动更新与代码签名。
 - `docs/mok-cli.md`：mok 本地 CLI 的调用方式与画布控制命令。
 - `docs/agent-roadmap.md`：历史 Agent 规划快照。
