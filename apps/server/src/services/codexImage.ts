@@ -69,6 +69,8 @@ export interface CodexTextMessage {
 export interface CodexTextRequest {
   model: string
   messages: CodexTextMessage[]
+  /** 作为上下文交给 Codex 的图片；最终仍只返回文本。 */
+  inputImages?: string[]
   /** 为 true 时不再要求"输出纯文本"（调用方需要 JSON 等结构化输出） */
   expectJson?: boolean
 }
@@ -233,7 +235,11 @@ function isCodexCommandNotFoundError(message: string): boolean {
   )
 }
 
-function wrapCodexCommandError(source: string, err: unknown): Error {
+function isCodexUpgradeRequiredError(message: string): boolean {
+  return /requires a newer version of Codex|upgrade to the latest (?:app or )?CLI/i.test(message)
+}
+
+function wrapCodexCommandError(source: string, err: unknown, modelId?: string): Error {
   const message = trimCodexErrorMessage(getErrorMessage(err))
   if (isCodexCommandNotFoundError(message)) {
     return new Error(
@@ -248,6 +254,12 @@ function wrapCodexCommandError(source: string, err: unknown): Error {
   if (isCodexAuthError(message)) {
     return new Error(
       `OpenAI CLI 未登录或登录态失效。请在设置里的 OpenAI CLI 区块复制并运行“打开登录”命令：codex。原始错误：${message}`,
+    )
+  }
+  if (isCodexUpgradeRequiredError(message)) {
+    const model = modelId ? getCodexTextExecModel(modelId) || modelId : '当前模型'
+    return new Error(
+      `当前 Codex CLI 版本不支持模型 ${model}。请升级 Codex CLI，或在模型菜单改选 codex:gpt-5.4。原始错误：${message}`,
     )
   }
   return new Error(`${source} 调用失败：${message}`)
@@ -824,53 +836,65 @@ export async function generateCodexCliText(
   const outputDir = await getOutputDir(deps)
   const runCommand = deps.runCommand ?? defaultRunCommand
   const timeoutMs = getCodexTimeoutMs(deps)
+  const tempPaths: string[] = []
 
   await mkdir(outputDir, { recursive: true })
-
-  const lastMessagePath = join(
-    outputDir,
-    `codex-chat-${Date.now()}-${randomBytes(4).toString('hex')}.txt`,
-  )
-  const args = [
-    'exec',
-    '--cd',
-    cwd,
-    '--sandbox',
-    'read-only',
-    '--ephemeral',
-    '--skip-git-repo-check',
-    '--output-last-message',
-    lastMessagePath,
-  ]
-  const execModel = getCodexTextExecModel(req.model)
-  if (execModel) args.push('--model', execModel)
-  args.push('-')
-
-  let result: CodexCommandResult
   try {
-    const execute = () =>
-      runCommand(codexPath, args, {
-        cwd,
-        input: buildCodexTextPrompt(req.messages, req.expectJson === true),
-        timeoutMs,
-      })
-    // 生产路径串行执行,避免并发刷新 OAuth 令牌把登录态弄坏(见 enqueueCodexCli)
-    result = deps.runCommand ? await execute() : await enqueueCodexCli(execute)
-  } catch (err) {
-    throw wrapCodexCommandError('OpenAI Codex CLI', err)
+    const referencePaths = await resolveInputImagePaths(
+      req.inputImages,
+      deps,
+      tempPaths,
+    )
+    const lastMessagePath = join(
+      outputDir,
+      `codex-chat-${Date.now()}-${randomBytes(4).toString('hex')}.txt`,
+    )
+    const args = [
+      'exec',
+      '--cd',
+      cwd,
+      '--sandbox',
+      'read-only',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '--output-last-message',
+      lastMessagePath,
+    ]
+    const execModel = getCodexTextExecModel(req.model)
+    if (execModel) args.push('--model', execModel)
+    for (const path of referencePaths) {
+      args.push('--image', path)
+    }
+    args.push('-')
+
+    let result: CodexCommandResult
+    try {
+      const execute = () =>
+        runCommand(codexPath, args, {
+          cwd,
+          input: buildCodexTextPrompt(req.messages, req.expectJson === true),
+          timeoutMs,
+        })
+      // 生产路径串行执行,避免并发刷新 OAuth 令牌把登录态弄坏(见 enqueueCodexCli)
+      result = deps.runCommand ? await execute() : await enqueueCodexCli(execute)
+    } catch (err) {
+      throw wrapCodexCommandError('OpenAI Codex CLI', err, req.model)
+    }
+    let content = ''
+    try {
+      content = (await readFile(lastMessagePath, 'utf8')).trim()
+    } catch {
+      content = ''
+    }
+    content ||= result.stdout.trim()
+    if (!content) {
+      const summary = summarizeOutput(result.stdout, result.stderr)
+      content = summary || 'Codex CLI 返回了空回复。'
+    }
+    return { content }
+  } finally {
+    await cleanupTempPaths(tempPaths)
   }
-  let content = ''
-  try {
-    content = (await readFile(lastMessagePath, 'utf8')).trim()
-  } catch {
-    content = ''
-  }
-  content ||= result.stdout.trim()
-  if (!content) {
-    const summary = summarizeOutput(result.stdout, result.stderr)
-    content = summary || 'Codex CLI 返回了空回复。'
-  }
-  return { content }
 }
 
 export async function generateCodexCliImage(

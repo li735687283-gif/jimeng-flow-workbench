@@ -337,7 +337,7 @@ export function HomePage({
             <div className="home-menu-popover">
               <button type="button" onClick={onOpenAllFlows}>
                 <FolderClock size={16} />
-                <span>历史项目</span>
+                <span>历史记录</span>
               </button>
               <button type="button" onClick={onOpenAssetLibrary}>
                 <Images size={16} />

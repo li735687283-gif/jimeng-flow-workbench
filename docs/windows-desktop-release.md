@@ -19,7 +19,7 @@ npm run package:win
 
 ## 数据目录与升级
 
-生产版把设置、工作流、素材和生成结果放在 Electron 的 `app.getPath('userData')/workspace`。Windows 上通常是 `%APPDATA%\MO.K\workspace`，以实际 Electron userData 路径为准。
+生产版把设置、工作流、素材和生成结果放在 Electron 的 `app.getPath('userData')/workspace`。Windows 上实际是 `%APPDATA%\jimeng-flow-workbench\workspace`：Electron 默认 userData 取根 `package.json` 的 `name` 字段（`jimeng-flow-workbench`），而不是 `build.productName`（`MO.K`）。排查用户数据时直接去这个目录，不要找 `%APPDATA%\MO.K`。也可用 `MOK_DESKTOP_USER_DATA_DIR` 指定其他 userData 目录。
 
 首次运行时，如果稳定目录为空，应用会从以下旧位置择一迁移：
 

@@ -14,7 +14,7 @@ interface SettingsState {
   error: string | null
   /** 派生：dreamina CLI 路径非空（生成相关链路可用） */
   isJimengConfigured: boolean
-  /** 派生：llmBaseUrl 和 llmApiKey 都非空（LLM 文本节点可用） */
+  /** 派生：任一 API Provider 配置完整（LLM 文本节点可用） */
   isLlmConfigured: boolean
   /** 拉取最新 settings 并更新派生值 */
   loadSettings: () => Promise<void>
@@ -31,12 +31,14 @@ function deriveJimengConfigured(s: Settings | null): boolean {
 }
 
 function deriveLlmConfigured(s: Settings | null): boolean {
+  if (!s) return false
+  const configured = (baseUrl: string, apiKey: string) =>
+    baseUrl.trim().length > 0 && apiKey.trim().length > 0
   return (
-    !!s &&
-    typeof s.llmBaseUrl === 'string' &&
-    s.llmBaseUrl.trim().length > 0 &&
-    typeof s.llmApiKey === 'string' &&
-    s.llmApiKey.trim().length > 0
+    configured(s.llmBaseUrl, s.llmApiKey) ||
+    configured(s.kimiBaseUrl, s.kimiApiKey) ||
+    configured(s.kimiCodingBaseUrl, s.kimiCodingApiKey) ||
+    configured(s.deepseekBaseUrl, s.deepseekApiKey)
   )
 }
 

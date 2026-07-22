@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
@@ -287,6 +287,41 @@ test('generateCodexCliText runs codex exec and returns the last message', async 
   assert.equal(calls[0].args[calls[0].args.indexOf('--model') + 1], 'gpt-5')
   assert.match(calls[0].input ?? '', /系统要求/)
   assert.match(calls[0].input ?? '', /总结这张图的风格/)
+})
+
+test('generateCodexCliText attaches image context and cleans temporary files', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'codex-text-image-'))
+  let attachedImage = ''
+
+  try {
+    const result = await generateCodexCliText(
+      {
+        model: 'codex:gpt-5',
+        messages: [{ role: 'user', content: '只返回这张图的提示词' }],
+        inputImages: ['data:image/png;base64,aGVsbG8='],
+      },
+      {
+        codexPath: 'codex',
+        cwd: dir,
+        outputDir: dir,
+        runCommand: async (_command, args) => {
+          const imageIndex = args.indexOf('--image')
+          assert.ok(imageIndex >= 0)
+          attachedImage = args[imageIndex + 1]
+          await access(attachedImage)
+          const lastIndex = args.indexOf('--output-last-message')
+          await writeFile(args[lastIndex + 1], '长城提示词')
+          return { stdout: '', stderr: '' }
+        },
+      },
+    )
+
+    assert.equal(result.content, '长城提示词')
+    assert.ok(attachedImage.endsWith('.png'))
+    await assert.rejects(access(attachedImage))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
 
 test('generateCodexCliText uses a platform-safe default Codex command', async () => {
@@ -846,6 +881,28 @@ test('generateCodexCliText explains refresh-token conflicts and trims log spam',
   assert.match(thrown.message, /避免同时在终端等其他地方使用 codex/)
   // 截断:不能整段刷屏日志都进错误消息
   assert.ok(thrown.message.length < 800, `message too long: ${thrown.message.length}`)
+})
+
+test('generateCodexCliText explains when the selected model needs a newer CLI', async () => {
+  await assert.rejects(
+    generateCodexCliText(
+      {
+        model: 'codex:gpt-5.6-luna',
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+      {
+        cwd: process.cwd(),
+        outputDir: process.cwd(),
+        commandExists: async () => true,
+        runCommand: async () => {
+          throw new Error(
+            "The 'gpt-5.6-luna' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.",
+          )
+        },
+      },
+    ),
+    /当前 Codex CLI 版本不支持模型 gpt-5\.6-luna[\s\S]*codex:gpt-5\.4/,
+  )
 })
 
 test('enqueueCodexCli serializes concurrent tasks', async () => {

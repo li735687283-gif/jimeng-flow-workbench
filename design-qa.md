@@ -96,3 +96,32 @@ final result: passed
 - 暂无基于当前截图可确认的 P3 项。
 
 final result: blocked
+
+---
+
+# Design QA — 文本节点运行反馈（2026-07-22）
+
+- Source visual truth: `C:\tmp\mok-text-node-status-reference.png` (1200 × 921)
+- Implementation capture: `C:\Users\Lzw\AppData\Local\Temp\mok-text-node-loading-verified.png` (1280 × 720)
+- State verified: text request running against a delayed local mock API
+
+## Full-view review
+
+- The existing text-node frame and editor layout remain unchanged.
+- The stale bottom-left message is absent in both idle and running states.
+- The running overlay stays inside the text-node body and does not cover the prompt editor.
+
+## Focused review
+
+- Reuses the image/video node dot, sweep and progress-bar classes.
+- Shows `文本生成中` and an accessible progress bar while the request is pending.
+- Prompt, model selector and send action are disabled during the request and recover afterward.
+- Browser console: no warnings or errors.
+
+## Findings
+
+- P0: none
+- P1: none
+- P2: none
+
+Final result: passed.

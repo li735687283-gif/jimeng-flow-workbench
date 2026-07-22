@@ -57,6 +57,13 @@ async function resolveAssetImageDataUrls(
   return urls
 }
 
+// Codex CLI 冷启动、插件加载和视觉输入解析可能超过 60 秒。
+// 与 Agent 调用保持同一默认上限，同时允许本地环境按需覆盖。
+const TEXT_NODE_LLM_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.MOK_TEXT_NODE_LLM_TIMEOUT_MS ?? '')
+  return Number.isFinite(raw) && raw > 0 ? raw : 300_000
+})()
+
 const llmRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // POST /api/llm/chat
   // body: LlmChatRequest → 返回 LlmChatResponse（不带 nodeId）
@@ -149,7 +156,15 @@ const llmRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     }
 
     try {
-      const result = await generateText(model, message, { outputFormat }, imageDataUrls)
+      const result = await generateText(
+        model,
+        message,
+        {
+          outputFormat,
+          timeoutMs: TEXT_NODE_LLM_TIMEOUT_MS,
+        },
+        imageDataUrls,
+      )
       const response: LlmChatResponse = {
         nodeId,
         model,

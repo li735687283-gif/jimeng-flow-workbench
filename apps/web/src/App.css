@@ -610,6 +610,333 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* 全部项目：两个首页入口共用的项目管理弹窗 */
+.project-manager-overlay {
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(12px);
+}
+
+.project-manager-modal {
+  display: flex;
+  width: 70vw;
+  height: 70vh;
+  min-width: 720px;
+  min-height: 480px;
+  max-width: 1180px;
+  max-height: 820px;
+  flex-direction: column;
+  overflow: hidden;
+  color: #f2f2f2;
+  background: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+}
+
+.project-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.project-manager-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.project-manager-heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  color: #e8e8e8;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.project-manager-heading h2,
+.project-manager-heading p {
+  margin: 0;
+}
+
+.project-manager-heading h2 {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.project-manager-heading p {
+  margin-top: 2px;
+  color: #858585;
+  font-size: 12px;
+}
+
+.project-manager-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: #a8a8a8;
+  background: transparent;
+  border: 0;
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.project-manager-close:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.project-manager-error {
+  margin: 14px 24px 0;
+  padding: 10px 12px;
+  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.project-manager-content {
+  min-height: 0;
+  flex: 1;
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+}
+
+.project-manager-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.project-manager-card {
+  min-width: 0;
+  overflow: hidden;
+  background: #202020;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  transition:
+    border-color var(--motion-base) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard);
+}
+
+.project-manager-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+  transform: translateY(-2px);
+}
+
+.project-manager-card-open {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  background: #111111;
+  border: 0;
+  cursor: pointer;
+}
+
+.project-manager-thumbnail,
+.project-manager-thumbnail-empty,
+.project-manager-thumbnail-shade {
+  position: absolute;
+  inset: 0;
+}
+
+.project-manager-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--motion-slow) var(--ease-standard);
+}
+
+.project-manager-card:hover .project-manager-thumbnail {
+  transform: scale(1.035);
+}
+
+.project-manager-thumbnail-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555555;
+  background: linear-gradient(145deg, #171717, #101010);
+}
+
+.project-manager-thumbnail-shade {
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.28));
+}
+
+.project-manager-opening {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #f4f4f4;
+  background: rgba(0, 0, 0, 0.62);
+  font-size: 12px;
+  backdrop-filter: blur(6px);
+}
+
+.project-manager-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 12px 13px 14px;
+}
+
+.project-manager-card-copy {
+  min-width: 0;
+}
+
+.project-manager-card-copy strong,
+.project-manager-card-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-manager-card-copy strong {
+  color: #ededed;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.project-manager-card-copy span {
+  margin-top: 3px;
+  color: #767676;
+  font-size: 11px;
+}
+
+.project-manager-rename-form {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-manager-rename-form input {
+  min-width: 0;
+  height: 32px;
+  flex: 1;
+  padding: 0 9px;
+  color: #f2f2f2;
+  background: var(--menu-control-bg);
+  border: 1px solid var(--menu-control-border);
+  border-radius: var(--menu-item-radius);
+  outline: none;
+  font: inherit;
+  font-size: 12px;
+}
+
+.project-manager-rename-form input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
+}
+
+.project-manager-rename-form button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--menu-item-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--menu-item-radius);
+  cursor: pointer;
+}
+
+.project-manager-rename-form button:hover {
+  background: var(--menu-item-hover-bg);
+}
+
+.project-manager-rename-form button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.project-manager-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.project-manager-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--menu-item-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--menu-item-radius);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.project-manager-card-actions button:hover {
+  background: var(--menu-item-hover-bg);
+}
+
+.project-manager-card-actions button.danger {
+  color: var(--menu-danger-text);
+}
+
+.project-manager-card-actions button.danger:hover {
+  background: var(--menu-danger-hover-bg);
+}
+
+.project-manager-card-actions button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+.project-manager-empty {
+  display: flex;
+  min-height: 260px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  color: #777777;
+  font-size: 13px;
+}
+
+@media (max-width: 900px), (max-height: 680px) {
+  .project-manager-overlay {
+    padding: 14px;
+  }
+
+  .project-manager-modal {
+    width: calc(100vw - 28px);
+    height: calc(100vh - 28px);
+    min-width: 0;
+    min-height: 0;
+  }
+}
+
 .home-featured-track {
   display: grid;
   grid-template-columns: minmax(0, 0.96fr) minmax(0, 1.16fr) minmax(0, 0.96fr);
@@ -8013,6 +8340,7 @@
 
 .settings-action-button,
 .settings-icon-button,
+.settings-api-key-link,
 .settings-model-list-selected,
 .settings-model-list-add,
 .settings-model-picker-tab {
@@ -8022,6 +8350,27 @@
     color var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-fast) var(--ease-standard),
     transform var(--motion-fast) var(--ease-standard);
+}
+
+.settings-api-key-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-api-key-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a8a8a8;
+  font-size: 11px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.settings-api-key-link:hover {
+  color: #ededed;
 }
 
 .settings-action-button {

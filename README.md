@@ -67,7 +67,9 @@ workspace/        本地配置、工作流和生成资产（Git 忽略）
 
 - `AGENTS.md`：项目协作硬规则。
 - `docs/windows-desktop-release.md`：Windows 构建、版本升级、GitHub Release、自动更新与代码签名。
+- `docs/mok-cli.md`：mok 本地 CLI 的调用方式与画布控制命令。
 - `docs/agent-roadmap.md`：历史 Agent 规划快照。
+- `docs/project-merge.md`：旧副本归并与当前仓库位置记录。
 - `docs/superpowers/`、`.trae/specs/`：设计与实施过程快照。
 - `outputs/jimeng-flow-workbench-prd.md`：v0.1 历史产品定义。
 

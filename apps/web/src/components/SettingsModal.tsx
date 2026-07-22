@@ -5,7 +5,17 @@
 // 参考 PRD 7.1、8.6、11.3、12.1。
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown, Copy, Plus, RefreshCw, Settings as SettingsIcon, Trash2, X } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  ExternalLink,
+  Plus,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Trash2,
+  X,
+} from 'lucide-react'
 import type { Settings } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import {
@@ -122,6 +132,61 @@ const CODEX_CHAT_MODEL_OPTIONS: LlmModelInfo[] = [
     description: '上一代 Codex CLI 旗舰模型，保留兼容',
   },
 ]
+
+const API_PROVIDER_DEFINITIONS = {
+  kimi: {
+    title: 'Kimi API',
+    description: 'Kimi 开放平台，按量付费，适合产品集成与通用对话。',
+    baseUrlKey: 'kimiBaseUrl',
+    apiKeyKey: 'kimiApiKey',
+    apiKeyUrl: 'https://platform.kimi.com/console/api-keys',
+    baseUrlPlaceholder: 'https://api.moonshot.cn/v1',
+    models: [
+      { id: 'kimi-k3', label: 'Kimi K3' },
+      { id: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+      { id: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code Highspeed' },
+      { id: 'kimi-k2.6', label: 'Kimi K2.6' },
+    ],
+  },
+  'kimi-coding': {
+    title: 'Kimi Coding Plan',
+    description: 'Kimi 会员 Coding 权益，使用独立的 Coding Plan API Key。',
+    baseUrlKey: 'kimiCodingBaseUrl',
+    apiKeyKey: 'kimiCodingApiKey',
+    apiKeyUrl: 'https://www.kimi.com/code/console',
+    baseUrlPlaceholder: 'https://api.kimi.com/coding/v1',
+    models: [
+      { id: 'k3', label: 'K3' },
+      { id: 'kimi-for-coding', label: 'Kimi for Coding' },
+      { id: 'kimi-for-coding-highspeed', label: 'Kimi for Coding Highspeed' },
+    ],
+  },
+  deepseek: {
+    title: 'DeepSeek API',
+    description: 'DeepSeek 开放平台，使用独立 API Key 和 OpenAI-compatible 接口。',
+    baseUrlKey: 'deepseekBaseUrl',
+    apiKeyKey: 'deepseekApiKey',
+    apiKeyUrl: 'https://platform.deepseek.com/api_keys',
+    baseUrlPlaceholder: 'https://api.deepseek.com',
+    models: [
+      { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+    ],
+  },
+} as const satisfies Record<
+  string,
+  {
+    title: string
+    description: string
+    baseUrlKey: keyof Settings
+    apiKeyKey: keyof Settings
+    apiKeyUrl: string
+    baseUrlPlaceholder: string
+    models: readonly LlmModelInfo[]
+  }
+>
+
+type ApiProviderId = keyof typeof API_PROVIDER_DEFINITIONS
 
 const FALLBACK_CODEX_SETUP_COMMANDS: NonNullable<CodexStatus['setupCommands']> = {
   installCodex: 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://chatgpt.com/codex/install.ps1 | iex"',
@@ -379,6 +444,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     ok: boolean
     message: string
   } | null>(null)
+  const [testingApiProvider, setTestingApiProvider] = useState<ApiProviderId | null>(null)
+  const [apiProviderTestResults, setApiProviderTestResults] = useState<
+    Partial<Record<ApiProviderId, { ok: boolean; message: string }>>
+  >({})
   const [availableLlmModels, setAvailableLlmModels] = useState<LlmModelInfo[]>([])
   const [loadingLlmModels, setLoadingLlmModels] = useState(false)
   const [llmModelsMessage, setLlmModelsMessage] = useState<string | null>(null)
@@ -398,6 +467,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setCodexTestResult(null)
     setCodexSetupCommands(FALLBACK_CODEX_SETUP_COMMANDS)
     setLlmTestResult(null)
+    setTestingApiProvider(null)
+    setApiProviderTestResults({})
     setLlmModelsMessage(null)
     setSaveStatus('idle')
     setOpenModelPicker(null)
@@ -426,6 +497,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const guards = getSettingsModalGuards(submitting)
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setSaveStatus('idle')
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const updateStringSetting = (key: keyof Settings, value: string) => {
     setSaveStatus('idle')
     setForm((prev) => ({ ...prev, [key]: value }))
   }
@@ -549,6 +625,39 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
   }
 
+  const handleTestApiProvider = async (providerId: ApiProviderId) => {
+    const definition = API_PROVIDER_DEFINITIONS[providerId]
+    setTestingApiProvider(providerId)
+    setApiProviderTestResults((current) => {
+      const next = { ...current }
+      delete next[providerId]
+      return next
+    })
+    try {
+      const result = await testLlmConnection({
+        llmBaseUrl: String(form[definition.baseUrlKey] ?? ''),
+        llmApiKey: String(form[definition.apiKeyKey] ?? ''),
+      })
+      setApiProviderTestResults((current) => ({
+        ...current,
+        [providerId]: {
+          ok: result.ok,
+          message: result.message ?? (result.ok ? '连接成功' : '连接失败'),
+        },
+      }))
+    } catch (err: unknown) {
+      setApiProviderTestResults((current) => ({
+        ...current,
+        [providerId]: {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        },
+      }))
+    } finally {
+      setTestingApiProvider((current) => (current === providerId ? null : current))
+    }
+  }
+
   async function refreshLlmModels(
     target: Partial<Settings> = form,
     opts?: { silent?: boolean },
@@ -669,11 +778,34 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     .map(({ idx }) => idx)
   const codexChatModels = codexChatModelIndices.map((idx) => selectedLlmModels[idx])
 
+  const apiProviderModelIds = new Set<string>(
+    Object.values(API_PROVIDER_DEFINITIONS).flatMap((definition) =>
+      definition.models.map((model) => model.id),
+    ),
+  )
+  const getApiProviderModels = (providerId: ApiProviderId) => {
+    const modelIds = new Set<string>(
+      API_PROVIDER_DEFINITIONS[providerId].models.map((model) => model.id),
+    )
+    const indices = selectedLlmModels
+      .map((id, idx) => ({ id, idx }))
+      .filter(({ id }) => modelIds.has(id))
+      .map(({ idx }) => idx)
+    return {
+      indices,
+      models: indices.map((idx) => selectedLlmModels[idx]),
+    }
+  }
+  const kimiApiModelState = getApiProviderModels('kimi')
+  const kimiCodingModelState = getApiProviderModels('kimi-coding')
+  const deepseekModelState = getApiProviderModels('deepseek')
+
   const relayModelIndices = selectedLlmModels
     .map((id, idx) => ({ id, idx }))
     .filter(
       ({ id }) =>
         !id.toLowerCase().startsWith('codex:') &&
+        !apiProviderModelIds.has(id) &&
         !isJimengImageModel(id) &&
         !isJimengVideoModel(id),
     )
@@ -799,6 +931,111 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       </div>
     )
   }
+
+  const renderApiProviderSection = (
+    providerId: ApiProviderId,
+    modelState: { models: string[]; indices: number[] },
+  ) => {
+    const definition = API_PROVIDER_DEFINITIONS[providerId]
+    const isTesting = testingApiProvider === providerId
+    const baseUrl = String(form[definition.baseUrlKey] ?? '')
+    const apiKey = String(form[definition.apiKeyKey] ?? '')
+
+    return (
+      <section style={sectionStyle} key={providerId}>
+        <div
+          style={{
+            ...sectionTitleStyle,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span>{definition.title}</span>
+          <button
+            type="button"
+            onClick={() => void handleTestApiProvider(providerId)}
+            className="settings-action-button"
+            disabled={isTesting}
+            style={{
+              padding: '4px 10px',
+              borderRadius: '4px',
+              border: '1px solid #444',
+              background: isTesting ? '#333' : '#252525',
+              color: isTesting ? '#888' : '#cfcfcf',
+              cursor: isTesting ? 'not-allowed' : 'pointer',
+              fontSize: '12px',
+            }}
+          >
+            {isTesting ? '测试中...' : '测试连接'}
+          </button>
+        </div>
+        <div style={{ ...helperTextStyle, marginBottom: '12px' }}>
+          {definition.description}
+        </div>
+        {renderTestResult(apiProviderTestResults[providerId] ?? null)}
+        <div style={gridStyle}>
+          <div style={fieldStyle}>
+            <label style={labelStyle} htmlFor={`set-${providerId}-base`}>
+              Base URL
+            </label>
+            <input
+              id={`set-${providerId}-base`}
+              style={inputStyle}
+              value={baseUrl}
+              onChange={(event) =>
+                updateStringSetting(definition.baseUrlKey, event.target.value)
+              }
+              placeholder={definition.baseUrlPlaceholder}
+            />
+          </div>
+          <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
+            <div className="settings-api-key-label-row">
+              <label style={labelStyle} htmlFor={`set-${providerId}-key`}>
+                API Key
+              </label>
+              <a
+                className="settings-api-key-link"
+                href={definition.apiKeyUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`打开${definition.title}密钥管理页面`}
+              >
+                获取 API Key
+                <ExternalLink size={12} aria-hidden="true" />
+              </a>
+            </div>
+            <input
+              id={`set-${providerId}-key`}
+              style={inputStyle}
+              type="password"
+              value={apiKey}
+              onChange={(event) =>
+                updateStringSetting(definition.apiKeyKey, event.target.value)
+              }
+              placeholder="sk-..."
+            />
+          </div>
+          <div style={{ ...fieldStyle, gridColumn: '1 / span 2', gap: '10px' }}>
+            {renderModelList(
+              `api-${providerId}`,
+              '模型',
+              `暂未添加${definition.title}模型。点击下方加号添加。`,
+              modelState.models,
+              modelState.indices,
+              [...definition.models],
+              selectedLlmModels,
+              '添加一个模型',
+              addLlmModel,
+              updateLlmModelRow,
+              removeLlmModelRow,
+            )}
+          </div>
+        </div>
+      </section>
+    )
+  }
+
   const codexSetupRows = [
     { label: '安装 Codex CLI', command: codexSetupCommands.installCodex },
     { label: '打开登录', command: codexSetupCommands.login },
@@ -1111,6 +1348,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               )}
             </div>
           </section>
+
+          {renderApiProviderSection('kimi', kimiApiModelState)}
+          {renderApiProviderSection('kimi-coding', kimiCodingModelState)}
+          {renderApiProviderSection('deepseek', deepseekModelState)}
 
           {/* LLM Provider */}
           <section style={sectionStyle}>

@@ -123,3 +123,39 @@ test('SettingsModal uses one custom picker system instead of browser datalists',
   assert.equal(html.includes('settings-dropdown-control'), false)
   assert.equal((html.match(/settings-model-list-add/g) ?? []).length >= 5, true)
 })
+test('SettingsModal keeps Kimi API, Kimi Coding Plan, and DeepSeek as separate providers', async () => {
+  const { SettingsModal } = await import('../src/components/SettingsModal')
+
+  const html = renderToStaticMarkup(
+    <SettingsModal open={true} onClose={() => undefined} />,
+  )
+  const source = readFileSync('apps/web/src/components/SettingsModal.tsx', 'utf8')
+
+  assert.equal(html.includes('Kimi API'), true)
+  assert.equal(html.includes('Kimi Coding Plan'), true)
+  assert.equal(html.includes('DeepSeek API'), true)
+  assert.equal(html.includes('https://api.moonshot.cn/v1'), true)
+  assert.equal(html.includes('https://api.kimi.com/coding/v1'), true)
+  assert.equal(html.includes('https://api.deepseek.com'), true)
+
+  for (const apiKeyUrl of [
+    'https://platform.kimi.com/console/api-keys',
+    'https://www.kimi.com/code/console',
+    'https://platform.deepseek.com/api_keys',
+  ]) {
+    assert.equal(html.includes(`href="${apiKeyUrl}"`), true)
+  }
+  assert.equal((html.match(/settings-api-key-link/g) ?? []).length, 3)
+  assert.equal((html.match(/target="_blank"/g) ?? []).length >= 3, true)
+
+  for (const modelId of [
+    'kimi-k3',
+    'kimi-k2.7-code',
+    'k3',
+    'kimi-for-coding',
+    'deepseek-v4-flash',
+    'deepseek-v4-pro',
+  ]) {
+    assert.equal(source.includes(`id: '${modelId}'`), true)
+  }
+})

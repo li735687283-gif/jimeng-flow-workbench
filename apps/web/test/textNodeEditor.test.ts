@@ -55,6 +55,27 @@ test('text node only keeps write+llm send interaction like image node editor', a
   assert.match(source, /handleOpenPromptPanel\(\)/)
   assert.match(source, /bodyEditingRef/)
   assert.match(source, /runTextNode\(/)
+  assert.equal(source.includes('当前模型（Codex）不支持识图'), false)
+  // 请求是否仍在执行只能由运行时 store 决定；持久化的 running 可能来自
+  // 刷新或异常中断，不能让发送按钮永久转圈。
+  assert.equal(source.includes("|| nodeData.status === 'running'"), false)
+  assert.equal(source.includes('上次文本生成未完成，请重新发送'), false)
+  assert.match(source, /status: 'idle'[\s\S]{0,80}error: undefined/)
+  assert.match(source, /finally\s*\{[\s\S]{0,120}setLoading\(id, false\)/)
+  // 成功结果不能继续展示旧任务恢复或上一次失败提示。
+  assert.match(source, /setBodyDraft\(res\.content\)[\s\S]{0,160}setError\(id, undefined\)/)
+  assert.match(source, /setError\(id, undefined\)[\s\S]{0,80}setSendError\(''\)/)
+  assert.equal(source.includes('visibleError'), false)
+  assert.equal(source.includes('image-editor-status error'), false)
+  assert.match(source, /<span>文本生成中<\/span>/)
+  assert.match(source, /className="image-generation-progress-dot"/)
+  assert.match(source, /className="image-generation-progress-track"/)
+  assert.match(source, /className="image-generation-progress-fill"/)
+  assert.match(
+    source,
+    /setSendError\(''\)[\s\S]{0,180}setError\(id, undefined\)[\s\S]{0,80}setLoading\(id, true\)/,
+  )
+
   // 双击只进正文，不得收起底栏；无动画保持底栏
   const enterBodyStart = source.indexOf('const handleEnterBodyEdit')
   const enterBodyEnd = source.indexOf('const handleNodeClick', enterBodyStart)

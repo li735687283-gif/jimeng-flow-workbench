@@ -4,7 +4,6 @@ import {
   extractImageNodeAssetId,
   getUpstreamImageAssetIds,
   getUpstreamImageReferences,
-  isCodexTextModel,
 } from '../src/utils/textNodeImageInputs'
 
 test('text node collects direct upstream image assets for reverse prompt', () => {
@@ -84,8 +83,6 @@ test('extractImageNodeAssetId falls back to outputAssetIds', () => {
     }),
     'asset_from_output',
   )
-  assert.equal(isCodexTextModel('codex:gpt-5.5'), true)
-  assert.equal(isCodexTextModel('gpt-4o-mini'), false)
 })
 
 test('syncAllTextNodeImageRefs writes inputImageAssetIds onto text targets', async () => {

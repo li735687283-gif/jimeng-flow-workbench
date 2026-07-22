@@ -43,7 +43,6 @@ import { getConfiguredChatModels } from '../utils/chatModels'
 import {
   getUpstreamImageAssetIds,
   getUpstreamImageReferences,
-  isCodexTextModel,
 } from '../utils/textNodeImageInputs'
 import {
   shouldCloseFloatingEditorOnPointerDown,
@@ -160,7 +159,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
   const setError = useTextNodeStore((s) => s.setError)
   const setLastRequest = useTextNodeStore((s) => s.setLastRequest)
   const callState = useTextNodeStore((s) => s.states[id])
-  const loading = callState?.loading === true || nodeData.status === 'running'
+  const loading = callState?.loading === true
 
   const frameColor =
     typeof nodeData.frameColor === 'string' && nodeData.frameColor.trim()
@@ -216,6 +215,25 @@ export function TextNode({ id, data, selected }: NodeProps) {
     storedImageAssetIds,
     updateNodeData,
     upstreamImageAssetIds,
+  ])
+
+  // running 是旧版本写进项目 JSON 的持久化状态。刷新、崩溃或网络中断后
+  // 不存在对应的运行时请求，静默恢复为空闲，避免残留错误提示或锁死发送按钮。
+  useEffect(() => {
+    if (nodeData.status !== 'running' || loading) return
+    setError(id, undefined)
+    updateNodeData(id, {
+      status: 'idle',
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    } as Partial<TextNodeData>)
+    void useFlowStore.getState().saveCurrent().catch(() => undefined)
+  }, [
+    id,
+    loading,
+    nodeData.status,
+    setError,
+    updateNodeData,
   ])
 
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
@@ -694,12 +712,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
       setSendError('请先选择大语言模型')
       return
     }
-    if (inputImages.length > 0 && isCodexTextModel(modelId)) {
-      setSendError(
-        '当前模型（Codex）不支持识图。请改选支持视觉的模型，例如 gpt-4o / qwen-vl 等 OpenAI 兼容模型',
-      )
-      return
-    }
     if (!message) {
       setSendError(
         inputImages.length > 0
@@ -711,8 +723,9 @@ export function TextNode({ id, data, selected }: NodeProps) {
     if (loading) return
 
     setSendError('')
-    setLoading(id, true)
+    // setError 会同步结束 loading；必须先清错，再进入运行态。
     setError(id, undefined)
+    setLoading(id, true)
     setLastRequest(id, { model: modelId, message, outputFormat: 'auto' })
     // 用户未手写时，不把默认反推长文写入 input，保持输入框干净
     if (typedMessage) {
@@ -763,7 +776,9 @@ export function TextNode({ id, data, selected }: NodeProps) {
         updatedAt: new Date().toISOString(),
       } as Partial<TextNodeData>)
       setBodyDraft(res.content)
-      setLoading(id, false)
+      // 成功结果优先于旧任务恢复提示；两层临时错误都必须立即清空。
+      setError(id, undefined)
+      setSendError('')
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -774,6 +789,8 @@ export function TextNode({ id, data, selected }: NodeProps) {
         error: msg,
         updatedAt: new Date().toISOString(),
       } as Partial<TextNodeData>)
+    } finally {
+      setLoading(id, false)
     }
   }, [
     id,
@@ -786,29 +803,10 @@ export function TextNode({ id, data, selected }: NodeProps) {
     updateNodeData,
   ])
 
-  // 有上游图时，自动避开 Codex 纯文本模型，优先选视觉兼容模型
-  useEffect(() => {
-    if (!hasUpstreamImages) return
-    if (!selectedModelId || !isCodexTextModel(selectedModelId)) return
-    const visionCandidate = modelOptions.find(
-      (model) => !isCodexTextModel(model.id),
-    )
-    if (!visionCandidate) return
-    setSelectedModelId(visionCandidate.id)
-    setModelTouched(true)
-    persistSelectedModel(visionCandidate.id)
-  }, [
-    hasUpstreamImages,
-    modelOptions,
-    persistSelectedModel,
-    selectedModelId,
-  ])
-
   const canSend =
     !!selectedModel?.id &&
     !loading &&
-    (prompt.trim().length > 0 || hasUpstreamImages) &&
-    !(hasUpstreamImages && isCodexTextModel(selectedModel?.id ?? ''))
+    (prompt.trim().length > 0 || hasUpstreamImages)
   const modelMenuStyle = {
     '--image-model-menu-width': '260px',
   } as CSSProperties
@@ -937,6 +935,26 @@ export function TextNode({ id, data, selected }: NodeProps) {
               />
             </div>
           </div>
+          {loading ? (
+            <div className="image-generation-progress-overlay" aria-live="polite">
+              <div className="image-generation-progress-content">
+                <div className="image-generation-progress-label">
+                  <span className="image-generation-progress-dot" />
+                  <span>文本生成中</span>
+                </div>
+                <div
+                  className="image-generation-progress-track"
+                  role="progressbar"
+                  aria-label="文本生成中"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuetext="生成中"
+                >
+                  <span className="image-generation-progress-fill" />
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         {contentExpanded && typeof document !== 'undefined'
@@ -1104,11 +1122,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
               </button>
             </div>
 
-            {sendError || callState?.error ? (
-              <div className="image-editor-status error">
-                {sendError || callState?.error}
-              </div>
-            ) : null}
           </div>
         )}
       </>

@@ -39,11 +39,6 @@ export function extractImageNodeAssetId(
   return ''
 }
 
-/** Codex CLI 文本通道不支持多模态识图 */
-export function isCodexTextModel(modelId: string): boolean {
-  return modelId.trim().toLowerCase().startsWith('codex:')
-}
-
 interface CanvasEdgeLike {
   source?: string | null
   target?: string | null

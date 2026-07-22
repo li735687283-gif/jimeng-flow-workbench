@@ -58,7 +58,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   )
 
   for (const text of [
-    '历史项目',
+    '历史记录',
     '资源库',
     '作品管理',
     '设置',

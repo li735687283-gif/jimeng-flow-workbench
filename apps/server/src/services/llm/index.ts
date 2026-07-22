@@ -104,7 +104,12 @@ const DEFAULT_MODELS: LlmModelInfo[] = [
   },
 ]
 
-export type LlmGenerationProvider = 'openai-compatible' | 'codex'
+export type LlmGenerationProvider =
+  | 'openai-compatible'
+  | 'codex'
+  | 'kimi'
+  | 'kimi-coding'
+  | 'deepseek'
 
 export function getLlmGenerationProviderForSettings(
   model: string,
@@ -116,7 +121,55 @@ export function getLlmGenerationProviderForSettings(
     settings?.modelConfigs,
     'chat',
   ).find((item) => item.id === id)
-  return configured?.provider === 'codex' ? 'codex' : 'openai-compatible'
+  const provider = configured?.provider
+  if (
+    provider === 'codex' ||
+    provider === 'kimi' ||
+    provider === 'kimi-coding' ||
+    provider === 'deepseek'
+  ) {
+    return provider
+  }
+  return 'openai-compatible'
+}
+
+export interface LlmProviderConnection {
+  baseUrl: string
+  apiKey: string
+  displayName: string
+}
+
+export function getLlmProviderConnection(
+  provider: LlmGenerationProvider,
+  settings: Settings,
+  overrides: Pick<GenerateOptions, 'baseUrl' | 'apiKey'> = {},
+): LlmProviderConnection {
+  if (provider === 'kimi') {
+    return {
+      baseUrl: settings.kimiBaseUrl,
+      apiKey: settings.kimiApiKey,
+      displayName: 'Kimi API',
+    }
+  }
+  if (provider === 'kimi-coding') {
+    return {
+      baseUrl: settings.kimiCodingBaseUrl,
+      apiKey: settings.kimiCodingApiKey,
+      displayName: 'Kimi Coding Plan',
+    }
+  }
+  if (provider === 'deepseek') {
+    return {
+      baseUrl: settings.deepseekBaseUrl,
+      apiKey: settings.deepseekApiKey,
+      displayName: 'DeepSeek API',
+    }
+  }
+  return {
+    baseUrl: overrides.baseUrl ?? settings.llmBaseUrl,
+    apiKey: overrides.apiKey ?? settings.llmApiKey,
+    displayName: 'LLM Provider',
+  }
 }
 
 /** 模型 estimatedLatency 估算（基于 id 简单匹配，仅供 UI 展示） */
@@ -222,15 +275,34 @@ async function callChatCompletions(
   const settings = await getSettings()
   const provider = getLlmGenerationProviderForSettings(model, settings)
   if (provider === 'codex') {
+    const inputImages: string[] = []
     const codexMessages = messages.map(({ role, content }) => {
       if (Array.isArray(content)) {
-        throw new Error('当前模型不支持图片识图/反推，请改用支持视觉的 OpenAI 兼容模型')
+        const text = content
+          .filter((part): part is Extract<OpenAiContentPart, { type: 'text' }> =>
+            part.type === 'text',
+          )
+          .map((part) => part.text)
+          .join('\n')
+        inputImages.push(
+          ...content
+            .filter((part): part is Extract<OpenAiContentPart, { type: 'image_url' }> =>
+              part.type === 'image_url',
+            )
+            .map((part) => part.image_url.url),
+        )
+        return { role, content: text }
       }
       return { role, content }
     })
     const outputFormat: LlmOutputFormat = opts.outputFormat ?? 'auto'
     const result = await generateCodexCliText(
-      { model, messages: codexMessages, expectJson: outputFormat === 'json' },
+      {
+        model,
+        messages: codexMessages,
+        inputImages,
+        expectJson: outputFormat === 'json',
+      },
       { settings, timeoutMs: opts.timeoutMs },
     )
     const { contentType, promptCandidate } = detectContentTypeAndPrompt(
@@ -244,14 +316,15 @@ async function callChatCompletions(
     }
   }
 
-  const baseUrl = (opts.baseUrl ?? settings.llmBaseUrl ?? '').replace(/\/+$/, '')
-  const apiKey = opts.apiKey ?? settings.llmApiKey ?? ''
+  const connection = getLlmProviderConnection(provider, settings, opts)
+  const baseUrl = connection.baseUrl.replace(/\/+$/, '')
+  const apiKey = connection.apiKey
 
   if (!baseUrl) {
-    throw new Error('LLM base URL 未配置，请先在设置中配置 llmBaseUrl')
+    throw new Error(`${connection.displayName} Base URL 未配置，请先在设置中完成配置`)
   }
   if (!apiKey) {
-    throw new Error('LLM API key 未配置，请先在设置中配置 llmApiKey')
+    throw new Error(`${connection.displayName} API Key 未配置，请先在设置中完成配置`)
   }
 
   const url = `${baseUrl}/chat/completions`
@@ -342,15 +415,8 @@ export async function generateText(
     )
   }
 
-  // Codex CLI 文本通道不支持多模态识图
-  const settings = await getSettings()
-  if (getLlmGenerationProviderForSettings(model, settings) === 'codex') {
-    throw new Error(
-      '当前模型不支持图片识图/反推，请改用支持视觉的 OpenAI 兼容模型（如 gpt-4o、qwen-vl 等）',
-    )
-  }
-
-  // OpenAI / 中转站视觉模型：content 为 text + image_url parts
+  // Codex CLI 与 OpenAI 兼容视觉模型都使用同一组 text + image_url parts；
+  // provider 分支负责转换为 `codex exec --image` 或 Chat Completions payload。
   const contentParts: OpenAiContentPart[] = [
     { type: 'text', text: message },
     ...images.map(

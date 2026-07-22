@@ -11,6 +11,9 @@ export type ModelProvider =
   | "dreamina"
   | "codex"
   | "openai-compatible"
+  | "kimi"
+  | "kimi-coding"
+  | "deepseek"
   | "custom";
 
 /** 带来源和能力的模型配置，用于逐步替代旧的字符串数组模型列表。 */
@@ -142,6 +145,9 @@ function inferProviderForModel(
   const id = modelId.toLowerCase();
   if (capability === "chat") {
     if (id.startsWith("codex:")) return "codex";
+    if (id === "k3" || id.startsWith("kimi-for-coding")) return "kimi-coding";
+    if (id.startsWith("kimi-")) return "kimi";
+    if (id.startsWith("deepseek-")) return "deepseek";
   }
   if (capability === "image") {
     if (id === "gpt-image-2" || id.startsWith("codex:")) return "codex";
@@ -244,6 +250,16 @@ export interface Settings {
   /** LLM API key */
   llmApiKey: string;
 
+  /** Kimi 开放平台（按量付费）OpenAI-compatible 地址与密钥 */
+  kimiBaseUrl: string;
+  kimiApiKey: string;
+  /** Kimi Coding Plan（会员权益）独立地址与密钥 */
+  kimiCodingBaseUrl: string;
+  kimiCodingApiKey: string;
+  /** DeepSeek 开放平台地址与密钥 */
+  deepseekBaseUrl: string;
+  deepseekApiKey: string;
+
   /** 输出目录，相对项目根 */
   outputDir: string;
   /** 首页封面背景图片 URL；留空时使用前端内置背景 */
@@ -298,6 +314,12 @@ export const DEFAULT_SETTINGS: Settings = {
   llmModel: "gpt-4o-mini",
   llmModels: ["gpt-4o-mini"],
   llmApiKey: "",
+  kimiBaseUrl: "https://api.moonshot.cn/v1",
+  kimiApiKey: "",
+  kimiCodingBaseUrl: "https://api.kimi.com/coding/v1",
+  kimiCodingApiKey: "",
+  deepseekBaseUrl: "https://api.deepseek.com",
+  deepseekApiKey: "",
 
   outputDir: "./workspace/outputs",
   homeHeroImagePath: "",

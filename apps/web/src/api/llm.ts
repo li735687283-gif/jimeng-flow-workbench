@@ -11,6 +11,9 @@ import type {
   TextNodeRunRequest,
 } from '@jimeng-flow/shared/textNode'
 
+// 服务端文本节点默认最多等待 5 分钟；浏览器多留 10 秒接收错误响应。
+const TEXT_NODE_REQUEST_TIMEOUT_MS = 310_000
+
 /** GET /api/llm/models - 拉取可用 LLM 模型列表 */
 export async function listLlmModels(): Promise<LlmModelInfo[]> {
   const res = await fetch('/api/llm/models', {
@@ -75,21 +78,36 @@ export async function runTextNode(
   nodeId: string,
   req: TextNodeRunRequest,
 ): Promise<LlmChatResponse> {
-  const res = await fetch(`/api/text-nodes/${encodeURIComponent(nodeId)}/run`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let message = `文本节点 LLM 调用失败：${res.status} ${res.statusText}`
-    try {
-      const parsed = JSON.parse(text) as { message?: string }
-      if (parsed.message) message = parsed.message
-    } catch {
-      // 非 JSON 错误体
+  const controller = new AbortController()
+  const timer = setTimeout(
+    () => controller.abort(),
+    TEXT_NODE_REQUEST_TIMEOUT_MS,
+  )
+  try {
+    const res = await fetch(`/api/text-nodes/${encodeURIComponent(nodeId)}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      let message = `文本节点 LLM 调用失败：${res.status} ${res.statusText}`
+      try {
+        const parsed = JSON.parse(text) as { message?: string }
+        if (parsed.message) message = parsed.message
+      } catch {
+        // 非 JSON 错误体
+      }
+      throw new Error(message)
     }
-    throw new Error(message)
+    return (await res.json()) as LlmChatResponse
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('文本生成等待超时，请检查模型连接后重试')
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
   }
-  return (await res.json()) as LlmChatResponse
 }
