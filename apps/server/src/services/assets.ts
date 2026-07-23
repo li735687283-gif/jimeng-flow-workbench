@@ -33,19 +33,54 @@ function generateAssetId(): string {
   return `asset_${ts}_${rand}`
 }
 
-/** 根据 mimeType 与文件名兜底推断资产类型 */
-function deriveAssetType(mimeType: string, originalName: string): AssetType {
-  const mime = (mimeType || '').toLowerCase()
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
+const SUPPORTED_ASSET_TYPES: Record<
+  string,
+  { mimeType: string; type: AssetType }
+> = {
+  '.png': { mimeType: 'image/png', type: 'image' },
+  '.jpg': { mimeType: 'image/jpeg', type: 'image' },
+  '.jpeg': { mimeType: 'image/jpeg', type: 'image' },
+  '.gif': { mimeType: 'image/gif', type: 'image' },
+  '.webp': { mimeType: 'image/webp', type: 'image' },
+  '.bmp': { mimeType: 'image/bmp', type: 'image' },
+  '.svg': { mimeType: 'image/svg+xml', type: 'image' },
+  '.mp4': { mimeType: 'video/mp4', type: 'video' },
+  '.mov': { mimeType: 'video/quicktime', type: 'video' },
+  '.webm': { mimeType: 'video/webm', type: 'video' },
+  '.avi': { mimeType: 'video/x-msvideo', type: 'video' },
+  '.mkv': { mimeType: 'video/x-matroska', type: 'video' },
+  '.m4v': { mimeType: 'video/x-m4v', type: 'video' },
+}
+
+export function getAssetUploadValidationError(
+  mimeType: string,
+  originalName: string,
+): string | null {
   const ext = extname(originalName).toLowerCase()
-  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'].includes(ext)) {
-    return 'image'
+  if (!ext) {
+    return '文件名必须包含受支持的图片或视频扩展名'
   }
-  if (['.mp4', '.mov', '.webm', '.avi', '.mkv', '.m4v'].includes(ext)) {
-    return 'video'
+  const supported = SUPPORTED_ASSET_TYPES[ext]
+  if (!supported) {
+    return `不支持的文件类型 ${ext}；请上传 PNG、JPEG、GIF、WebP、BMP、SVG、MP4、MOV、WebM、AVI、MKV 或 M4V`
   }
-  return 'image'
+  const normalizedMime = mimeType.trim().toLowerCase()
+  if (!normalizedMime) {
+    return `缺少文件 MIME 类型；扩展名 ${ext} 需要 ${supported.mimeType}`
+  }
+  if (normalizedMime !== supported.mimeType) {
+    return `MIME 类型 ${mimeType} 与扩展名 ${ext} 不匹配；期望 ${supported.mimeType}`
+  }
+  return null
+}
+
+/** 仅在 MIME 与受支持扩展名严格匹配时返回资产类型。 */
+export function deriveAssetType(
+  mimeType: string,
+  originalName: string,
+): AssetType | null {
+  if (getAssetUploadValidationError(mimeType, originalName)) return null
+  return SUPPORTED_ASSET_TYPES[extname(originalName).toLowerCase()]?.type ?? null
 }
 
 /** 根据提示词和参数对资产做稳定的自动分类。 */
@@ -105,6 +140,13 @@ export interface SaveUploadInput {
  * - metadata 文件名：<assetId>.json
  */
 export async function saveUploadFile(input: SaveUploadInput): Promise<Asset> {
+  const type = deriveAssetType(input.mimeType, input.originalName)
+  if (!type) {
+    throw new Error(
+      getAssetUploadValidationError(input.mimeType, input.originalName) ??
+        '不支持的素材文件',
+    )
+  }
   const outputsRoot = await getOutputsRoot()
   const dateSubdir = todayDateStr()
   const fileDir = resolve(outputsRoot, dateSubdir)
@@ -118,7 +160,6 @@ export async function saveUploadFile(input: SaveUploadInput): Promise<Asset> {
   await writeFile(absFilePath, input.fileBuffer)
 
   const relPath = toForwardSlash(relative(WORKSPACE_DIR, absFilePath))
-  const type = deriveAssetType(input.mimeType, input.originalName)
   const asset: Asset = {
     id: assetId,
     type,

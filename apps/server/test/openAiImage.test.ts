@@ -26,14 +26,14 @@ test('extractOpenAiImageResults reads base64 image results', () => {
   assert.deepEqual(results, [{ base64Data: 'aGVsbG8=', mimeType: 'image/png' }])
 })
 
-test('getOpenAiCompatibleImageSize maps freeform ratios to provider-safe sizes', () => {
+test('getOpenAiCompatibleImageSize maps ratios within model and long-side constraints', () => {
   assert.equal(
     getOpenAiCompatibleImageSize({
       model: 'gpt-image-1',
       width: 1536,
       height: 864,
     }),
-    '1536x1024',
+    '2048x1152',
   )
   assert.equal(
     getOpenAiCompatibleImageSize({
@@ -51,6 +51,22 @@ test('getOpenAiCompatibleImageSize maps freeform ratios to provider-safe sizes',
     }),
     '1024x1024',
   )
+})
+test('getOpenAiCompatibleImageSize preserves unified 1K, 2K and 4K long sides', () => {
+  for (const [width, height, expected] of [
+    [1024, 576, '1024x576'],
+    [2048, 1152, '2048x1152'],
+    [4096, 2304, '4096x2304'],
+  ] as const) {
+    assert.equal(
+      getOpenAiCompatibleImageSize({
+        model: 'qwen-image-2.0',
+        width,
+        height,
+      }),
+      expected,
+    )
+  }
 })
 
 test('getOpenAiCompatibleImagePayload uses APIMart async image parameters', () => {
@@ -428,4 +444,53 @@ test('generateOpenAiCompatibleImage posts reference images to OpenAI edits endpo
   assert.equal(form.get('n'), '1')
   assert.equal(form.get('size'), '1024x1024')
   assert.ok(form.get('image') instanceof File)
+})
+test('text and edit requests share 1K, 2K and 4K compatible image sizes', async () => {
+  const referenceImage =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ'
+  const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = init?.body
+    const size = typeof body === 'string'
+      ? (JSON.parse(body) as { size?: string }).size
+      : body instanceof FormData
+        ? body.get('size')
+        : null
+    return Response.json({ data: [{ b64_json: String(size) }] })
+  }
+
+  for (const [width, height, expected] of [
+    [1024, 576, '1024x576'],
+    [2048, 1152, '2048x1152'],
+    [4096, 2304, '4096x2304'],
+  ] as const) {
+    const baseRequest = {
+      flowId: 'local',
+      nodeId: `image-${expected}`,
+      mediaType: 'image' as const,
+      prompt: 'resolution check',
+      model: 'qwen-image-2.0',
+      width,
+      height,
+      count: 1,
+    }
+    const generated = await generateOpenAiCompatibleImage(baseRequest, {
+      settings: {
+        llmBaseUrl: 'https://api.openai.example/v1',
+        llmApiKey: 'test-key',
+      },
+      fetchImpl,
+    })
+    const edited = await generateOpenAiCompatibleImage(
+      { ...baseRequest, inputImages: [referenceImage] },
+      {
+        settings: {
+          llmBaseUrl: 'https://api.openai.example/v1',
+          llmApiKey: 'test-key',
+        },
+        fetchImpl,
+      },
+    )
+    assert.equal(generated[0]?.base64Data, expected)
+    assert.equal(edited[0]?.base64Data, expected)
+  }
 })

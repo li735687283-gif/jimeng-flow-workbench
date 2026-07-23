@@ -2,7 +2,7 @@
 // 封装业务逻辑：读取当前 settings、合并更新并持久化。
 // 参考 PRD 10.1、8.6。
 
-import type { Settings } from '@jimeng-flow/shared'
+import { normalizeCanvasTheme, type Settings } from '@jimeng-flow/shared'
 import { readSettings, writeSettings } from '../config'
 
 /**
@@ -21,9 +21,14 @@ export async function getSettings(): Promise<Settings> {
  * - 写回磁盘
  * - 返回最新 settings
  */
+export function normalizeSettingsPatch(patch: Partial<Settings>): Partial<Settings> {
+  if (patch.canvasTheme === undefined) return patch
+  return { ...patch, canvasTheme: normalizeCanvasTheme(patch.canvasTheme) }
+}
+
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
   const current = await readSettings()
-  const next: Settings = { ...current, ...patch }
+  const next: Settings = { ...current, ...normalizeSettingsPatch(patch) }
   await writeSettings(next)
   return next
 }

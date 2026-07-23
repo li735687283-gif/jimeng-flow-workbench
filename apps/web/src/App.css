@@ -10182,3 +10182,97 @@
   cursor: not-allowed;
   opacity: 0.45;
 }
+
+/* === 节点输入圆角与内缩滚动条 === */
+:root {
+  --node-card-radius: 28px;
+  --node-card-border-width: 1px;
+  --node-content-radius: calc(var(--node-card-radius) - var(--node-card-border-width));
+  --node-prompt-radius: 10px;
+  --node-scrollbar-inset: 12px;
+}
+
+/* 浮动编辑器外圆角 28px、内边距 18px，对应 10px 同心内圆角。 */
+.prompt-editor-shell {
+  background: var(--theme-control, #202020);
+  border: 1px solid var(--theme-border, #333333);
+  border-radius: var(--node-prompt-radius);
+}
+
+.prompt-editor-shell > .image-editor-prompt {
+  padding: 14px 52px 14px 16px;
+  background-color: transparent !important;
+  border-radius: inherit;
+  scrollbar-gutter: stable;
+}
+
+.prompt-editor-shell > .prompt-editor-highlight {
+  padding: 14px 52px 14px 16px;
+  border-radius: inherit;
+}
+
+.prompt-editor-shell > .prompt-editor-expand {
+  top: 8px;
+  right: 8px;
+}
+
+.prompt-editor-modal > .prompt-editor-modal-textarea,
+.text-node-modal > .text-node-modal-textarea {
+  background-color: var(--theme-control, #202020) !important;
+  border: 1px solid var(--theme-border, #333333);
+  border-radius: 12px;
+  scrollbar-gutter: stable;
+}
+
+/* 文本节点只有 1px 外框，27px 内圆角与 28px 外圆角保持同心。 */
+.node-wrapper[data-flow-node-type='text'] .text-node-container,
+.node-wrapper[data-flow-node-type='text'] .text-node-preview,
+.node-wrapper[data-flow-node-type='text'] .text-node-content-stack {
+  border-radius: var(--node-content-radius);
+  overflow: hidden;
+}
+
+.node-wrapper[data-flow-node-type='text'] .text-node-summary,
+.node-wrapper[data-flow-node-type='text'] .text-node-body-editor {
+  border-radius: var(--node-content-radius);
+}
+
+.node-wrapper[data-flow-node-type='text'] .text-node-body-editor {
+  background-color: var(--theme-control, #202020) !important;
+}
+
+/* 节点编辑区的滚动条向内收，不再压到圆角外沿。 */
+.node-wrapper *::-webkit-scrollbar,
+.image-editor-panel *::-webkit-scrollbar,
+.prompt-editor-modal *::-webkit-scrollbar,
+.text-node-modal *::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.node-wrapper *::-webkit-scrollbar-track,
+.image-editor-panel *::-webkit-scrollbar-track,
+.prompt-editor-modal *::-webkit-scrollbar-track,
+.text-node-modal *::-webkit-scrollbar-track {
+  margin-block: var(--node-scrollbar-inset);
+  margin-inline: var(--node-scrollbar-inset);
+  background: transparent;
+}
+
+.node-wrapper *::-webkit-scrollbar-thumb,
+.image-editor-panel *::-webkit-scrollbar-thumb,
+.prompt-editor-modal *::-webkit-scrollbar-thumb,
+.text-node-modal *::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  background: var(--theme-border-strong, #484848);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+.node-wrapper *::-webkit-scrollbar-corner,
+.image-editor-panel *::-webkit-scrollbar-corner,
+.prompt-editor-modal *::-webkit-scrollbar-corner,
+.text-node-modal *::-webkit-scrollbar-corner {
+  background: transparent;
+}

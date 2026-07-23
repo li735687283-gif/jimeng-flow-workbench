@@ -21,6 +21,13 @@ interface ImageGenerationInputEdge {
   target?: string | null
 }
 
+/** 上传/外部导入的图片节点只作为参考源，不允许在原节点直接生成。 */
+export function isImageNodeSourceOnly(
+  data: { sourceOnly?: unknown } | null | undefined,
+): boolean {
+  return data?.sourceOnly === true
+}
+
 /** 上游文本节点引用（作为图片提示词来源） */
 export interface UpstreamTextReference {
   nodeId: string

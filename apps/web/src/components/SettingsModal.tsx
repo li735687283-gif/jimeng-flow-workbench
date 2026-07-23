@@ -1,5 +1,5 @@
 // 即梦 Flow 前端 - SettingsModal 设置弹窗组件
-// 暗色主题，固定遮罩 + 居中卡片。
+// 全局主题，固定遮罩 + 居中卡片。
 // 字段分组：Dreamina CLI、LLM Provider。
 // 加载时拉取 GET /api/settings；保存时 PUT /api/settings，成功后更新 store，并在弹窗内显示保存状态。
 // 参考 PRD 7.1、8.6、11.3、12.1。
@@ -16,15 +16,22 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import type { Settings } from '@jimeng-flow/shared'
+import type { CanvasTheme, Settings } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import {
   DEFAULT_SETTINGS,
   buildModelConfigsFromSettings,
+  normalizeCanvasTheme,
 } from '@jimeng-flow/shared'
 import { IMAGE_MODELS, isJimengImageModel } from '@jimeng-flow/shared/generateNode'
 import { VIDEO_MODELS, isJimengVideoModel } from '@jimeng-flow/shared/videoNode'
 import { useSettingsStore } from '../state/settingsStore'
+import { ThemePicker } from './ThemePicker'
+import {
+  applyCanvasTheme,
+  beginCanvasThemePreview,
+  endCanvasThemePreview,
+} from '../utils/canvasTheme'
 import {
   createSettingsDraft,
   getSettingsModalGuards,
@@ -47,13 +54,13 @@ export interface SettingsModalProps {
 type FormState = Settings
 
 const sectionStyle: React.CSSProperties = {
-  borderBottom: '1px solid #2a2a2a',
+  borderBottom: '1px solid var(--theme-border, #2a2a2a)',
   padding: '16px 0',
 }
 const sectionTitleStyle: React.CSSProperties = {
   fontSize: '13px',
   fontWeight: 600,
-  color: '#a0a0a0',
+  color: 'var(--theme-muted, #a0a0a0)',
   marginBottom: '12px',
   textTransform: 'uppercase',
   letterSpacing: '0.6px',
@@ -70,14 +77,14 @@ const fieldStyle: React.CSSProperties = {
 }
 const labelStyle: React.CSSProperties = {
   fontSize: '12px',
-  color: '#9a9a9a',
+  color: 'var(--theme-muted, #9a9a9a)',
 }
 const inputStyle: React.CSSProperties = {
   backgroundColor: 'var(--menu-control-bg, #282828)',
   border: '1px solid var(--menu-control-border, #373737)',
   borderRadius: '6px',
   padding: 'var(--menu-control-padding, 6px 8px)',
-  color: '#e8e8e8',
+  color: 'var(--theme-heading, #e8e8e8)',
   fontSize: 'var(--menu-control-font-size, 12px)',
   fontFamily: 'inherit',
   outline: 'none',
@@ -94,9 +101,9 @@ const subtleButtonStyle: React.CSSProperties = {
   gap: '6px',
   padding: '7px 10px',
   borderRadius: '6px',
-  border: '1px solid #3a3a3a',
-  background: '#242424',
-  color: '#d7d7d7',
+  border: '1px solid var(--theme-border-strong, #3a3a3a)',
+  background: 'var(--theme-card, #242424)',
+  color: 'var(--theme-heading, #d7d7d7)',
   cursor: 'pointer',
   fontSize: '12px',
   fontFamily: 'inherit',
@@ -104,7 +111,7 @@ const subtleButtonStyle: React.CSSProperties = {
 }
 
 const helperTextStyle: React.CSSProperties = {
-  color: '#777',
+  color: 'var(--theme-muted, #777)',
   fontSize: 11,
 }
 
@@ -456,10 +463,21 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     target: 'add' | number
   } | null>(null)
   const autoFetchedModelsRef = useRef(false)
+  const confirmedThemeRef = useRef<CanvasTheme>('dark')
+  const previewThemeRef = useRef<CanvasTheme>('dark')
+  const themePreviewChangedRef = useRef(false)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
     if (!open) return
+    const persistedTheme = normalizeCanvasTheme(
+      useSettingsStore.getState().settings?.canvasTheme,
+    )
+    confirmedThemeRef.current = persistedTheme
+    previewThemeRef.current = persistedTheme
+    themePreviewChangedRef.current = false
+    endCanvasThemePreview()
+    applyCanvasTheme(persistedTheme)
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setLoadError(null)
     setSaveError(null)
@@ -480,10 +498,24 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   // settings 加载完成后同步到本地 form
   useEffect(() => {
-    if (settings) {
-      setForm(createSettingsDraft(settings))
+    if (!settings) return
+    const persistedTheme = normalizeCanvasTheme(settings.canvasTheme)
+    setForm((previous) => {
+      const next = createSettingsDraft(settings)
+      if (open && themePreviewChangedRef.current) {
+        next.canvasTheme = previous.canvasTheme
+      }
+      return next
+    })
+    if (open && themePreviewChangedRef.current) {
+      beginCanvasThemePreview()
+      applyCanvasTheme(previewThemeRef.current)
+    } else if (open) {
+      confirmedThemeRef.current = persistedTheme
+      endCanvasThemePreview()
+      applyCanvasTheme(persistedTheme)
     }
-  }, [settings])
+  }, [open, settings])
 
   useEffect(() => {
     if (!open || !settings || autoFetchedModelsRef.current) return
@@ -506,6 +538,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  const handleThemePreview = (theme: CanvasTheme) => {
+    previewThemeRef.current = theme
+    themePreviewChangedRef.current = true
+    setSaveStatus('idle')
+    setForm((previous) => ({ ...previous, canvasTheme: theme }))
+    beginCanvasThemePreview()
+    applyCanvasTheme(theme)
+  }
+
   const handleSave = async () => {
     if (guards.saveBlocked) return
     setSubmitting(true)
@@ -526,7 +567,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
       await saveSettings(nextForm)
+      const confirmedTheme = normalizeCanvasTheme(nextForm.canvasTheme)
+      confirmedThemeRef.current = confirmedTheme
+      previewThemeRef.current = confirmedTheme
+      themePreviewChangedRef.current = false
+      endCanvasThemePreview()
+      applyCanvasTheme(confirmedTheme)
       setSaveStatus('saved')
+      onClose()
     } catch (err: unknown) {
       setSaveStatus('error')
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -537,6 +585,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   const handleCancel = () => {
     if (guards.closeBlocked) return
+    const persistedTheme = normalizeCanvasTheme(
+      useSettingsStore.getState().settings?.canvasTheme ?? confirmedThemeRef.current,
+    )
+    previewThemeRef.current = persistedTheme
+    themePreviewChangedRef.current = false
+    endCanvasThemePreview()
+    applyCanvasTheme(persistedTheme)
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setSaveStatus('idle')
     setSaveError(null)
@@ -736,12 +791,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           borderRadius: '6px',
           fontSize: '12px',
           background: result.ok
-            ? 'rgba(255, 255, 255, 0.12)'
-            : 'rgba(255, 255, 255, 0.08)',
+            ? 'var(--theme-accent-soft, rgba(255, 255, 255, 0.12))'
+            : 'var(--theme-accent-softer, rgba(255, 255, 255, 0.08))',
           border: result.ok
-            ? '1px solid rgba(255, 255, 255, 0.34)'
-            : '1px solid rgba(255, 255, 255, 0.2)',
-          color: result.ok ? '#eeeeee' : '#cfcfcf',
+            ? '1px solid var(--theme-border-strong, rgba(255, 255, 255, 0.34))'
+            : '1px solid var(--theme-border, rgba(255, 255, 255, 0.2))',
+          color: result.ok ? 'var(--theme-heading, #eeeeee)' : 'var(--theme-text, #cfcfcf)',
         }}
       >
         {result.ok ? '连接成功：' : '连接失败：'}
@@ -846,7 +901,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
     return (
       <div className="settings-model-list">
-        <div style={{ ...labelStyle, color: '#c0c0c0' }}>{title}</div>
+        <div style={{ ...labelStyle, color: 'var(--theme-heading, #c0c0c0)' }}>{title}</div>
         {models.length === 0 && (
           <div className="settings-model-list-empty">{emptyHint}</div>
         )}
@@ -960,9 +1015,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             style={{
               padding: '4px 10px',
               borderRadius: '4px',
-              border: '1px solid #444',
-              background: isTesting ? '#333' : '#252525',
-              color: isTesting ? '#888' : '#cfcfcf',
+              border: '1px solid var(--theme-border-strong, #444)',
+              background: isTesting ? 'var(--theme-control-hover, #333)' : 'var(--theme-control, #252525)',
+              color: isTesting ? 'var(--theme-muted, #888)' : 'var(--theme-heading, #cfcfcf)',
               cursor: isTesting ? 'not-allowed' : 'pointer',
               fontSize: '12px',
             }}
@@ -1047,7 +1102,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.58)',
+        background: 'var(--theme-overlay, rgba(0, 0, 0, 0.58))',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -1069,14 +1124,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <div
         className="settings-modal-content"
         style={{
-          background: '#1a1a1a',
-          color: '#e8e8e8',
+          background: 'var(--theme-panel, #1a1a1a)',
+          color: 'var(--theme-heading, #e8e8e8)',
           borderRadius: '12px',
           width: 'min(960px, calc(100vw - 96px))',
           height: 'min(720px, calc(100vh - 96px))',
           overflow: 'auto',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-          border: '1px solid #2a2a2a',
+          boxShadow: 'var(--theme-panel-shadow, 0 10px 40px rgba(0,0,0,0.6))',
+          border: '1px solid var(--theme-border, #2a2a2a)',
         }}
         onClick={(e) => {
           if (
@@ -1095,15 +1150,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '14px 18px',
-            borderBottom: '1px solid #2a2a2a',
+            borderBottom: '1px solid var(--theme-border, #2a2a2a)',
             position: 'sticky',
             top: 0,
-            background: '#1a1a1a',
+            background: 'var(--theme-panel, #1a1a1a)',
             zIndex: 1,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <SettingsIcon size={16} color="#a0a0a0" />
+            <SettingsIcon size={16} color="var(--theme-muted, #a0a0a0)" />
             <span style={{ fontSize: '15px', fontWeight: 600 }}>设置</span>
           </div>
           <button
@@ -1115,7 +1170,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#9a9a9a',
+              color: 'var(--theme-muted, #9a9a9a)',
               cursor: guards.closeBlocked ? 'not-allowed' : 'pointer',
               padding: '4px',
               display: 'flex',
@@ -1133,10 +1188,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               style={{
                 marginTop: '12px',
                 padding: '8px 10px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
+                background: 'var(--theme-accent-softer, rgba(255, 255, 255, 0.08))',
+                border: '1px solid var(--theme-border, rgba(255, 255, 255, 0.2))',
                 borderRadius: '6px',
-                color: '#cfcfcf',
+                color: 'var(--theme-text, #cfcfcf)',
                 fontSize: '12px',
               }}
             >
@@ -1144,6 +1199,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           )}
 
+
+          <ThemePicker
+            value={normalizeCanvasTheme(form.canvasTheme)}
+            onChange={handleThemePreview}
+          />
 
           {/* Dreamina CLI */}
           <section style={sectionStyle}>
@@ -1164,9 +1224,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 style={{
                   padding: '4px 10px',
                   borderRadius: '4px',
-                  border: '1px solid #444',
-                  background: testingJimeng ? '#333' : '#252525',
-                  color: testingJimeng ? '#888' : '#cfcfcf',
+                  border: '1px solid var(--theme-border-strong, #444)',
+                  background: testingJimeng ? 'var(--theme-control-hover, #333)' : 'var(--theme-control, #252525)',
+                  color: testingJimeng ? 'var(--theme-muted, #888)' : 'var(--theme-heading, #cfcfcf)',
                   cursor: testingJimeng ? 'not-allowed' : 'pointer',
                   fontSize: '12px',
                 }}
@@ -1186,7 +1246,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 onChange={(e) => update('dreaminaPath', e.target.value)}
                 placeholder="dreamina 或 C:\\Users\\...\\dreamina.exe"
               />
-              <span style={{ color: '#777', fontSize: 11 }}>
+              <span style={{ color: 'var(--theme-muted, #777)', fontSize: 11 }}>
                 生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
               </span>
             </div>
@@ -1241,9 +1301,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   style={{
                     padding: '4px 10px',
                     borderRadius: '4px',
-                    border: '1px solid #444',
-                    background: codexReloginStarting ? '#333' : '#252525',
-                    color: codexReloginStarting ? '#888' : '#cfcfcf',
+                    border: '1px solid var(--theme-border-strong, #444)',
+                    background: codexReloginStarting ? 'var(--theme-control-hover, #333)' : 'var(--theme-control, #252525)',
+                    color: codexReloginStarting ? 'var(--theme-muted, #888)' : 'var(--theme-heading, #cfcfcf)',
                     cursor: codexReloginStarting ? 'not-allowed' : 'pointer',
                     fontSize: '12px',
                   }}
@@ -1258,9 +1318,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   style={{
                     padding: '4px 10px',
                     borderRadius: '4px',
-                    border: '1px solid #444',
-                    background: testingCodex ? '#333' : '#252525',
-                    color: testingCodex ? '#888' : '#cfcfcf',
+                    border: '1px solid var(--theme-border-strong, #444)',
+                    background: testingCodex ? 'var(--theme-control-hover, #333)' : 'var(--theme-control, #252525)',
+                    color: testingCodex ? 'var(--theme-muted, #888)' : 'var(--theme-heading, #cfcfcf)',
                     cursor: testingCodex ? 'not-allowed' : 'pointer',
                     fontSize: '12px',
                   }}
@@ -1291,7 +1351,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     alignItems: 'center',
                   }}
                 >
-                  <span style={{ ...labelStyle, color: '#b8b8b8' }}>
+                  <span style={{ ...labelStyle, color: 'var(--theme-text, #b8b8b8)' }}>
                     {row.label}
                   </span>
                   <code
@@ -1372,9 +1432,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 style={{
                   padding: '4px 10px',
                   borderRadius: '4px',
-                  border: '1px solid #444',
-                  background: testingLlm ? '#333' : '#252525',
-                  color: testingLlm ? '#888' : '#cfcfcf',
+                  border: '1px solid var(--theme-border-strong, #444)',
+                  background: testingLlm ? 'var(--theme-control-hover, #333)' : 'var(--theme-control, #252525)',
+                  color: testingLlm ? 'var(--theme-muted, #888)' : 'var(--theme-heading, #cfcfcf)',
                   cursor: testingLlm ? 'not-allowed' : 'pointer',
                   fontSize: '12px',
                 }}
@@ -1441,7 +1501,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 </div>
 
                 {llmModelsMessage && (
-                  <div style={{ ...helperTextStyle, color: llmModelsMessage.includes('失败') ? '#cfcfcf' : '#8d8d8d' }}>
+                  <div style={{ ...helperTextStyle, color: llmModelsMessage.includes('失败') ? 'var(--theme-text, #cfcfcf)' : 'var(--theme-muted, #8d8d8d)' }}>
                     {llmModelsMessage}
                   </div>
                 )}
@@ -1474,14 +1534,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             justifyContent: 'flex-end',
             gap: '8px',
             padding: '14px 18px',
-            borderTop: '1px solid #2a2a2a',
+            borderTop: '1px solid var(--theme-border, #2a2a2a)',
             position: 'sticky',
             bottom: 0,
-            background: '#1a1a1a',
+            background: 'var(--theme-panel, #1a1a1a)',
           }}
         >
           {saveError && (
-            <div style={{ marginRight: 'auto', color: '#cfcfcf', fontSize: '12px', alignSelf: 'center' }}>
+            <div style={{ marginRight: 'auto', color: 'var(--theme-text, #cfcfcf)', fontSize: '12px', alignSelf: 'center' }}>
               保存失败：{saveError}
             </div>
           )}
@@ -1493,9 +1553,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
-              border: '1px solid #333',
+              border: '1px solid var(--theme-border, #333)',
               background: 'transparent',
-              color: '#cfcfcf',
+              color: 'var(--theme-text, #cfcfcf)',
               cursor: guards.closeBlocked ? 'not-allowed' : 'pointer',
               fontSize: '13px',
             }}
@@ -1511,9 +1571,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             style={{
               padding: '8px 16px',
               borderRadius: '6px',
-              border: '1px solid #4a4a4a',
-              background: guards.saveBlocked ? '#3a3a3a' : '#2d2d2d',
-              color: '#fff',
+              border: '1px solid var(--theme-border-strong, #4a4a4a)',
+              background: guards.saveBlocked ? 'var(--theme-control, #3a3a3a)' : 'var(--theme-accent, #2d2d2d)',
+              color: 'var(--theme-accent-contrast, #fff)',
               cursor: guards.saveBlocked ? 'not-allowed' : 'pointer',
               fontSize: '13px',
             }}
@@ -1521,17 +1581,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             {submitting ? (
               <>
                 <RefreshCw size={13} className="animate-spin" />
-                保存中...
+                确认中...
               </>
             ) : saveStatus === 'saved' ? (
               <>
                 <Check size={13} />
-                已保存
+                已确认
               </>
             ) : saveStatus === 'error' ? (
-              '重试保存'
+              '重试确认'
             ) : (
-              '保存'
+              '确认'
             )}
           </button>
         </div>

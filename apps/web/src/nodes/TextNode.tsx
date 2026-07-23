@@ -62,10 +62,10 @@ const PROMPT_LIBRARY_ESTIMATED_HEIGHT = 520
 const PROMPT_LIBRARY_WIDTH = 720
 
 const COLORS = {
-  text: '#e5e5e5',
-  textDim: '#5d5d5d',
-  jsonBg: '#101010',
-  border: '#373737',
+  text: 'var(--theme-text, #e5e5e5)',
+  textDim: 'var(--theme-muted, #5d5d5d)',
+  jsonBg: 'var(--theme-control, #101010)',
+  border: 'var(--theme-border, #373737)',
 }
 
 const DEFAULT_FRAME_COLOR = TEXT_FRAME_COLOR_PRESETS[0].color

@@ -5,7 +5,7 @@
 // 参考 PRD 10.2、11.1、8.5。
 
 import { create } from 'zustand'
-import type { FlowSummary } from '@jimeng-flow/shared/flow'
+import type { Flow, FlowSummary } from '@jimeng-flow/shared/flow'
 import * as flowsApi from '../api/flows'
 import { useCanvasStore } from './canvasStore'
 import { syncAllTextNodeImageRefs } from '../utils/syncTextNodeImageRefs'
@@ -68,6 +68,15 @@ interface FlowState {
 
 const normalizeFlowName = (name: string): string =>
   name === '未命名工作流' ? '无限画布' : name
+export function normalizeFlowCanvasArrays(flow: {
+  nodes?: unknown
+  edges?: unknown
+}): Pick<Flow, 'nodes' | 'edges'> {
+  return {
+    nodes: Array.isArray(flow.nodes) ? (flow.nodes as Flow['nodes']) : [],
+    edges: Array.isArray(flow.edges) ? (flow.edges as Flow['edges']) : [],
+  }
+}
 
 function migrateLegacyNodes(nodes: unknown[]): unknown[] {
   return nodes.map((node) => {
@@ -328,6 +337,7 @@ export const useFlowStore = create<FlowState>((set, get) => {
 
         while (true) {
           const flow = await flowsApi.getFlow(flowId)
+          const canvas = normalizeFlowCanvasArrays(flow)
           if (isSuperseded()) return
 
           const stabilized = await stabilizeCurrentFlow(
@@ -345,8 +355,8 @@ export const useFlowStore = create<FlowState>((set, get) => {
           }
 
           useCanvasStore.setState({
-            nodes: migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
-            edges: flow.edges,
+            nodes: migrateLegacyNodes(canvas.nodes as unknown[]) as typeof canvas.nodes,
+            edges: canvas.edges,
             deletedNodeIds: [],
             selectedNodeId: null,
           })
@@ -625,6 +635,7 @@ export const useFlowStore = create<FlowState>((set, get) => {
         try {
           while (true) {
             const flow = await flowsApi.getFlow(id)
+            const canvas = normalizeFlowCanvasArrays(flow)
             if (
               navigationRequestId !== latestNavigationRequestId ||
               intentId !== flowIntentId ||
@@ -659,10 +670,10 @@ export const useFlowStore = create<FlowState>((set, get) => {
 
             useCanvasStore.setState({
               nodes: syncAllTextNodeImageRefs(
-                migrateLegacyNodes(flow.nodes as unknown[]) as typeof flow.nodes,
-                flow.edges,
+                migrateLegacyNodes(canvas.nodes as unknown[]) as typeof canvas.nodes,
+                canvas.edges,
               ),
-              edges: flow.edges,
+              edges: canvas.edges,
               deletedNodeIds: [],
               selectedNodeId: null,
             })

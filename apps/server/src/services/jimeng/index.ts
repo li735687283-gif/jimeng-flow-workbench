@@ -21,7 +21,7 @@ import {
 } from '@jimeng-flow/shared/videoNode'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import type { AuthMode, Settings } from '@jimeng-flow/shared'
-import { getProjectRoot, resolveRuntimePath } from '../../config'
+import { getProjectRoot, resolveWorkspaceInputPath } from '../../config'
 import { getSettings } from '../settings'
 import { getAsset, getAssetFilePath } from '../assets'
 
@@ -291,7 +291,7 @@ async function resolveInputPaths(inputImages: string[] | undefined): Promise<str
       }
       paths.push(getAssetFilePath(asset))
     } else {
-      paths.push(resolveRuntimePath(input))
+      paths.push(resolveWorkspaceInputPath(input))
     }
   }
   return paths

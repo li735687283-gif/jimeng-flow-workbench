@@ -24,3 +24,17 @@ test('image send button stays busy until generation reaches a terminal state', (
   assert.match(afterFlowStart.slice(onCompleteIndex, onErrorIndex), /setIsGenerating\(false\)/)
   assert.match(afterFlowStart.slice(onErrorIndex), /handleGenerationError\(error\)/)
 })
+
+test('image generation persists the generation id as soon as the task is queued', () => {
+  const source = readFileSync('apps/web/src/nodes/ImageNode.tsx', 'utf8')
+  const queuedStart = source.indexOf('onQueued: (response) =>')
+  const queuedBlock = source.slice(
+    queuedStart,
+    source.indexOf('onUpdate:', queuedStart),
+  )
+
+  assert.notEqual(queuedStart, -1)
+  assert.match(queuedBlock, /generationId: response\.id/)
+  assert.match(queuedBlock, /setGenerationId\(id, response\.id\)/)
+  assert.match(queuedBlock, /saveCurrent\(\)/)
+})

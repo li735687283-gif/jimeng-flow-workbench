@@ -5,7 +5,7 @@ import type {
 import type { Settings } from '@jimeng-flow/shared/settings'
 import { readFile } from 'node:fs/promises'
 import { extname } from 'node:path'
-import { resolveRuntimePath } from '../config'
+import { resolveWorkspaceInputPath } from '../config'
 import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
 
@@ -205,7 +205,7 @@ async function resolveInputImageFilePath(value: string): Promise<string> {
     }
     return getAssetFilePath(asset)
   }
-  return resolveRuntimePath(value)
+  return resolveWorkspaceInputPath(value)
 }
 
 async function resolveInputImageDataUrl(input: string): Promise<string | null> {
@@ -344,9 +344,21 @@ export function getOpenAiCompatibleImageSize({
     return '1024x1024'
   }
 
-  if (ratio >= 1.2) return '1536x1024'
-  if (ratio <= 0.82) return '1024x1536'
-  return '1024x1024'
+  const requestedLongSide = Math.max(safeWidth, safeHeight)
+  const targetLongSide =
+    requestedLongSide >= 3072
+      ? 4096
+      : requestedLongSide >= 1536
+        ? 2048
+        : 1024
+  const scale = targetLongSide / requestedLongSide
+  const normalizeSide = (value: number): number =>
+    Math.max(64, Math.min(targetLongSide, Math.round((value * scale) / 64) * 64))
+  const normalizedWidth =
+    safeWidth >= safeHeight ? targetLongSide : normalizeSide(safeWidth)
+  const normalizedHeight =
+    safeHeight >= safeWidth ? targetLongSide : normalizeSide(safeHeight)
+  return `${normalizedWidth}x${normalizedHeight}`
 }
 
 export function getOpenAiCompatibleImagePayload(

@@ -79,6 +79,7 @@ export function resumeGenerationSubscription({
         status: 'error',
         error: '生成任务连接中断，请重试',
       })
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
     },
   })
 

@@ -48,6 +48,7 @@ import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
+import { useAssetStore } from '../state/assetStore'
 import { useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import {
@@ -62,11 +63,13 @@ import {
 } from '../utils/imageGenerationHistory'
 import {
   getImageGenerationProgressState,
+  isInterruptedImageGeneration,
   shouldShowImagePlaceholderIcon,
 } from '../utils/imageGenerationProgress'
 import {
   getImageGenerationInputImages,
   getUpstreamTextReferences,
+  isImageNodeSourceOnly,
   joinUpstreamTextPrompts,
   resolveImageGenerationPrompt,
 } from '../utils/imageGenerationInputs'
@@ -107,6 +110,7 @@ interface ImageNodeData extends BaseNodeData {
   resolution?: string
   inputImageAssetIds?: string[]
   generationRuns?: ImageGenerationRun[]
+  sourceOnly?: boolean
 }
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -230,6 +234,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
   const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const fetchAsset = useAssetStore((state) => state.fetchAsset)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
   )
@@ -261,6 +266,26 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       generationUnsubscribeRef.current = null
     }
   }, [nodeData.generationId, nodeData.status, id])
+
+  // 兼容旧画布：根据 Asset metadata 自动补齐上传图片的只读源标记。
+  useEffect(() => {
+    const assetId = nodeData.assetId?.trim()
+    if (!assetId || nodeData.sourceOnly === true) return
+
+    let cancelled = false
+    void fetchAsset(assetId).then((asset) => {
+      if (cancelled || asset?.params?.origin !== 'upload') return
+      updateNodeData(id, {
+        sourceOnly: true,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [fetchAsset, id, nodeData.assetId, nodeData.sourceOnly, updateNodeData])
+
   const [imgError, setImgError] = useState(false)
   const [editorMounted, setEditorMounted] = useState(false)
   const [editorClosing, setEditorClosing] = useState(false)
@@ -316,6 +341,36 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     count: 'down',
     prompt: 'down',
   })
+
+  useEffect(() => {
+    if (
+      !isInterruptedImageGeneration(
+        nodeData.status,
+        nodeData.generationId,
+        isGenerating,
+      )
+    ) {
+      return
+    }
+    const message = '上次生成在任务创建完成前中断，请重新发送'
+    updateNodeData(id, {
+      status: 'error',
+      error: message,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+    useGenerateStore.getState().patch(id, {
+      status: 'error',
+      error: message,
+    })
+    void useFlowStore.getState().saveCurrent().catch(() => undefined)
+  }, [
+    id,
+    isGenerating,
+    nodeData.generationId,
+    nodeData.status,
+    updateNodeData,
+  ])
+
   const generationRuns = useMemo(
     () => getImageGenerationHistoryItems(nodeData.generationRuns),
     [nodeData.generationRuns],
@@ -550,6 +605,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     ...frameStyle,
   }
   const primaryImageAssetId = nodeData.assetId ?? imageResultAssetIds[0] ?? ''
+  const sourceOnly = isImageNodeSourceOnly(nodeData)
   const emptyContainerStyle = {
     ...CONTAINER_STYLE,
     ...frameStyle,
@@ -948,6 +1004,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
 
   const handleSend = async (options: ImageGenerationSubmitOptions = {}) => {
     if (isGenerating) return
+    if (sourceOnly) {
+      setSendError('上传图片只能作为参考源，请拉线创建新的图片节点后再生成')
+      return
+    }
     // 发送时从 store 取最新 nodes/edges，避免闭包过期读不到上游文本
     const canvasSnapshot = useCanvasStore.getState()
     const resolved = resolveImageGenerationPrompt({
@@ -1179,17 +1239,31 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     }
 
     const flow = startImageGenerationFlow(request, {
-      onQueued: () => {
+      onQueued: (response) => {
         setSendError('')
+        generateStore.setGenerationId(id, response.id)
+        store.updateNodeData(id, {
+          status: response.status,
+          generationId: response.id,
+          error: response.error,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+        if (startedFlowId) {
+          void useFlowStore.getState().saveCurrent().catch((saveErr) => {
+            console.warn('[ImageNode] save queued generation id failed', saveErr)
+          })
+        }
       },
       onUpdate: (data) => {
         if (data.status !== 'success' && data.status !== 'error') {
           store.updateNodeData(id, {
             status: data.status,
             error: data.error,
+            generationId: data.id,
             updatedAt: new Date().toISOString(),
           } as unknown as Partial<BaseNodeData>)
           generateStore.setStatus(id, data.status)
+          generateStore.setGenerationId(id, data.id)
           if (data.error) generateStore.setError(id, data.error)
         }
       },
@@ -1415,7 +1489,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             )
           : null}
 
-        {editorMounted && (
+        {editorMounted && !sourceOnly && (
           <div
             className={`image-editor-panel nodrag nopan${
               editorClosing ? ' closing' : ''

@@ -6,7 +6,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Settings } from '@jimeng-flow/shared'
-import { DEFAULT_SETTINGS, normalizeModelConfigs } from '@jimeng-flow/shared'
+import {
+  DEFAULT_SETTINGS,
+  normalizeCanvasTheme,
+  normalizeModelConfigs,
+} from '@jimeng-flow/shared'
 
 const configuredProjectRoot = process.env.MOK_PROJECT_ROOT?.trim()
 // 项目根目录仅用于 CLI cwd；持久化数据使用独立的 workspace 根目录。
@@ -64,6 +68,39 @@ export function resolveRuntimePath(value: string): string {
     : resolve(PROJECT_ROOT, value)
 }
 
+/** 判断是否为 Windows 风格的绝对路径（盘符或 UNC），保证跨平台校验行为一致 */
+function isWindowsAbsolutePath(value: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\') || value.startsWith('//')
+}
+
+/** 判断解析后的绝对路径是否位于 workspace 目录内（比较时不区分盘符大小写） */
+export function isPathInsideWorkspace(absPath: string): boolean {
+  const workspace = WORKSPACE_DIR.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const target = resolve(absPath).replace(/\\/g, '/').toLowerCase()
+  return target === workspace || target.startsWith(`${workspace}/`)
+}
+
+/**
+ * 解析生成任务输入图片的本地文件引用。
+ * 只接受 workspace 内的相对路径（可带 workspace/ 前缀）；
+ * 拒绝绝对路径（POSIX、Windows 盘符、UNC）与目录穿越，
+ * 防止服务端读取 workspace 之外的文件并上传给外部模型供应商。
+ */
+export function resolveWorkspaceInputPath(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error('参考图路径不能为空')
+  }
+  if (isAbsolute(trimmed) || isWindowsAbsolutePath(trimmed)) {
+    throw new Error(`参考图必须是 workspace 内的相对路径，不支持绝对路径：${value}`)
+  }
+  const abs = resolveWorkspaceDataPath(trimmed)
+  if (!isPathInsideWorkspace(abs)) {
+    throw new Error(`参考图路径不能指向 workspace 之外的文件：${value}`)
+  }
+  return abs
+}
+
 /** 返回输出目录的绝对路径（基于 settings.outputDir） */
 export function resolveOutputDir(outputDir: string): string {
   return resolveWorkspaceDataPath(outputDir)
@@ -89,6 +126,10 @@ function mergeWithDefaults(raw: unknown): Settings {
     const value = obj[key as string]
     if (value === undefined || value === null) return
     const defaultValue = DEFAULT_SETTINGS[key]
+    if (key === 'canvasTheme') {
+      ;(result[key] as unknown) = normalizeCanvasTheme(value)
+      return
+    }
     if (key === 'modelConfigs') {
       ;(result[key] as unknown) = normalizeModelConfigs(value)
       return

@@ -4,6 +4,18 @@ export interface ImageGenerationProgressState {
   valueText: string
 }
 
+export function isInterruptedImageGeneration(
+  status: unknown,
+  generationId: unknown,
+  requestInFlight: boolean,
+): boolean {
+  return (
+    !requestInFlight &&
+    (status === 'queued' || status === 'running') &&
+    (typeof generationId !== 'string' || generationId.trim().length === 0)
+  )
+}
+
 export function getImageGenerationProgressState(
   status: unknown,
   isGenerating: boolean,

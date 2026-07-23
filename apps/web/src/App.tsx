@@ -23,12 +23,17 @@ import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
+import {
+  applyCanvasTheme,
+  isCanvasThemePreviewActive,
+} from './utils/canvasTheme'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowNodeType } from './types/nodeTypes'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
 import agentAvatarUrl from '../../../image/agent-avatar-black.png'
 import defaultMokHeroUrl from './assets/mok-hero.png'
 import './App.css'
+import './theme.css'
 
 type AppView = 'home' | 'canvas'
 
@@ -143,6 +148,12 @@ function AppInner() {
     })
     void reloadWorks()
   }, [loadSettings, reloadWorks])
+
+  useEffect(() => {
+    if (settings && !isCanvasThemePreviewActive()) {
+      applyCanvasTheme(settings.canvasTheme)
+    }
+  }, [settings])
 
   useEffect(() => {
     if (view !== 'canvas') setAgentOpen(false)

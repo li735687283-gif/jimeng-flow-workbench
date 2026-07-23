@@ -230,6 +230,25 @@ export function buildModelConfigsFromSettings(
   return Array.from(map.values());
 }
 
+/** 可在设置中实时切换并持久化的全局皮肤。 */
+export const CANVAS_THEMES = [
+  "dark",
+  "light",
+  "starry-night",
+  "turner-mist",
+  "hokusai-indigo",
+  "monet-lilac",
+] as const;
+
+export type CanvasTheme = (typeof CANVAS_THEMES)[number];
+
+export function normalizeCanvasTheme(value: unknown): CanvasTheme {
+  return typeof value === "string" &&
+    (CANVAS_THEMES as readonly string[]).includes(value)
+    ? (value as CanvasTheme)
+    : "dark";
+}
+
 /** 全局 Settings 配置 */
 export interface Settings {
   /** 旧 HTTP 适配器服务地址（保留用于兼容已有配置） */
@@ -262,6 +281,8 @@ export interface Settings {
 
   /** 输出目录，相对项目根 */
   outputDir: string;
+  /** 首页、画布、节点、面板和设置共用的全局皮肤 */
+  canvasTheme: CanvasTheme;
   /** 首页封面背景图片 URL；留空时使用前端内置背景 */
   homeHeroImagePath?: string;
   /** 首页主图（MOK猫）URL；留空时使用前端内置默认图 */
@@ -322,6 +343,7 @@ export const DEFAULT_SETTINGS: Settings = {
   deepseekApiKey: "",
 
   outputDir: "./workspace/outputs",
+  canvasTheme: "dark",
   homeHeroImagePath: "",
   homeMokHeroImagePath: "",
   homeMokHeroScale: 1,

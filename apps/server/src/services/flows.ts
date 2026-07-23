@@ -29,6 +29,35 @@ function generateFlowId(): string {
 function nowIso(): string {
   return new Date().toISOString()
 }
+function corruptFlowError(id: string, detail: string): Error & { code: string } {
+  const error = new Error(`工作流文件损坏: ${id}（${detail}）`) as Error & {
+    code: string
+  }
+  error.code = 'FLOW_CORRUPT'
+  return error
+}
+
+/**
+ * 兼容旧项目缺失画布数组；已存在但类型错误的数据视为损坏，
+ * 避免错误延迟到生成写回阶段才以 TypeError 暴露。
+ */
+export function normalizePersistedFlow(value: unknown, id: string): Flow {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw corruptFlowError(id, '根数据必须是对象')
+  }
+  const record = value as Record<string, unknown>
+  if (record.nodes !== undefined && !Array.isArray(record.nodes)) {
+    throw corruptFlowError(id, 'nodes 必须是数组')
+  }
+  if (record.edges !== undefined && !Array.isArray(record.edges)) {
+    throw corruptFlowError(id, 'edges 必须是数组')
+  }
+  return {
+    ...record,
+    nodes: record.nodes ?? [],
+    edges: record.edges ?? [],
+  } as unknown as Flow
+}
 
 function hasStringValue(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -282,7 +311,7 @@ export async function getFlow(id: string): Promise<Flow> {
   validateFlowId(id)
   try {
     const content = await readFile(flowFile(id), 'utf8')
-    return JSON.parse(content) as Flow
+    return normalizePersistedFlow(JSON.parse(content) as unknown, id)
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'ENOENT') {
@@ -293,7 +322,7 @@ export async function getFlow(id: string): Promise<Flow> {
     // JSON 解析失败时转换为友好错误
     if (err instanceof SyntaxError) {
       const error = new Error(`工作流文件损坏: ${id}`)
-      ;(error as Error & { code: string }).code = 'FLOW_NOT_FOUND'
+      ;(error as Error & { code: string }).code = 'FLOW_CORRUPT'
       throw error
     }
     throw err

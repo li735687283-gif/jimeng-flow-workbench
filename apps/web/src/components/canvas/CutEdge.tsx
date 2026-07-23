@@ -11,8 +11,6 @@ import { Scissors } from 'lucide-react'
 import { useCanvasStore } from '../../state/canvasStore'
 import { getCardEdgePoint } from './cutEdgeGeometry'
 
-const EDGE_COLOR_DEFAULT = '#737373'
-const EDGE_COLOR_ACTIVE = '#e3e3e3'
 export function CutEdge({
   id,
   source,
@@ -86,7 +84,7 @@ export function CutEdge({
       <path
         d={edgePath}
         fill="none"
-        stroke={isActive ? EDGE_COLOR_ACTIVE : EDGE_COLOR_DEFAULT}
+        stroke={isActive ? 'var(--edge-color-active)' : 'var(--edge-color)'}
         strokeWidth={2.4}
         strokeLinecap="round"
         style={{ opacity: isActive ? 0.95 : 0.82, pointerEvents: 'none' }}
@@ -95,7 +93,7 @@ export function CutEdge({
       <path
         d={edgePath}
         fill="none"
-        stroke={EDGE_COLOR_ACTIVE}
+        stroke="var(--edge-color-active)"
         strokeWidth={1.25}
         strokeLinecap="round"
         strokeDasharray="16 44"

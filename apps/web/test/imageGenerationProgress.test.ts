@@ -3,8 +3,17 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   getImageGenerationProgressState,
+  isInterruptedImageGeneration,
   shouldShowImagePlaceholderIcon,
 } from '../src/utils/imageGenerationProgress'
+
+test('persisted running image nodes without a generation id are interrupted', () => {
+  assert.equal(isInterruptedImageGeneration('running', undefined, false), true)
+  assert.equal(isInterruptedImageGeneration('queued', '   ', false), true)
+  assert.equal(isInterruptedImageGeneration('running', 'gen-1', false), false)
+  assert.equal(isInterruptedImageGeneration('running', undefined, true), false)
+  assert.equal(isInterruptedImageGeneration('success', undefined, false), false)
+})
 
 test('image generation progress shows while the node is queued or running', () => {
   assert.deepEqual(getImageGenerationProgressState('queued', false), {

@@ -13,6 +13,7 @@ import {
   startCodexLogin,
 } from '../src/services/codexImage'
 import { getAssetFilePath, saveUploadFile } from '../src/services/assets'
+import { resolveWorkspaceInputPath } from '../src/config'
 
 test('normalizeCodexImageSize keeps already-valid gpt-image-2 sizes', () => {
   assert.deepEqual(normalizeCodexImageSize(1024, 1024), { width: 1024, height: 1024 })
@@ -202,6 +203,61 @@ test('generateCodexCliImage runs codex exec and returns newly created image file
   assert.match(calls[0].input ?? '', /cinematic city skyline/)
 })
 
+test('generateCodexCliImage isolates concurrent requests in separate output directories', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'codex-image-isolation-'))
+  const taskByOutputDir = new Map<string, string>()
+
+  try {
+    const results = await Promise.all(
+      ['one', 'two', 'three', 'four'].map((task) =>
+        generateCodexCliImage(
+          {
+            flowId: 'local',
+            nodeId: 'image-' + task,
+            mediaType: 'image',
+            prompt: 'edit reference ' + task,
+            model: 'codex:gpt-5.5',
+            width: 1024,
+            height: 1024,
+            count: 1,
+          },
+          {
+            codexPath: 'codex',
+            cwd: outputDir,
+            outputDir,
+            now: () => 1_000,
+            runCommand: async (_command, _args, options) => {
+              const runOutputDir = options.input
+                ?.match(/保存到这个本地目录：(.+)/)?.[1]
+                ?.trim()
+              assert.ok(runOutputDir)
+              taskByOutputDir.set(runOutputDir, task)
+              return { stdout: 'done', stderr: '' }
+            },
+            listImageFiles: async (runOutputDir) => [
+              {
+                path: join(
+                  runOutputDir,
+                  'result-' + taskByOutputDir.get(runOutputDir) + '.png',
+                ),
+                mtimeMs: 1_200,
+                size: 10,
+              },
+            ],
+          },
+        ),
+      ),
+    )
+
+    assert.equal(taskByOutputDir.size, 4)
+    assert.deepEqual(
+      results.map((result) => basename(result[0]?.localPath ?? '')),
+      ['result-one.png', 'result-two.png', 'result-three.png', 'result-four.png'],
+    )
+  } finally {
+    await rm(outputDir, { recursive: true, force: true })
+  }
+})
 test('generateCodexCliImage normalizes oversized requests in the prompt', async () => {
   const inputs: string[] = []
 
@@ -659,9 +715,54 @@ test('generateCodexCliImage accepts codex exec reported image urls', async () =>
   ])
 })
 
+test('generateCodexCliImage prefers the exact reported local path over directory scanning', async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'codex-image-reported-'))
+  const outputDir = join(tempRoot, 'outputs')
+  const reportedPath = join(outputDir, 'reported-result.png')
+
+  try {
+    const results = await generateCodexCliImage(
+      {
+        flowId: 'local',
+        nodeId: 'image-1',
+        mediaType: 'image',
+        prompt: 'glass city poster',
+        model: 'codex:gpt-5.5',
+        width: 1536,
+        height: 864,
+        count: 1,
+      },
+      {
+        cwd: tempRoot,
+        outputDir,
+        env: {},
+        now: () => 1_000,
+        commandExists: async () => false,
+        fileExists: async () => false,
+        runCommand: async () => ({
+          stdout: JSON.stringify({ images: [{ path: reportedPath }] }),
+          stderr: '',
+        }),
+        listImageFiles: async () => [
+          {
+            path: join(outputDir, 'stale-scanned-result.png'),
+            mtimeMs: 1_200,
+            size: 10,
+          },
+        ],
+      },
+    )
+
+    assert.deepEqual(results, [{ localPath: reportedPath }])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test('generateCodexCliImage sends reference images to codex exec', async () => {
   const calls: { command: string; args: string[] }[] = []
-  const referencePath = 'F:\\repo\\workspace\\outputs\\reference.png'
+  const referenceInput = 'outputs/reference.png'
+  const referencePath = resolveWorkspaceInputPath(referenceInput)
 
   const results = await generateCodexCliImage(
     {
@@ -669,7 +770,7 @@ test('generateCodexCliImage sends reference images to codex exec', async () => {
       nodeId: 'image-1',
       mediaType: 'image',
       prompt: 'turn the reference into a rainy night scene',
-      inputImages: [referencePath],
+      inputImages: [referenceInput],
       model: 'codex:gpt-5.5',
       width: 1536,
       height: 864,

@@ -1,4 +1,8 @@
 import { useEffect, useRef } from 'react'
+import {
+  readThemeParticlePalette,
+  type ThemeParticlePalette,
+} from '../utils/themeParticlePalette'
 
 interface Particle {
   x: number
@@ -15,22 +19,25 @@ const REPEL_RADIUS = 136
 const REPEL_FORCE = 28
 const LERP = 0.16
 const FALL_SPEED = 0.24
-const BASE_COLOR = [255, 255, 255, 0.13] as const
-const HOT_COLOR = [255, 215, 0, 0.82] as const
+
 const SYMBOL_THRESHOLD = 0.25
 
 function mixChannel(a: number, b: number, t: number): number {
   return Math.round(a + (b - a) * t)
 }
 
-function particleColor(hot: number, alpha: number): string {
-  return `rgba(${mixChannel(BASE_COLOR[0], HOT_COLOR[0], hot)}, ${mixChannel(
-    BASE_COLOR[1],
-    HOT_COLOR[1],
+function particleColor(
+  hot: number,
+  alpha: number,
+  palette: ThemeParticlePalette,
+): string {
+  const { base, hot: active } = palette
+  return `rgba(${mixChannel(base[0], active[0], hot)}, ${mixChannel(
+    base[1],
+    active[1],
     hot,
-  )}, ${mixChannel(BASE_COLOR[2], HOT_COLOR[2], hot)}, ${(
-    (BASE_COLOR[3] + (HOT_COLOR[3] - BASE_COLOR[3]) * hot) *
-    alpha
+  )}, ${mixChannel(base[2], active[2], hot)}, ${(
+    (base[3] + (active[3] - base[3]) * hot) * alpha
   ).toFixed(3)})`
 }
 
@@ -41,6 +48,16 @@ export function HomeParticleField() {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
+
+    let particlePalette = readThemeParticlePalette()
+    const syncThemePalette = () => {
+      particlePalette = readThemeParticlePalette()
+    }
+    const themeObserver = new MutationObserver(syncThemePalette)
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-canvas-theme'],
+    })
 
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     const pointer = { x: -9999, y: -9999, active: false }
@@ -134,7 +151,7 @@ export function HomeParticleField() {
         if (hot > SYMBOL_THRESHOLD) {
           const symbolAlpha = Math.min(1, (hot - SYMBOL_THRESHOLD) / (1 - SYMBOL_THRESHOLD)) * alpha
           ctx.save()
-          ctx.fillStyle = particleColor(hot, symbolAlpha)
+          ctx.fillStyle = particleColor(hot, symbolAlpha, particlePalette)
           ctx.font = `bold ${SYMBOL_SIZE}px "Microsoft YaHei", "SimHei", Arial, sans-serif`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
@@ -143,7 +160,7 @@ export function HomeParticleField() {
         } else {
           const radius = BASE_RADIUS + breath * 0.42 + hot * 1.2
           const dotAlpha = alpha * (1 - Math.max(0, (hot - 0) / SYMBOL_THRESHOLD) * 0.3)
-          ctx.fillStyle = particleColor(hot, dotAlpha)
+          ctx.fillStyle = particleColor(hot, dotAlpha, particlePalette)
           ctx.beginPath()
           ctx.arc(px, py, radius, 0, Math.PI * 2)
           ctx.fill()
@@ -171,6 +188,7 @@ export function HomeParticleField() {
     draw(performance.now())
 
     return () => {
+      themeObserver.disconnect()
       window.cancelAnimationFrame(raf)
       window.clearTimeout(idleTimer)
       window.removeEventListener('resize', resize)

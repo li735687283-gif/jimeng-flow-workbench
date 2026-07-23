@@ -523,6 +523,7 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
         updateNodeData(nodeId, {
           title: file.name,
           localPreviewUrl,
+          sourceOnly: true,
           status: 'running',
         } as Partial<BaseNodeData>)
       } else {
@@ -545,6 +546,7 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
             : {
                 assetId: asset.id,
                 localPreviewUrl: undefined,
+                sourceOnly: true,
               }),
         } as Partial<BaseNodeData>)
         if (localPreviewUrl) URL.revokeObjectURL(localPreviewUrl)
@@ -811,8 +813,8 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
           variant={BackgroundVariant.Dots}
           gap={22}
           size={1.5}
-          color="#2a2a2a"
-          bgColor="#0f0f0f"
+          color="var(--canvas-grid-color)"
+          bgColor="transparent"
         />
         <CanvasZoomControls
           snapAlignEnabled={snapAlignEnabled}

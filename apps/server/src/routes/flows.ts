@@ -24,6 +24,17 @@ import {
   deleteFlow,
   duplicateFlow,
 } from '../services/flows'
+function sendKnownFlowError(reply: import('fastify').FastifyReply, err: unknown) {
+  const code = (err as Error & { code?: string }).code
+  if (code !== 'FLOW_NOT_FOUND' && code !== 'FLOW_CORRUPT') return null
+  const statusCode = code === 'FLOW_NOT_FOUND' ? 404 : 422
+  return reply.code(statusCode).send({
+    statusCode,
+    error: code === 'FLOW_NOT_FOUND' ? 'Not Found' : 'Unprocessable Entity',
+    message: (err as Error).message,
+    code,
+  })
+}
 
 const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // GET /api/flows → FlowSummary[]
@@ -38,14 +49,8 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       try {
         return await getFlow(req.params.id)
       } catch (err) {
-        if ((err as Error & { code?: string }).code === 'FLOW_NOT_FOUND') {
-          return reply.code(404).send({
-            statusCode: 404,
-            error: 'Not Found',
-            message: (err as Error).message,
-            code: 'FLOW_NOT_FOUND',
-          })
-        }
+        const response = sendKnownFlowError(reply, err)
+        if (response) return response
         throw err
       }
     },
@@ -102,14 +107,8 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       try {
         return await updateFlow(req.params.id, safePatch)
       } catch (err) {
-        if ((err as Error & { code?: string }).code === 'FLOW_NOT_FOUND') {
-          return reply.code(404).send({
-            statusCode: 404,
-            error: 'Not Found',
-            message: (err as Error).message,
-            code: 'FLOW_NOT_FOUND',
-          })
-        }
+        const response = sendKnownFlowError(reply, err)
+        if (response) return response
         throw err
       }
     },
@@ -140,14 +139,8 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       try {
         return await duplicateFlow(req.params.id, nameOverride)
       } catch (err) {
-        if ((err as Error & { code?: string }).code === 'FLOW_NOT_FOUND') {
-          return reply.code(404).send({
-            statusCode: 404,
-            error: 'Not Found',
-            message: (err as Error).message,
-            code: 'FLOW_NOT_FOUND',
-          })
-        }
+        const response = sendKnownFlowError(reply, err)
+        if (response) return response
         throw err
       }
     },

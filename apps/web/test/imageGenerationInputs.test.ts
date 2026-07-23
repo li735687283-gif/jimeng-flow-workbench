@@ -4,9 +4,17 @@ import {
   extractTextNodePrompt,
   getImageGenerationInputImages,
   getUpstreamTextReferences,
+  isImageNodeSourceOnly,
   joinUpstreamTextPrompts,
   resolveImageGenerationPrompt,
 } from '../src/utils/imageGenerationInputs'
+
+test('uploaded image nodes are source-only only when explicitly marked', () => {
+  assert.equal(isImageNodeSourceOnly({ sourceOnly: true }), true)
+  assert.equal(isImageNodeSourceOnly({ sourceOnly: false }), false)
+  assert.equal(isImageNodeSourceOnly({}), false)
+  assert.equal(isImageNodeSourceOnly(undefined), false)
+})
 
 test('image regeneration ignores the current node asset without an incoming image edge', () => {
   assert.deepEqual(

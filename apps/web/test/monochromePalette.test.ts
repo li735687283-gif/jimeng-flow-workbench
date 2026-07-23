@@ -41,6 +41,7 @@ test('frontend source colors stay neutral except for approved semantic accents',
   const violations: string[] = []
 
   for (const filePath of listSourceFiles(srcDir)) {
+    if (relative(srcDir, filePath) === 'theme.css') continue
     const source = readFileSync(filePath, 'utf8')
     for (const match of source.matchAll(/#([0-9a-fA-F]{3,8})\b/g)) {
       const color = match[1].toLowerCase()

@@ -22,6 +22,8 @@ import {
   listLibraryAssets,
   saveAssetToLibrary,
   getAssetFilePath,
+  deriveAssetType,
+  getAssetUploadValidationError,
 } from '../services/assets'
 import {
   createAssetContentHash,
@@ -62,10 +64,7 @@ function mimeForFile(absPath: string, fallback: string): string {
 }
 
 function isImageUpload(fileName: string, mimeType: string): boolean {
-  return (
-    mimeType.toLowerCase().startsWith('image/') ||
-    MIME_BY_EXT[extname(fileName).toLowerCase()]?.startsWith('image/') === true
-  )
+  return deriveAssetType(mimeType, fileName) === 'image'
 }
 
 async function findDuplicateUpload(fileBuffer: Buffer, fileName: string, mimeType: string) {
@@ -182,9 +181,16 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     }
 
     const fileName = data.filename || 'upload.bin'
-    const effectiveMime =
-      data.mimetype ||
-      (MIME_BY_EXT[extname(fileName).toLowerCase()] ?? 'application/octet-stream')
+    const effectiveMime = data.mimetype || ''
+    const uploadTypeError = getAssetUploadValidationError(effectiveMime, fileName)
+    if (uploadTypeError) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: uploadTypeError,
+        code: 'INVALID_INPUT',
+      })
+    }
 
     const duplicateUpload = await findDuplicateUpload(fileBuffer, fileName, effectiveMime)
     if (duplicateUpload?.duplicate) {
@@ -258,10 +264,16 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         })
       }
 
-      const effectiveMime =
-        typeof mimeType === 'string' && mimeType
-          ? mimeType
-          : MIME_BY_EXT[extname(fileName).toLowerCase()] ?? 'application/octet-stream'
+      const effectiveMime = typeof mimeType === 'string' ? mimeType : ''
+      const uploadTypeError = getAssetUploadValidationError(effectiveMime, fileName)
+      if (uploadTypeError) {
+        return reply.code(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: uploadTypeError,
+          code: 'INVALID_INPUT',
+        })
+      }
 
       const duplicateUpload = body.provider
         ? null

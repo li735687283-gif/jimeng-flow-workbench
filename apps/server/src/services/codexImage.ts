@@ -18,13 +18,16 @@ import {
   join,
   resolve,
 } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type {
   GenerationRequest,
   GenerationResult,
 } from '@jimeng-flow/shared/generateNode'
 import type { Settings } from '@jimeng-flow/shared/settings'
-import { getProjectRoot, resolveOutputDir, resolveRuntimePath } from '../config'
+import {
+  getProjectRoot,
+  resolveOutputDir,
+  resolveWorkspaceInputPath,
+} from '../config'
 import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
 
@@ -594,9 +597,9 @@ async function resolveInputImagePath(
     )
   }
   if (value.startsWith('file://')) {
-    return fileURLToPath(value)
+    throw new Error('参考图不支持 file URL；请先上传为 Asset')
   }
-  return resolveRuntimePath(value)
+  return resolveWorkspaceInputPath(value)
 }
 
 async function resolveInputImagePaths(
@@ -907,19 +910,21 @@ export async function generateCodexCliImage(
   const runCommand = deps.runCommand ?? defaultRunCommand
   const listImageFiles = deps.listImageFiles ?? defaultListImageFiles
   const timeoutMs = getCodexTimeoutMs(deps)
-  const sinceMs = deps.now?.() ?? Date.now()
   const tempPaths: string[] = []
 
   await mkdir(outputDir, { recursive: true })
 
   try {
+    // 每个任务使用独立目录，避免多个排队任务扫描同一个输出目录时
+    // 把前一项任务的图片误认成自己的结果。
+    const runOutputDir = await mkdtemp(join(outputDir, '.codex-image-'))
     const referencePaths = await resolveInputImagePaths(
       req.inputImages,
       deps,
       tempPaths,
     )
     const lastMessagePath = join(
-      outputDir,
+      runOutputDir,
       `codex-last-${Date.now()}-${randomBytes(4).toString('hex')}.txt`,
     )
     const args = [
@@ -941,41 +946,44 @@ export async function generateCodexCliImage(
     args.push('-')
 
     let result: CodexCommandResult
+    let sinceMs = deps.now?.() ?? Date.now()
     try {
-      const execute = () =>
-        runCommand(codexPath, args, {
+      const execute = () => {
+        // 必须在真正取得 Codex 串行队列执行权后再记录时间。
+        sinceMs = deps.now?.() ?? Date.now()
+        return runCommand(codexPath, args, {
           cwd,
-          input: buildCodexImagePrompt(req, outputDir),
+          input: buildCodexImagePrompt(req, runOutputDir),
           timeoutMs,
         })
+      }
       // 生产路径串行执行,避免并发刷新 OAuth 令牌把登录态弄坏(见 enqueueCodexCli)
       result = deps.runCommand ? await execute() : await enqueueCodexCli(execute)
     } catch (err) {
       throw wrapCodexCommandError('OpenAI Codex CLI', err)
     }
 
-    let newFiles = getNewImageFiles(
-      await listImageFiles(outputDir),
+    let lastMessage = ''
+    try {
+      lastMessage = await readFile(lastMessagePath, 'utf8')
+    } catch {
+      lastMessage = ''
+    }
+    const text = [
+      result.stdout,
+      result.stderr,
+      lastMessage,
+    ].filter(Boolean).join('\n')
+    const reportedResults = extractImageResultsFromText(text)
+    if (reportedResults.length > 0) {
+      return reportedResults.slice(0, Math.max(1, req.count ?? 1))
+    }
+
+    const newFiles = getNewImageFiles(
+      await listImageFiles(runOutputDir),
       sinceMs,
       req.count,
     )
-    if (newFiles.length === 0) {
-      let lastMessage = ''
-      try {
-        lastMessage = await readFile(lastMessagePath, 'utf8')
-      } catch {
-        lastMessage = ''
-      }
-      const text = [
-        result.stdout,
-        result.stderr,
-        lastMessage,
-      ].filter(Boolean).join('\n')
-      const reportedResults = extractImageResultsFromText(text)
-      if (reportedResults.length > 0) {
-        return reportedResults.slice(0, Math.max(1, req.count ?? 1))
-      }
-    }
 
     if (newFiles.length === 0) {
       throw new Error(

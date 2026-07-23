@@ -45,6 +45,7 @@ import { generateCodexCliImage, isCodexImageModel } from './codexImage'
 import { saveUploadFile } from './assets'
 import { getFlow, updateFlow } from './flows'
 import { getSettings } from './settings'
+import { resolveWorkspaceInputPath } from '../config'
 
 /** 生成任务 ID：gen_<timestamp>_<random> */
 function makeGenerationId(): string {
@@ -872,6 +873,66 @@ function toResponse(rec: GenerationRecord): GenerationResponse {
   }
 }
 
+function isAssetId(value: string): boolean {
+  return /^asset_[A-Za-z0-9_-]+$/.test(value)
+}
+
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[A-Za-z0-9.+-]+(?:;[^,]*)?,/i.test(value)
+}
+
+function isLocalAssetUrl(value: string): boolean {
+  let pathname = ''
+  if (value.startsWith('/')) {
+    pathname = value
+  } else {
+    try {
+      const url = new URL(value)
+      const hostname = url.hostname.toLowerCase()
+      if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) return false
+      pathname = url.pathname
+    } catch {
+      return false
+    }
+  }
+  return /^\/api\/assets\/asset_[A-Za-z0-9_-]+\/(?:file|download)$/.test(pathname)
+}
+
+/** 在任务入队前拒绝可能读取 workspace 外本地文件的参考图输入。 */
+export function assertValidGenerationInputImages(
+  inputImages: readonly unknown[] | undefined,
+): void {
+  for (const input of inputImages ?? []) {
+    if (input === undefined || input === '') continue
+    if (typeof input !== 'string') {
+      throw new JimengError(
+        'INVALID_INPUT',
+        '参考图输入必须是 Asset ID、图片数据 URL 或 workspace 内的相对文件路径',
+        400,
+      )
+    }
+
+    const value = input.trim()
+    if (!value) continue
+    if (isAssetId(value) || isImageDataUrl(value) || isLocalAssetUrl(value)) {
+      continue
+    }
+    if (/^(?:https?|file):/i.test(value)) {
+      throw new JimengError(
+        'INVALID_INPUT',
+        `参考图不支持远程 URL 或 file URL；请先上传为 Asset：${input}`,
+        400,
+      )
+    }
+
+    try {
+      resolveWorkspaceInputPath(value)
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      throw new JimengError('INVALID_INPUT', reason, 400)
+    }
+  }
+}
 /** 创建任务前的通用校验 */
 function validateCreateRequest(
   req: GenerationRequest | VideoGenerationRequest,
@@ -881,6 +942,14 @@ function validateCreateRequest(
   }
   if (!req.nodeId) {
     throw new JimengError('INVALID_INPUT', 'nodeId 不能为空', 400)
+  }
+  assertValidGenerationInputImages(req.inputImages)
+  if (req.mediaType === 'video') {
+    assertValidGenerationInputImages(
+      normalizeVideoReferences(req.references).map((reference) =>
+        reference.url ?? reference.assetId,
+      ),
+    )
   }
 }
 
