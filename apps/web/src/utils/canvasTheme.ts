@@ -1,6 +1,8 @@
 import {
   normalizeCanvasTheme,
+  normalizeThemeBackgroundMode,
   type CanvasTheme,
+  type ThemeBackgroundMode,
 } from '@jimeng-flow/shared'
 
 export interface CanvasThemeOption {
@@ -26,6 +28,15 @@ export function applyCanvasTheme(
   root.dataset.canvasTheme = theme
   root.style.colorScheme = theme === 'light' ? 'light' : 'dark'
   return theme
+}
+
+export function applyThemeBackgroundMode(
+  value: unknown,
+  root: HTMLElement = document.documentElement,
+): ThemeBackgroundMode {
+  const mode = normalizeThemeBackgroundMode(value)
+  root.dataset.themeBackgroundMode = mode
+  return mode
 }
 
 export const CANVAS_THEME_PREVIEW_ATTRIBUTE = 'data-canvas-theme-preview'

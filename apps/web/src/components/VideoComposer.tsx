@@ -581,11 +581,6 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         <textarea
           value={d.prompt}
           onChange={(e) => set({ prompt: e.target.value })}
-          placeholder={
-            upstreamPrompt
-              ? '（已使用上游文本，可在此覆盖）'
-              : '描述生成画面内容，支持 @ 引用素材…'
-          }
           style={{
             flex: 1,
             resize: 'none',

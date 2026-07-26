@@ -17,9 +17,11 @@ test('image and video prompts share expandable wheel-scroll editor', async () =>
   )
   const css = await readFile(new URL('../src/App.css', import.meta.url), 'utf8')
 
-  assert.match(imageNode, /<PromptEditor[\s\S]*placeholder=\{[\s\S]*可直接文字生图/)
+  assert.match(imageNode, /<PromptEditor/)
+  assert.doesNotMatch(imageNode, /placeholder\s*=/)
   assert.match(imageNode, /closest\('\.prompt-editor-modal'\)/)
-  assert.match(videoPanel, /<MentionablePromptEditor[\s\S]*placeholder=\{[\s\S]*描述视频画面/)
+  assert.match(videoPanel, /<MentionablePromptEditor/)
+  assert.doesNotMatch(videoPanel, /placeholder\s*=/)
   assert.match(videoPanel, /import\s+\{\s*MentionablePromptEditor/)
   const videoNode = await readFile(
     new URL('../src/nodes/VideoNode.tsx', import.meta.url),

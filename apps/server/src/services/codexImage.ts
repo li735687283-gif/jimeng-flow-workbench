@@ -732,6 +732,44 @@ function extractImageResultsFromText(text: string): GenerationResult[] {
   return results
 }
 
+async function validateReportedImageResults(
+  results: GenerationResult[],
+  options: {
+    cwd: string
+    runOutputDir: string
+    fileExists: (path: string) => Promise<boolean>
+  },
+): Promise<GenerationResult[]> {
+  const validated: GenerationResult[] = []
+
+  for (const result of results) {
+    if (result.remoteUrl) {
+      validated.push(result)
+      continue
+    }
+
+    const reportedPath = result.localPath?.trim()
+    if (!reportedPath || !IMAGE_EXTENSIONS.has(extname(reportedPath).toLowerCase())) {
+      continue
+    }
+
+    const candidates = isAbsolute(reportedPath)
+      ? [reportedPath]
+      : [
+          resolve(options.runOutputDir, reportedPath),
+          resolve(options.cwd, reportedPath),
+        ]
+    for (const candidate of Array.from(new Set(candidates))) {
+      if (await options.fileExists(candidate)) {
+        validated.push({ localPath: candidate })
+        break
+      }
+    }
+  }
+
+  return validated
+}
+
 /**
  * gpt-image-2 的硬性尺寸约束（见 Codex CLI imagegen 技能文档）：
  * 长边 ≤ 3840、两条边都是 16 的倍数、总像素 655,360 ~ 8,294,400、长短边比 ≤ 3:1。
@@ -909,6 +947,7 @@ export async function generateCodexCliImage(
   const outputDir = await getOutputDir(deps)
   const runCommand = deps.runCommand ?? defaultRunCommand
   const listImageFiles = deps.listImageFiles ?? defaultListImageFiles
+  const fileExists = deps.fileExists ?? defaultFileExists
   const timeoutMs = getCodexTimeoutMs(deps)
   const tempPaths: string[] = []
 
@@ -974,7 +1013,10 @@ export async function generateCodexCliImage(
       result.stderr,
       lastMessage,
     ].filter(Boolean).join('\n')
-    const reportedResults = extractImageResultsFromText(text)
+    const reportedResults = await validateReportedImageResults(
+      extractImageResultsFromText(text),
+      { cwd, runOutputDir, fileExists },
+    )
     if (reportedResults.length > 0) {
       return reportedResults.slice(0, Math.max(1, req.count ?? 1))
     }

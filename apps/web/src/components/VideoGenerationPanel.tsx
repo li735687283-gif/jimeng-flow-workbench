@@ -155,11 +155,6 @@ export function VideoGenerationPanel({
       <MentionablePromptEditor
         value={prompt}
         onChange={onPromptChange}
-        placeholder={
-          upstreamTextBrief
-            ? '已引用上游文本，可直接发送；也可在此补充或覆盖视频提示词'
-            : '描述视频画面，输入 @ 可引用上游图片'
-        }
         disabled={running}
         mentionImages={mentionImages}
       />

@@ -10,6 +10,7 @@ import {
   DEFAULT_SETTINGS,
   normalizeCanvasTheme,
   normalizeModelConfigs,
+  normalizeThemeBackgroundMode,
 } from '@jimeng-flow/shared'
 
 const configuredProjectRoot = process.env.MOK_PROJECT_ROOT?.trim()
@@ -128,6 +129,10 @@ function mergeWithDefaults(raw: unknown): Settings {
     const defaultValue = DEFAULT_SETTINGS[key]
     if (key === 'canvasTheme') {
       ;(result[key] as unknown) = normalizeCanvasTheme(value)
+      return
+    }
+    if (key === 'themeBackgroundMode') {
+      ;(result[key] as unknown) = normalizeThemeBackgroundMode(value)
       return
     }
     if (key === 'modelConfigs') {

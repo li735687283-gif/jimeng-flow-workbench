@@ -63,7 +63,6 @@ export function AgentConversationHistory({
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索对话"
           aria-label="搜索历史对话"
           autoFocus
         />

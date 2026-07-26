@@ -927,7 +927,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
                 onPointerDown={(event) => {
                   if (bodyEditing) event.stopPropagation()
                 }}
-                placeholder="编辑节点正文…"
                 disabled={loading}
                 spellCheck
                 aria-label="节点正文编辑"
@@ -981,7 +980,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
                     }}
                     onKeyDown={(event) => event.stopPropagation()}
                     onWheel={(event) => event.stopPropagation()}
-                    placeholder="编辑节点正文…"
                     spellCheck
                     autoFocus
                   />
@@ -1014,11 +1012,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
             <PromptEditor
               value={prompt}
               onChange={persistPromptDraft}
-              placeholder={
-                hasUpstreamImages
-                  ? '可选：补充分析要求（如「只要色彩和风格」）；留空则默认反推完整生图提示词'
-                  : '输入发给大模型的提示词，例如：把下面这段改得更简洁'
-              }
               disabled={loading}
               autoFocus={false}
             />

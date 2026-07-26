@@ -210,7 +210,6 @@ export function PromptTemplateLibrary({
             <input
               value={newTitle}
               onChange={(event) => setNewTitle(event.target.value)}
-              placeholder="输入模板标题"
             />
           </label>
           <div
@@ -249,7 +248,6 @@ export function PromptTemplateLibrary({
               className="prompt-template-category-input"
               value={newCategory}
               onChange={(event) => setNewCategory(event.target.value)}
-              placeholder="或自定义分类名"
             />
           </div>
           <label className="prompt-template-new-field prompt-template-new-prompt-field">
@@ -257,7 +255,6 @@ export function PromptTemplateLibrary({
             <textarea
               value={newPrompt}
               onChange={(event) => setNewPrompt(event.target.value)}
-              placeholder="粘贴提示词内容..."
             />
           </label>
           <div className="prompt-template-new-actions">

@@ -5,10 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import {
   CANVAS_THEMES,
   DEFAULT_SETTINGS,
+  THEME_BACKGROUND_MODES,
   normalizeCanvasTheme,
+  normalizeThemeBackgroundMode,
 } from '@jimeng-flow/shared'
 import {
   applyCanvasTheme,
+  applyThemeBackgroundMode,
   CANVAS_THEME_OPTIONS,
 } from '../src/utils/canvasTheme'
 
@@ -25,12 +28,17 @@ test('the global skin registry exposes exactly the six requested themes', () => 
   ])
   assert.equal(CANVAS_THEME_OPTIONS.length, 6)
   assert.equal(DEFAULT_SETTINGS.canvasTheme, 'dark')
+  assert.deepEqual(THEME_BACKGROUND_MODES, ['original', 'blur'])
+  assert.equal(DEFAULT_SETTINGS.themeBackgroundMode, 'blur')
 })
 
 test('legacy and invalid settings fall back to the existing dark skin', () => {
   assert.equal(normalizeCanvasTheme(undefined), 'dark')
   assert.equal(normalizeCanvasTheme('unknown-theme'), 'dark')
   assert.equal(normalizeCanvasTheme('light'), 'light')
+  assert.equal(normalizeThemeBackgroundMode(undefined), 'blur')
+  assert.equal(normalizeThemeBackgroundMode('unknown-mode'), 'blur')
+  assert.equal(normalizeThemeBackgroundMode('original'), 'original')
 })
 
 test('applying a skin updates the root without reloading the document', () => {
@@ -46,6 +54,11 @@ test('applying a skin updates the root without reloading the document', () => {
   assert.equal(applyCanvasTheme('light', root), 'light')
   assert.equal(root.dataset.canvasTheme, 'light')
   assert.equal(root.style.colorScheme, 'light')
+
+  assert.equal(applyThemeBackgroundMode('original', root), 'original')
+  assert.equal(root.dataset.themeBackgroundMode, 'original')
+  assert.equal(applyThemeBackgroundMode('invalid', root), 'blur')
+  assert.equal(root.dataset.themeBackgroundMode, 'blur')
 })
 
 test('settings renders all skins in one real-time preview group', async () => {

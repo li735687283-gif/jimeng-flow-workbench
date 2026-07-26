@@ -89,7 +89,6 @@ export function AssetLibraryModal({
               <input
                 type="search"
                 value={query}
-                placeholder="搜索素材"
                 aria-label="搜索素材"
                 onChange={(event) => setQuery(event.target.value)}
               />

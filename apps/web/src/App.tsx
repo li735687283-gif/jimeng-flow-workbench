@@ -25,6 +25,7 @@ import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
 import {
   applyCanvasTheme,
+  applyThemeBackgroundMode,
   isCanvasThemePreviewActive,
 } from './utils/canvasTheme'
 import type { Asset } from '@jimeng-flow/shared/asset'
@@ -152,6 +153,7 @@ function AppInner() {
   useEffect(() => {
     if (settings && !isCanvasThemePreviewActive()) {
       applyCanvasTheme(settings.canvasTheme)
+      applyThemeBackgroundMode(settings.themeBackgroundMode)
     }
   }, [settings])
 

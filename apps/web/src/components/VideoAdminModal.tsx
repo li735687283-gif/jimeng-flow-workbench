@@ -329,7 +329,6 @@ export function VideoAdminModal({
               <input
                 value={form.title}
                 onChange={(event) => setForm({ ...form, title: event.target.value })}
-                placeholder="作品标题"
               />
             </label>
             <label>
@@ -339,7 +338,6 @@ export function VideoAdminModal({
                 onChange={(event) =>
                   setForm({ ...form, description: event.target.value })
                 }
-                placeholder="简短描述"
               />
             </label>
             <label>

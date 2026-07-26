@@ -20,7 +20,6 @@ export interface MentionImage {
 
 interface MentionablePromptEditorProps {
   value: string
-  placeholder: string
   disabled?: boolean
   mentionImages?: MentionImage[]
   onChange: (value: string) => void
@@ -73,7 +72,6 @@ function renderHighlightedText(text: string, regex: RegExp | null): ReactNode {
 
 export function MentionablePromptEditor({
   value,
-  placeholder,
   disabled = false,
   mentionImages = [],
   onChange,
@@ -240,7 +238,6 @@ export function MentionablePromptEditor({
         onScroll={syncScroll}
         onKeyDown={handleKeyDown}
         onWheelCapture={handleWheel}
-        placeholder={placeholder}
         disabled={disabled}
         autoFocus={isExpanded}
       />

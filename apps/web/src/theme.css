@@ -27,6 +27,11 @@
   --theme-panel-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
   --theme-home-atmosphere: none;
   --theme-canvas-atmosphere: none;
+  --theme-background-image: none;
+  --theme-background-opacity: 0;
+  --theme-background-filter: none;
+  --theme-background-scale: 1;
+  --theme-background-inset: 0;
   --theme-particle-base: 255, 255, 255;
   --theme-particle-base-alpha: 0.13;
   --theme-particle-hot: 255, 215, 0;
@@ -99,6 +104,8 @@
 [data-canvas-theme='starry-night'] {
   --theme-app-bg: #030819;
   --theme-canvas-bg: #02061a;
+  --theme-background-image: url('./assets/theme-backgrounds/starry-night.png');
+  --theme-background-opacity: 0.86;
   --theme-panel: #07142c;
   --theme-card: #0a1b39;
   --theme-card-hover: #10274c;
@@ -136,6 +143,8 @@
 [data-canvas-theme='turner-mist'] {
   --theme-app-bg: #171308;
   --theme-canvas-bg: #151207;
+  --theme-background-image: url('./assets/theme-backgrounds/turner-mist.png');
+  --theme-background-opacity: 0.84;
   --theme-panel: #211b10;
   --theme-card: #2e2516;
   --theme-card-hover: #3a2f1c;
@@ -173,6 +182,8 @@
 [data-canvas-theme='hokusai-indigo'] {
   --theme-app-bg: #061824;
   --theme-canvas-bg: #051722;
+  --theme-background-image: url('./assets/theme-backgrounds/hokusai-indigo.png');
+  --theme-background-opacity: 0.84;
   --theme-panel: #0a2230;
   --theme-card: #102b39;
   --theme-card-hover: #173746;
@@ -210,6 +221,8 @@
 [data-canvas-theme='monet-lilac'] {
   --theme-app-bg: #090a2b;
   --theme-canvas-bg: #08092a;
+  --theme-background-image: url('./assets/theme-backgrounds/monet-lilac.png');
+  --theme-background-opacity: 0.84;
   --theme-panel: #15143d;
   --theme-card: #1e1c50;
   --theme-card-hover: #2a2666;
@@ -905,4 +918,153 @@ textarea::placeholder {
 .image-generation-progress-dot {
   background: var(--theme-accent) !important;
   box-shadow: 0 0 0 6px var(--theme-accent-softer), 0 0 18px var(--theme-accent-glow) !important;
+}
+/* 艺术主题背景：原图保持清晰，模糊模式使用中档强度并降低视觉干扰。 */
+[data-theme-background-mode='original'] {
+  --theme-background-filter: none;
+  --theme-background-scale: 1;
+  --theme-background-inset: 0;
+}
+
+[data-theme-background-mode='blur'] {
+  --theme-background-filter: blur(24px);
+  --theme-background-scale: 1.06;
+  --theme-background-inset: -28px;
+}
+
+[data-canvas-theme='starry-night'][data-theme-background-mode='blur'],
+[data-canvas-theme='turner-mist'][data-theme-background-mode='blur'],
+[data-canvas-theme='hokusai-indigo'][data-theme-background-mode='blur'],
+[data-canvas-theme='monet-lilac'][data-theme-background-mode='blur'] {
+  --theme-background-opacity: 0.58;
+}
+
+.home-page::before,
+.mature-layout .canvas-container::before {
+  content: '';
+  position: absolute;
+  inset: var(--theme-background-inset);
+  z-index: 0;
+  background-image: var(--theme-background-image);
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  filter: var(--theme-background-filter);
+  opacity: var(--theme-background-opacity);
+  transform: scale(var(--theme-background-scale));
+  transform-origin: center;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-slow) var(--ease-standard),
+    filter var(--motion-slow) var(--ease-standard),
+    transform var(--motion-slow) var(--ease-standard);
+}
+
+.home-page::before {
+  position: fixed;
+}
+
+.mature-layout .canvas-container {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.mature-layout .canvas-container > .react-flow {
+  position: relative;
+  z-index: 1;
+}
+.settings-background-mode {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--theme-border);
+}
+
+.settings-background-mode-copy {
+  display: flex;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-background-mode-copy strong {
+  color: var(--theme-heading);
+  font-size: 12px;
+}
+
+.settings-background-mode-copy small {
+  color: var(--theme-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.settings-background-mode-options {
+  display: grid;
+  width: min(390px, 100%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-background-mode-option {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--theme-border);
+  border-radius: 9px;
+  background: var(--theme-card);
+  color: var(--theme-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-background-mode-option:hover {
+  border-color: var(--theme-border-strong);
+  background: var(--theme-card-hover);
+}
+
+.settings-background-mode-option.is-selected {
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 1px var(--theme-accent-soft);
+}
+
+.settings-background-mode-option > svg { color: var(--theme-accent); }
+.settings-background-mode-option > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.settings-background-mode-option strong { color: var(--theme-heading); font-size: 11px; }
+.settings-background-mode-option small { overflow: hidden; color: var(--theme-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 日间皮肤不沿用深色皮肤中硬编码的白字。 */
+[data-canvas-theme='light'] .node-wrapper.media-display .node-title,
+[data-canvas-theme='light'] .text-node-modal-header,
+[data-canvas-theme='light'] .prompt-template-library-head strong,
+[data-canvas-theme='light'] .prompt-template-card-head strong,
+[data-canvas-theme='light'] .image-model-copy strong,
+[data-canvas-theme='light'] .image-quality-row button,
+[data-canvas-theme='light'] .video-duration-labels span,
+[data-canvas-theme='light'] .asset-library-title,
+[data-canvas-theme='light'] .video-admin-table td strong,
+[data-canvas-theme='light'] .agent-title,
+[data-canvas-theme='light'] .agent-conversation-history-title,
+[data-canvas-theme='light'] .agent-bubble.assistant strong,
+[data-canvas-theme='light'] .agent-input,
+[data-canvas-theme='light'] .agent-card-title,
+[data-canvas-theme='light'] .agent-skill-library-header > span,
+[data-canvas-theme='light'] .agent-active-template-copy strong {
+  color: var(--theme-heading) !important;
+}
+
+[data-canvas-theme='light'] .home-project-card.no-cover small,
+[data-canvas-theme='light'] .video-duration-head span,
+[data-canvas-theme='light'] .agent-active-template-copy small {
+  color: var(--theme-muted) !important;
+}
+
+@media (max-width: 700px) {
+  .settings-background-mode { align-items: stretch; flex-direction: column; }
+  .settings-background-mode-options { width: 100%; }
 }

@@ -738,7 +738,7 @@ test('generateCodexCliImage prefers the exact reported local path over directory
         env: {},
         now: () => 1_000,
         commandExists: async () => false,
-        fileExists: async () => false,
+        fileExists: async (path) => path === reportedPath,
         runCommand: async () => ({
           stdout: JSON.stringify({ images: [{ path: reportedPath }] }),
           stderr: '',
@@ -759,6 +759,44 @@ test('generateCodexCliImage prefers the exact reported local path over directory
   }
 })
 
+test('generateCodexCliImage ignores shell variable placeholders and scans the task directory', async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'codex-image-placeholder-'))
+  let actualPath = ''
+  try {
+    const results = await generateCodexCliImage(
+      {
+        flowId: 'local',
+        nodeId: 'image-1',
+        mediaType: 'image',
+        prompt: 'remove nodes and keep the background',
+        model: 'codex:gpt-5.5',
+        width: 1536,
+        height: 864,
+        count: 1,
+      },
+      {
+        cwd: tempRoot,
+        outputDir: join(tempRoot, 'outputs'),
+        env: {},
+        now: () => 1_000,
+        commandExists: async () => false,
+        fileExists: async () => false,
+        runCommand: async () => ({
+          stdout: JSON.stringify({ images: [{ path: 'Path=$dest' }] }),
+          stderr: '',
+        }),
+        listImageFiles: async (runOutputDir) => {
+          actualPath = join(runOutputDir, 'actual-background.png')
+          return [{ path: actualPath, mtimeMs: 1_200, size: 10 }]
+        },
+      },
+    )
+
+    assert.deepEqual(results, [{ localPath: actualPath }])
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
 test('generateCodexCliImage sends reference images to codex exec', async () => {
   const calls: { command: string; args: string[] }[] = []
   const referenceInput = 'outputs/reference.png'

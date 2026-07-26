@@ -16,12 +16,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import type { CanvasTheme, Settings } from '@jimeng-flow/shared'
+import type { CanvasTheme, Settings, ThemeBackgroundMode } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 import {
   DEFAULT_SETTINGS,
   buildModelConfigsFromSettings,
   normalizeCanvasTheme,
+  normalizeThemeBackgroundMode,
 } from '@jimeng-flow/shared'
 import { IMAGE_MODELS, isJimengImageModel } from '@jimeng-flow/shared/generateNode'
 import { VIDEO_MODELS, isJimengVideoModel } from '@jimeng-flow/shared/videoNode'
@@ -29,6 +30,7 @@ import { useSettingsStore } from '../state/settingsStore'
 import { ThemePicker } from './ThemePicker'
 import {
   applyCanvasTheme,
+  applyThemeBackgroundMode,
   beginCanvasThemePreview,
   endCanvasThemePreview,
 } from '../utils/canvasTheme'
@@ -465,19 +467,26 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const autoFetchedModelsRef = useRef(false)
   const confirmedThemeRef = useRef<CanvasTheme>('dark')
   const previewThemeRef = useRef<CanvasTheme>('dark')
+  const confirmedBackgroundModeRef = useRef<ThemeBackgroundMode>('blur')
+  const previewBackgroundModeRef = useRef<ThemeBackgroundMode>('blur')
   const themePreviewChangedRef = useRef(false)
 
   // 打开时拉取一次最新 settings
   useEffect(() => {
     if (!open) return
-    const persistedTheme = normalizeCanvasTheme(
-      useSettingsStore.getState().settings?.canvasTheme,
+    const currentSettings = useSettingsStore.getState().settings
+    const persistedTheme = normalizeCanvasTheme(currentSettings?.canvasTheme)
+    const persistedBackgroundMode = normalizeThemeBackgroundMode(
+      currentSettings?.themeBackgroundMode,
     )
     confirmedThemeRef.current = persistedTheme
     previewThemeRef.current = persistedTheme
+    confirmedBackgroundModeRef.current = persistedBackgroundMode
+    previewBackgroundModeRef.current = persistedBackgroundMode
     themePreviewChangedRef.current = false
     endCanvasThemePreview()
     applyCanvasTheme(persistedTheme)
+    applyThemeBackgroundMode(persistedBackgroundMode)
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setLoadError(null)
     setSaveError(null)
@@ -500,20 +509,25 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (!settings) return
     const persistedTheme = normalizeCanvasTheme(settings.canvasTheme)
+    const persistedBackgroundMode = normalizeThemeBackgroundMode(settings.themeBackgroundMode)
     setForm((previous) => {
       const next = createSettingsDraft(settings)
       if (open && themePreviewChangedRef.current) {
         next.canvasTheme = previous.canvasTheme
+        next.themeBackgroundMode = previous.themeBackgroundMode
       }
       return next
     })
     if (open && themePreviewChangedRef.current) {
       beginCanvasThemePreview()
       applyCanvasTheme(previewThemeRef.current)
+      applyThemeBackgroundMode(previewBackgroundModeRef.current)
     } else if (open) {
       confirmedThemeRef.current = persistedTheme
+      confirmedBackgroundModeRef.current = persistedBackgroundMode
       endCanvasThemePreview()
       applyCanvasTheme(persistedTheme)
+      applyThemeBackgroundMode(persistedBackgroundMode)
     }
   }, [open, settings])
 
@@ -547,6 +561,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     applyCanvasTheme(theme)
   }
 
+  const handleBackgroundModePreview = (mode: ThemeBackgroundMode) => {
+    previewBackgroundModeRef.current = mode
+    themePreviewChangedRef.current = true
+    setSaveStatus('idle')
+    setForm((previous) => ({ ...previous, themeBackgroundMode: mode }))
+    beginCanvasThemePreview()
+    applyThemeBackgroundMode(mode)
+  }
+
   const handleSave = async () => {
     if (guards.saveBlocked) return
     setSubmitting(true)
@@ -568,11 +591,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
       await saveSettings(nextForm)
       const confirmedTheme = normalizeCanvasTheme(nextForm.canvasTheme)
+      const confirmedBackgroundMode = normalizeThemeBackgroundMode(nextForm.themeBackgroundMode)
       confirmedThemeRef.current = confirmedTheme
       previewThemeRef.current = confirmedTheme
+      confirmedBackgroundModeRef.current = confirmedBackgroundMode
+      previewBackgroundModeRef.current = confirmedBackgroundMode
       themePreviewChangedRef.current = false
       endCanvasThemePreview()
       applyCanvasTheme(confirmedTheme)
+      applyThemeBackgroundMode(confirmedBackgroundMode)
       setSaveStatus('saved')
       onClose()
     } catch (err: unknown) {
@@ -585,13 +612,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   const handleCancel = () => {
     if (guards.closeBlocked) return
+    const currentSettings = useSettingsStore.getState().settings
     const persistedTheme = normalizeCanvasTheme(
-      useSettingsStore.getState().settings?.canvasTheme ?? confirmedThemeRef.current,
+      currentSettings?.canvasTheme ?? confirmedThemeRef.current,
+    )
+    const persistedBackgroundMode = normalizeThemeBackgroundMode(
+      currentSettings?.themeBackgroundMode ?? confirmedBackgroundModeRef.current,
     )
     previewThemeRef.current = persistedTheme
+    previewBackgroundModeRef.current = persistedBackgroundMode
     themePreviewChangedRef.current = false
     endCanvasThemePreview()
     applyCanvasTheme(persistedTheme)
+    applyThemeBackgroundMode(persistedBackgroundMode)
     setForm(createSettingsDraft(useSettingsStore.getState().settings))
     setSaveStatus('idle')
     setSaveError(null)
@@ -1041,7 +1074,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               onChange={(event) =>
                 updateStringSetting(definition.baseUrlKey, event.target.value)
               }
-              placeholder={definition.baseUrlPlaceholder}
             />
           </div>
           <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
@@ -1068,7 +1100,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               onChange={(event) =>
                 updateStringSetting(definition.apiKeyKey, event.target.value)
               }
-              placeholder="sk-..."
             />
           </div>
           <div style={{ ...fieldStyle, gridColumn: '1 / span 2', gap: '10px' }}>
@@ -1202,7 +1233,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           <ThemePicker
             value={normalizeCanvasTheme(form.canvasTheme)}
+            backgroundMode={normalizeThemeBackgroundMode(form.themeBackgroundMode)}
             onChange={handleThemePreview}
+            onBackgroundModeChange={handleBackgroundModePreview}
           />
 
           {/* Dreamina CLI */}
@@ -1244,7 +1277,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 style={inputStyle}
                 value={form.dreaminaPath}
                 onChange={(e) => update('dreaminaPath', e.target.value)}
-                placeholder="dreamina 或 C:\\Users\\...\\dreamina.exe"
               />
               <span style={{ color: 'var(--theme-muted, #777)', fontSize: 11 }}>
                 生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
@@ -1453,7 +1485,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   style={inputStyle}
                   value={form.llmBaseUrl}
                   onChange={(e) => update('llmBaseUrl', e.target.value)}
-                  placeholder="https://api.openai.com/v1"
                 />
               </div>
               <div style={{ ...fieldStyle, gridColumn: '1 / span 2' }}>
@@ -1466,7 +1497,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   type="password"
                   value={form.llmApiKey}
                   onChange={(e) => update('llmApiKey', e.target.value)}
-                  placeholder="sk-..."
                 />
               </div>
               <div style={{ ...fieldStyle, gridColumn: '1 / span 2', gap: '10px' }}>

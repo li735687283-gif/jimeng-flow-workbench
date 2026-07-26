@@ -10,7 +10,6 @@ import { createPortal } from 'react-dom'
 
 interface PromptEditorProps {
   value: string
-  placeholder: string
   disabled?: boolean
   autoFocus?: boolean
   onChange: (value: string) => void
@@ -18,7 +17,6 @@ interface PromptEditorProps {
 
 export function PromptEditor({
   value,
-  placeholder,
   disabled = false,
   autoFocus = false,
   onChange,
@@ -62,7 +60,6 @@ export function PromptEditor({
       onWheelCapture={handleWheel}
       onKeyDown={(event) => event.stopPropagation()}
       onPaste={(event) => event.stopPropagation()}
-      placeholder={placeholder}
       disabled={disabled}
     />
   )
@@ -98,7 +95,6 @@ export function PromptEditor({
                   value={value}
                   onChange={(event) => onChange(event.target.value)}
                   onWheelCapture={handleWheel}
-                  placeholder={placeholder}
                   disabled={disabled}
                   autoFocus
                 />

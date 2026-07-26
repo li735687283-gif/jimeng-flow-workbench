@@ -47,6 +47,7 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       'deepseekApiKey',
       'outputDir',
       'canvasTheme',
+      'themeBackgroundMode',
       'homeHeroImagePath',
       'homeMokHeroImagePath',
       'homeMokHeroScale',

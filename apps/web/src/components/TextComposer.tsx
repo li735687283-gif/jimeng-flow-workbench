@@ -273,7 +273,6 @@ export function TextComposer({ nodeId }: TextComposerProps) {
         {/* 中间：输入框 */}
         <textarea
           style={textareaStyle}
-          placeholder="输入自然语言需求，例如：一个女孩在风中飞舞"
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={(e) => {

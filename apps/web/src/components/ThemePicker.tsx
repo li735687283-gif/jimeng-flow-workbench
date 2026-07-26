@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent } from 'react'
-import { Check, Palette } from 'lucide-react'
-import type { CanvasTheme } from '@jimeng-flow/shared'
+import { Check, Image as ImageIcon, Palette, Waves } from 'lucide-react'
+import type { CanvasTheme, ThemeBackgroundMode } from '@jimeng-flow/shared'
 
 import { CANVAS_THEME_OPTIONS } from '../utils/canvasTheme'
 
@@ -11,12 +11,29 @@ const previewImages: Partial<Record<CanvasTheme, string>> = {
   'monet-lilac': new URL('../assets/themes/monet-lilac.jpg', import.meta.url).href,
 }
 
+const backgroundModes: ReadonlyArray<{
+  id: ThemeBackgroundMode
+  name: string
+  description: string
+  icon: typeof ImageIcon
+}> = [
+  { id: 'original', name: '原图', description: '保留背景原始清晰度', icon: ImageIcon },
+  { id: 'blur', name: '模糊', description: '中等模糊，减少工作干扰', icon: Waves },
+]
+
 interface ThemePickerProps {
   value: CanvasTheme
+  backgroundMode: ThemeBackgroundMode
   onChange: (theme: CanvasTheme) => void
+  onBackgroundModeChange: (mode: ThemeBackgroundMode) => void
 }
 
-export function ThemePicker({ value, onChange }: ThemePickerProps) {
+export function ThemePicker({
+  value,
+  backgroundMode,
+  onChange,
+  onBackgroundModeChange,
+}: ThemePickerProps) {
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -82,6 +99,39 @@ export function ThemePicker({ value, onChange }: ThemePickerProps) {
             </button>
           )
         })}
+      </div>
+
+      <div className="settings-background-mode">
+        <div className="settings-background-mode-copy">
+          <strong>主题背景</strong>
+          <small>四套艺术皮肤使用对应背景；墨黑与日间保持纯色</small>
+        </div>
+        <div className="settings-background-mode-options" role="radiogroup" aria-label="主题背景效果">
+          {backgroundModes.map((option) => {
+            const selected = option.id === backgroundMode
+            const Icon = option.icon
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                data-background-mode={option.id}
+                className={`settings-background-mode-option${selected ? ' is-selected' : ''}`}
+                onClick={() => onBackgroundModeChange(option.id)}
+              >
+                <Icon size={15} strokeWidth={1.8} aria-hidden="true" />
+                <span>
+                  <strong>{option.name}</strong>
+                  <small>{option.description}</small>
+                </span>
+                <span className="settings-theme-check" aria-hidden="true">
+                  {selected ? <Check size={13} strokeWidth={2.2} /> : null}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </section>
   )

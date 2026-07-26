@@ -144,7 +144,7 @@ test('work admin modal renders its shell and labeled upload controls', async () 
   assert.match(coverUpload, /\baccept="image\/\*"/)
 
   const titleInput = findLabeledControl(editSection, '标题', 'input')
-  assert.match(titleInput, /\bplaceholder="作品标题"/)
+  assert.doesNotMatch(titleInput, /\bplaceholder=/)
 
   const description = findLabeledControl(editSection, '简介', 'textarea')
   assert.match(description, /^<textarea\b/)

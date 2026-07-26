@@ -1522,11 +1522,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             <PromptEditor
               value={prompt}
               onChange={persistPromptDraft}
-              placeholder={
-                upstreamTextBrief
-                  ? '已引用上方文本提示词，可直接发送；也可在此补充或覆盖'
-                  : '可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜'
-              }
             />
 
             <div className="image-editor-bottom">

@@ -14,7 +14,12 @@ Object.assign(globalThis, { React })
 
 test('theme radios expose one roving tab stop and keyboard navigation', async () => {
   const html = renderToStaticMarkup(
-    <ThemePicker value="dark" onChange={() => undefined} />,
+    <ThemePicker
+      value="dark"
+      backgroundMode="blur"
+      onChange={() => undefined}
+      onBackgroundModeChange={() => undefined}
+    />,
   )
   assert.equal((html.match(/tabindex="0"/g) ?? []).length, 1)
   assert.equal((html.match(/tabindex="-1"/g) ?? []).length, 5)

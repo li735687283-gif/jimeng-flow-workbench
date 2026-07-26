@@ -805,7 +805,6 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               void submit()
             }
           }}
-          placeholder="和我聊聊，或描述想要的画面，使用 @ 引用画布节点..."
           disabled={loading}
         />
 

@@ -249,6 +249,18 @@ export function normalizeCanvasTheme(value: unknown): CanvasTheme {
     : "dark";
 }
 
+/** 主题背景可使用清晰原图，或使用适合工作画布的中等强度模糊。 */
+export const THEME_BACKGROUND_MODES = ["original", "blur"] as const;
+
+export type ThemeBackgroundMode = (typeof THEME_BACKGROUND_MODES)[number];
+
+export function normalizeThemeBackgroundMode(value: unknown): ThemeBackgroundMode {
+  return typeof value === "string" &&
+    (THEME_BACKGROUND_MODES as readonly string[]).includes(value)
+    ? (value as ThemeBackgroundMode)
+    : "blur";
+}
+
 /** 全局 Settings 配置 */
 export interface Settings {
   /** 旧 HTTP 适配器服务地址（保留用于兼容已有配置） */
@@ -283,6 +295,8 @@ export interface Settings {
   outputDir: string;
   /** 首页、画布、节点、面板和设置共用的全局皮肤 */
   canvasTheme: CanvasTheme;
+  /** 艺术主题背景的显示方式；默认模糊以降低画布视觉干扰 */
+  themeBackgroundMode: ThemeBackgroundMode;
   /** 首页封面背景图片 URL；留空时使用前端内置背景 */
   homeHeroImagePath?: string;
   /** 首页主图（MOK猫）URL；留空时使用前端内置默认图 */
@@ -344,6 +358,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
   outputDir: "./workspace/outputs",
   canvasTheme: "dark",
+  themeBackgroundMode: "blur",
   homeHeroImagePath: "",
   homeMokHeroImagePath: "",
   homeMokHeroScale: 1,
