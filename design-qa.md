@@ -243,3 +243,154 @@ final result: passed
 - Pass 2: shared prompt shells received concentric inner radii; direct text editing received the 27px inner radius; node-local scrollbars were inset. Same-state full and focused comparisons showed no remaining P0/P1/P2 issue.
 
 final result: passed
+
+---
+
+# Design QA — 文本节点缩放与画布点阵（2026-07-26）
+
+## Scope
+
+- Reference: 用户提供的截图（已保留在 `docs/design-qa/text-node-resize-comparison.png` 对照图中）
+- Implementation: `docs/design-qa/text-node-resize-full.png`
+- Focused implementation: `docs/design-qa/text-node-resize-focused.png`
+- Side-by-side comparison: `docs/design-qa/text-node-resize-comparison.png`
+- Refined default state: `docs/design-qa/text-node-resize-default-refined.png`
+- Refined hover state: `docs/design-qa/text-node-resize-hover-refined.png`
+- Refined three-way comparison: `docs/design-qa/text-node-resize-refined-comparison.png`
+- Contained-corner default state: `docs/design-qa/text-node-resize-corner-contained-default-fit.png`
+- Contained-corner hover state: `docs/design-qa/text-node-resize-corner-contained-hover-fit.png`
+- Contained-corner three-way comparison: `docs/design-qa/text-node-resize-corner-contained-comparison.png`
+- Viewport: 1280 × 720, default canvas theme, one text node with multiline Chinese content
+- Reference size: 562 × 438
+- Focused implementation size: 620 × 440
+
+## Visual comparison
+
+- The default dot grid is visibly larger and more widely spaced while preserving the existing theme color.
+- The bottom-right resize affordance follows the reference's rounded corner treatment and now occupies a 26 × 26 logical-pixel target, half the original area.
+- The icon uses Lucide `Equal`, rotated -45 degrees into the reference's two parallel rising strokes; the existing fullscreen `Maximize2` remains unchanged.
+- The default handle background is transparent, so it reveals the exact text-node frame color without creating a second visible corner.
+- The 26 × 26 handle is inset by 2px and uses a 26px outer radius inside the node's 28px radius; its arc no longer protrudes beyond the node edge.
+- Hover resolves to the sampled reference colors `#392b5b` with `#8b5cf6` strokes, with only an inset highlight and no external glow.
+- Content padding was reduced with the smaller target while retaining enough bottom-right clearance for text.
+- No clipping, broken borders, or unexpected layout shifts were visible at the tested viewport.
+
+## Interaction verification
+
+- Dragged the text node from 360 × 300 to 497 × 327.
+- Dragged it narrower to 311 × 327; the multiline sample reflowed from four to six visible text-line rectangles.
+- Dragged it back to 499 × 327 for the final inspection state.
+- Verified the resize target uses `cursor: nwse-resize`.
+- Verified the default icon transform is `rotate(-45deg) scale(0.88)` and hover is `rotate(-45deg) scale(1.12)`.
+- Browser-computed hover state: background `rgb(57, 43, 91)`, stroke color `rgb(139, 92, 246)`, opacity `1`.
+- Browser-computed corner geometry: default background `transparent`, node radius `28px`, handle radius `15px 0 26px 0`, and right/bottom inset `2px`.
+- Verified the 26 × 26 target still resizes a valid server-backed canvas from 360 × 300 to 404 × 324 and autosaves without a new console error.
+- The live text-generation provider was not invoked; source regression tests verify the progress dot and empty-state symbol are both absent while loading.
+
+## QA history
+
+1. Captured the supplied reference image.
+2. Opened a new local canvas in the in-app browser.
+3. Added a text node, entered multiline content, and exercised both wider and narrower resize paths.
+4. Captured the full and focused implementation states.
+5. Compared the reference and implementation side by side and found no blocking mismatch.
+6. Refined the handle to half size, replaced the arrows with rotated parallel strokes, and sampled the reference purple colors directly.
+7. Captured default and forced-hover states in the same viewport and compared them with the source in one three-way image.
+8. Inset the handle arc to match the node corner, removed the external hover glow, and captured a focused reference/default/hover comparison confirming no protruding edge.
+
+final result: passed
+
+---
+
+# Design QA — 文本节点高级渐变色板（2026-07-26）
+
+## Scope
+
+- Source visual truth: 用户提供的截图（已保留在 `docs/design-qa/text-node-premium-palette-comparison.png` 对照图中）
+- Rendered implementation: `docs/design-qa/text-node-premium-palette-selected.png`
+- Focused side-by-side comparison: `docs/design-qa/text-node-premium-palette-comparison.png`
+- Source pixels: 708 × 909
+- Implementation capture: 1095 × 720 pixels from a 1280 × 720 CSS viewport at device pixel ratio 1.5
+- State: dark canvas, text-node color menu open, `暮光靛` selected
+
+## Findings
+
+- No actionable P0, P1, or P2 issues remain.
+- The source's seven grayscale solids were intentionally replaced with seven distinct low-saturation mineral gradients.
+- The menu structure, three-column rhythm, selected check, compact spacing, and rounded dark surface remain unchanged.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged; toolbar copy and hierarchy remain consistent with the source state.
+- Spacing and layout rhythm: unchanged; the focused comparison confirms the swatch grid, gaps, padding, and menu radius remain stable.
+- Colors and visual tokens: passed; all seven computed backgrounds are unique gradients, remain dark enough for the existing text, and avoid saturated red/green.
+- Image quality and assets: not applicable; this control contains only existing Lucide icons and CSS color surfaces.
+- Copy and content: passed; accessible labels are `夜雾墨 / 深海雾蓝 / 暮光靛 / 苔玉灰 / 烟熏玫瑰 / 古铜茶 / 月影灰紫`.
+
+## Interaction verification
+
+- Clicked `暮光靛`; the node background immediately changed to the corresponding three-stop gradient.
+- Reopened the menu and confirmed only `暮光靛` reported `aria-checked="true"`.
+- Reloaded the app, reopened the same project, and confirmed the selected gradient persisted.
+- Verified all seven swatches expose distinct computed `background-image` values.
+- Verified legacy grayscale preset strings resolve to their corresponding new gradients.
+- Browser console errors after selection and reload: 0.
+
+## QA history
+
+1. Opened the supplied grayscale palette reference and captured the initial implementation state.
+2. Replaced the seven grayscale solids with muted mineral gradients and added legacy-value normalization.
+3. Fixed the later-loaded theme rule so node gradients survive default, hover, and selected states.
+4. Captured the open palette, selected-state node, and focused side-by-side comparison.
+5. Selected a color, reloaded the project, and confirmed persistence with no console errors.
+
+final result: passed
+---
+
+# Design QA — 三类节点与展开面板同色（2026-07-26）
+
+## Scope
+
+- Source visual truth: `docs/design-qa/2026-07-26-node-surface-reference.png`
+- Implementation screenshot: `docs/design-qa/2026-07-26-node-surface-implementation.jpg`
+- Expanded-panel screenshot: `docs/design-qa/2026-07-26-node-surface-implementation-panel.jpg`
+- Source pixels: 1389 × 1059
+- Implementation capture: 1095 × 720 pixels from a 1280 × 720 CSS viewport
+- State: dark theme; one empty text node, image node, and video node; video and image expanded-editor states checked
+
+## Visual comparison
+
+- The supplied reference and the current implementation were emitted together in one comparison input. The external reference viewport is taller than the fixed in-app browser viewport, so the comparison used the same three-node state plus a focused expanded-panel capture.
+- Text, empty image, empty video, and the expanded editor all resolve to the same surface: `rgb(24, 24, 24)` / `#181818` / `--theme-panel`.
+- The selected-node border remains brighter for orientation, but selection no longer changes the node fill.
+- The default text preset now follows `--theme-panel`; the six intentionally selected premium gradients remain available.
+- Media-result image and video nodes remain transparent so real assets are not covered by the empty-node surface.
+
+## Findings
+
+- P0: none
+- P1: none
+- P2: none
+- P3: the source screenshot used a taller viewport than the available in-app browser preview; exact computed-color checks were used alongside the focused visual comparison.
+
+## Interaction and runtime checks
+
+- Opened the video editor, then the image editor, and confirmed the selected node and panel stay `rgb(24, 24, 24)`.
+- Confirmed the text, image, and video prompt/editor surfaces remain borderless and visually merge into their default node surface.
+- Confirmed the empty-state override is ordered after the generic hover/selected rule; regression tests lock that cascade order.
+- Browser Vite error overlays: 0. The current in-app browser binding did not expose historical console collection during this pass.
+- Focused regression tests: 6 passed.
+- Web typecheck: passed.
+- Full web suite: 337 passed, 0 failed.
+- Web lint: 0 errors; 10 pre-existing warnings remain.
+- Production build: passed; the existing main-chunk size warning remains.
+
+## Comparison history
+
+1. Sampled the expanded panel from the supplied screenshot at `#181818`.
+2. Added a failing regression test covering the default text, empty image, empty video, expanded panel, and media transparency.
+3. Mapped the three empty-node surfaces and direct text editor to the panel token, then reran the focused tests.
+4. Opened the real saved canvas, compared source and implementation in one input, and measured all four rendered surfaces at `rgb(24, 24, 24)`.
+5. Added a cascade-order assertion after independent review and reran the focused tests.
+
+final result: passed

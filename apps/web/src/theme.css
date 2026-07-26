@@ -37,6 +37,47 @@
   --theme-particle-hot: 255, 215, 0;
   --theme-particle-hot-alpha: 0.82;
 
+  /* 文本节点默认与展开编辑面板使用同一表面色。 */
+  --text-frame-obsidian: var(--theme-panel);
+  --text-frame-ocean: linear-gradient(
+    145deg,
+    #2b3b47 0%,
+    #263641 52%,
+    #1f2d36 100%
+  );
+  --text-frame-indigo: linear-gradient(
+    145deg,
+    #34384f 0%,
+    #2d3048 52%,
+    #25283c 100%
+  );
+  --text-frame-moss: linear-gradient(
+    145deg,
+    #2f3a34 0%,
+    #2a342f 52%,
+    #232b27 100%
+  );
+  --text-frame-rose: linear-gradient(
+    145deg,
+    #47343c 0%,
+    #412f36 52%,
+    #36282e 100%
+  );
+  --text-frame-bronze: linear-gradient(
+    145deg,
+    #413827 0%,
+    #393123 52%,
+    #30291d 100%
+  );
+  --text-frame-mauve: linear-gradient(
+    145deg,
+    #403549 0%,
+    #392f43 52%,
+    #302838 100%
+  );
+  --text-resize-handle-hover-bg: #392b5b;
+  --text-resize-handle-hover-icon: #8b5cf6;
+
   --bg-base: var(--theme-canvas-bg);
   --bg-panel: var(--theme-panel);
   --bg-card: var(--theme-card);
@@ -336,10 +377,24 @@ body,
   box-shadow: var(--theme-node-shadow);
 }
 
+.node-wrapper[data-flow-node-type='text'] .node-card {
+  background: var(--text-node-frame-color, var(--theme-panel)) !important;
+}
+
 .node-wrapper:not(.media-display):hover .node-card,
 .node-wrapper:not(.media-display).selected .node-card {
   border-color: var(--theme-border-strong);
   background: var(--theme-card-hover) !important;
+}
+
+.node-wrapper[data-flow-node-type='text']:hover .node-card,
+.node-wrapper[data-flow-node-type='text'].selected .node-card {
+  background: var(--text-node-frame-color, var(--theme-panel)) !important;
+}
+
+.node-wrapper[data-flow-node-type='image']:not(.media-display) .node-card,
+.node-wrapper[data-flow-node-type='video']:not(.media-display) .node-card {
+  background: var(--theme-panel) !important;
 }
 
 .node-title,

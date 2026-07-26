@@ -271,11 +271,21 @@ export function VideoNode({ id, data, selected }: NodeProps) {
    */
   const handleOpenFullSize = useCallback(
     (event?: {
+      target?: EventTarget | null
       preventDefault?: () => void
       stopPropagation?: () => void
     }) => {
-      event?.preventDefault?.()
       event?.stopPropagation?.()
+      const target = event?.target
+      if (
+        target instanceof Element &&
+        target.closest(
+          'button, input, textarea, select, a, [role="button"], [contenteditable="true"]',
+        )
+      ) {
+        return
+      }
+      event?.preventDefault?.()
       // 先干掉原生全屏，再开我们的弹层小播放器
       exitNativeVideoFullscreen()
       if (!nodeData.assetIds[0]) return

@@ -18,7 +18,7 @@ test('text node only keeps write+llm send interaction like image node editor', a
   assert.equal(source.includes('文字生音乐'), false)
   assert.equal(source.includes('自己编写内容'), false)
 
-  // 双击只编辑节点正文（content）；单击才打开提示词面板（input）
+  // 双击放大并编辑节点正文（content）；单击才打开提示词面板（input）
   assert.match(source, /onDoubleClick=\{handleNodeDoubleClick\}/)
   assert.match(source, /onClick=\{handleNodeClick\}/)
   assert.match(source, /handleEnterBodyEdit/)
@@ -68,7 +68,8 @@ test('text node only keeps write+llm send interaction like image node editor', a
   assert.equal(source.includes('visibleError'), false)
   assert.equal(source.includes('image-editor-status error'), false)
   assert.match(source, /<span>文本生成中<\/span>/)
-  assert.match(source, /className="image-generation-progress-dot"/)
+  assert.doesNotMatch(source, /className="image-generation-progress-dot"/)
+  assert.match(source, /\{!loading \? \([\s\S]{0,100}<FileText/)
   assert.match(source, /className="image-generation-progress-track"/)
   assert.match(source, /className="image-generation-progress-fill"/)
   assert.match(
@@ -76,19 +77,20 @@ test('text node only keeps write+llm send interaction like image node editor', a
     /setSendError\(''\)[\s\S]{0,180}setError\(id, undefined\)[\s\S]{0,80}setLoading\(id, true\)/,
   )
 
-  // 双击只进正文，不得收起底栏；无动画保持底栏
+  // 双击进入正文编辑并打开大屏，不得收起底栏；无动画保持底栏
   const enterBodyStart = source.indexOf('const handleEnterBodyEdit')
   const enterBodyEnd = source.indexOf('const handleNodeClick', enterBodyStart)
   assert.ok(enterBodyStart >= 0 && enterBodyEnd > enterBodyStart)
   const enterBodyBlock = source.slice(enterBodyStart, enterBodyEnd)
   assert.equal(enterBodyBlock.includes('setEditorMounted(false)'), false)
   assert.match(enterBodyBlock, /setBodyEditing\(true\)/)
+  assert.match(enterBodyBlock, /setContentExpanded\(true\)/)
   assert.match(enterBodyBlock, /setPanelNoAnim\(true\)/)
   // 预览/编辑双层叠放，避免卸载 DOM 导致尺寸跳变
   assert.match(source, /text-node-content-stack/)
   assert.match(source, /text-node-preview-layer/)
   assert.match(source, /is-inactive/)
-  // 放大仅在顶部工具条；节点本体不放放大按钮
+  // 放大可由顶部工具条或节点双击触发；节点本体不放额外按钮
   assert.equal(source.includes('text-node-expand-btn'), false)
   assert.match(source, /prompt-editor-modal/)
   assert.match(source, /handleExpandText/)

@@ -7,7 +7,12 @@
 // - data 字段：title, status, assetId?, assetPath?, asReference?
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent, SyntheticEvent } from 'react'
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent,
+  SyntheticEvent,
+} from 'react'
 import { createPortal } from 'react-dom'
 import type { NodeProps } from '@xyflow/react'
 import {
@@ -819,6 +824,24 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     setFullSizeOpen(true)
   }, [hasImage, imageSrc])
 
+  const handleMediaDoubleClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.stopPropagation()
+      const target = event.target
+      if (
+        target instanceof Element &&
+        target.closest(
+          'button, input, textarea, select, a, [role="button"], [contenteditable="true"]',
+        )
+      ) {
+        return
+      }
+      event.preventDefault()
+      handleOpenFullSize()
+    },
+    [handleOpenFullSize],
+  )
+
   const handleFullSizeScaleChange = useCallback((scale: number) => {
     setFullSizeScale(clampPreviewScale(scale))
   }, [])
@@ -1406,6 +1429,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           <div
             className="media-display-node image-media-display"
             onClick={handleOpenEditor}
+            onDoubleClick={handleMediaDoubleClick}
             style={mediaDisplayStyle}
           >
             {imageResultAssetIds.length > 1 ? (

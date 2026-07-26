@@ -9,12 +9,13 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent,
 } from 'react'
-import type { NodeProps } from '@xyflow/react'
+import { NodeResizeControl, type NodeProps } from '@xyflow/react'
 import { createPortal } from 'react-dom'
 import {
   ArrowUp,
   Check,
   ChevronDown,
+  Equal,
   FileText,
   LayoutTemplate,
   Loader2,
@@ -30,10 +31,8 @@ import type { BaseNodeData } from '../types/nodeTypes'
 import { PromptEditor } from '../components/PromptEditor'
 import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
-import {
-  TEXT_FRAME_COLOR_PRESETS,
-  TextActionCard,
-} from '../components/TextActionCard'
+import { TextActionCard } from '../components/TextActionCard'
+import { resolveTextFrameColor } from '../utils/textFrameColors'
 import { runTextNode } from '../api/llm'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
@@ -60,6 +59,10 @@ const MODEL_MENU_VERTICAL_PADDING = 20
 const MODEL_MENU_MAX_HEIGHT = 440
 const PROMPT_LIBRARY_ESTIMATED_HEIGHT = 520
 const PROMPT_LIBRARY_WIDTH = 720
+const TEXT_NODE_DEFAULT_WIDTH = 360
+const TEXT_NODE_DEFAULT_HEIGHT = 300
+const TEXT_NODE_MIN_WIDTH = 280
+const TEXT_NODE_MIN_HEIGHT = 220
 
 const COLORS = {
   text: 'var(--theme-text, #e5e5e5)',
@@ -68,19 +71,17 @@ const COLORS = {
   border: 'var(--theme-border, #373737)',
 }
 
-const DEFAULT_FRAME_COLOR = TEXT_FRAME_COLOR_PRESETS[0].color
-
 const CONTAINER_STYLE: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  width: 360,
-  minHeight: 300,
+  width: '100%',
+  minHeight: 0,
   height: '100%',
 }
 
 const CONTENT_AREA_STYLE: CSSProperties = {
   flex: 1,
-  minHeight: 240,
+  minHeight: 0,
   width: '100%',
   display: 'flex',
   alignItems: 'stretch',
@@ -98,19 +99,19 @@ const EMPTY_STATE_STYLE: CSSProperties = {
   justifyContent: 'center',
   width: '100%',
   height: '100%',
-  minHeight: 240,
+  minHeight: 0,
   gap: 0,
   color: COLORS.textDim,
   fontSize: 12,
 }
 
 /** 与 CSS .text-node-body-editor / .text-node-summary 保持一致，避免预览↔编辑切换跳动 */
-const TEXT_CONTENT_PADDING = '22px 40px 22px 28px'
+const TEXT_CONTENT_PADDING = '22px 40px 38px 28px'
 
 const BODY_EDITOR_STYLE: CSSProperties = {
   width: '100%',
   height: '100%',
-  minHeight: 240,
+  minHeight: 0,
   boxSizing: 'border-box',
   resize: 'none',
   border: 'none',
@@ -149,7 +150,7 @@ interface ChatModelOption {
   label: string
 }
 
-export function TextNode({ id, data, selected }: NodeProps) {
+export function TextNode({ id, data, selected, width, height }: NodeProps) {
   const nodeData = data as BaseNodeData & Partial<TextNodeData>
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const nodes = useCanvasStore((s) => s.nodes)
@@ -161,10 +162,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
   const callState = useTextNodeStore((s) => s.states[id])
   const loading = callState?.loading === true
 
-  const frameColor =
-    typeof nodeData.frameColor === 'string' && nodeData.frameColor.trim()
-      ? nodeData.frameColor.trim()
-      : DEFAULT_FRAME_COLOR
+  const frameColor = resolveTextFrameColor(nodeData.frameColor)
 
   /**
    * 上游图片引用（识图反推）：
@@ -372,8 +370,8 @@ export function TextNode({ id, data, selected }: NodeProps) {
   )
 
   /**
-   * 双击：编辑节点正文（content）。
-   * 底栏保持打开；若尚未打开则无动画挂上。
+   * 双击：放大并编辑节点正文（content）。
+   * 底栏保持打开；正文复用顶部工具条已有的大屏编辑器。
    */
   const handleEnterBodyEdit = useCallback(() => {
     bodyEditingRef.current = true
@@ -385,6 +383,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
     setEditorClosing(false)
     setBodyDraft(typeof nodeData.content === 'string' ? nodeData.content : '')
     setBodyEditing(true)
+    setContentExpanded(true)
   }, [clearCloseTimer, nodeData.content])
 
   const handleNodeClick = useCallback(
@@ -411,7 +410,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
   )
 
   useEffect(() => {
-    if (!bodyEditing) return
+    if (!bodyEditing || contentExpanded) return
     const frame = window.requestAnimationFrame(() => {
       const el = bodyEditorRef.current
       if (!el) return
@@ -419,7 +418,7 @@ export function TextNode({ id, data, selected }: NodeProps) {
       // 不调用 setSelectionRange，避免部分浏览器滚动/选区跳动造成「缩放感」
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [bodyEditing])
+  }, [bodyEditing, contentExpanded])
 
   const updateMenuDirection = useCallback(() => {
     const rect = modelMenuButtonRef.current?.getBoundingClientRect()
@@ -828,8 +827,18 @@ export function TextNode({ id, data, selected }: NodeProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [contentExpanded])
 
+  const renderedWidth =
+    typeof width === 'number' && Number.isFinite(width) && width > 0
+      ? Math.max(width, TEXT_NODE_MIN_WIDTH)
+      : TEXT_NODE_DEFAULT_WIDTH
+  const renderedHeight =
+    typeof height === 'number' && Number.isFinite(height) && height > 0
+      ? Math.max(height, TEXT_NODE_MIN_HEIGHT)
+      : TEXT_NODE_DEFAULT_HEIGHT
   const wrapperStyle = {
     ['--text-node-frame-color' as string]: frameColor,
+    width: renderedWidth,
+    height: renderedHeight,
   } as CSSProperties
 
   return (
@@ -859,13 +868,13 @@ export function TextNode({ id, data, selected }: NodeProps) {
           onClick={handleNodeClick}
           onDoubleClick={handleNodeDoubleClick}
           style={CONTAINER_STYLE}
-          title={bodyEditing ? '正在编辑节点正文' : '单击打开提示词面板 · 双击编辑节点正文'}
+          title={bodyEditing ? '正在编辑节点正文' : '单击打开提示词面板 · 双击放大并编辑节点正文'}
         >
           <div className="node-preview-area text-node-preview" style={CONTENT_AREA_STYLE}>
             {/*
-              预览层与编辑层始终同盒叠放，双击只切可见性/指针，不卸载 DOM，
-              避免高度/滚动条重算造成「整块缩放」观感。
-              放大入口仅在顶部工具条，节点本体不再放放大按钮。
+              预览层与编辑层始终同盒叠放，切换时不卸载 DOM，
+              避免高度/滚动条重算造成节点尺寸跳动。
+              放大入口复用顶部工具条的大屏编辑器，节点本体不再放额外按钮。
             */}
             <div className="text-node-content-stack">
               <div
@@ -875,11 +884,13 @@ export function TextNode({ id, data, selected }: NodeProps) {
               >
                 {isEmpty ? (
                   <div className="text-node-empty" style={EMPTY_STATE_STYLE}>
-                    <FileText
-                      size={46}
-                      strokeWidth={2.4}
-                      className="node-placeholder-icon"
-                    />
+                    {!loading ? (
+                      <FileText
+                        size={46}
+                        strokeWidth={2.4}
+                        className="node-placeholder-icon"
+                      />
+                    ) : null}
                   </div>
                 ) : (
                   <div
@@ -938,7 +949,6 @@ export function TextNode({ id, data, selected }: NodeProps) {
             <div className="image-generation-progress-overlay" aria-live="polite">
               <div className="image-generation-progress-content">
                 <div className="image-generation-progress-label">
-                  <span className="image-generation-progress-dot" />
                   <span>文本生成中</span>
                 </div>
                 <div
@@ -955,6 +965,21 @@ export function TextNode({ id, data, selected }: NodeProps) {
             </div>
           ) : null}
         </div>
+
+        <NodeResizeControl
+          nodeId={id}
+          className="text-node-resize-control nopan"
+          position="bottom-right"
+          minWidth={TEXT_NODE_MIN_WIDTH}
+          minHeight={TEXT_NODE_MIN_HEIGHT}
+        >
+          <span
+            className="text-node-resize-icon"
+            title="拖动调整文本节点大小"
+          >
+            <Equal size={16} strokeWidth={3} aria-hidden="true" />
+          </span>
+        </NodeResizeControl>
 
         {contentExpanded && typeof document !== 'undefined'
           ? createPortal(

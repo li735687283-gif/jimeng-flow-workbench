@@ -17,7 +17,7 @@ test('image and video editor prompt changes persist to node data immediately', (
 test('text node body edit persists content; prompt box persists input separately', () => {
   const textNode = readFileSync('apps/web/src/nodes/TextNode.tsx', 'utf8')
 
-  // 双击编辑节点正文 → content
+  // 放大编辑节点正文 → content
   assert.match(textNode, /const persistBodyDraft = useCallback/)
   assert.match(textNode, /value=\{bodyDraft\}/)
   assert.match(

@@ -811,8 +811,8 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
         <Background
           id="canvas-dots"
           variant={BackgroundVariant.Dots}
-          gap={22}
-          size={1.5}
+          gap={30}
+          size={2.5}
           color="var(--canvas-grid-color)"
           bgColor="transparent"
         />

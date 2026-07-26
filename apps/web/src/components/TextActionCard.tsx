@@ -6,17 +6,10 @@ import {
   Palette,
 } from 'lucide-react'
 
-export const TEXT_FRAME_COLOR_PRESETS = [
-  { id: 'default', color: '#242424', label: '默认灰' },
-  { id: 'slate', color: '#202020', label: '石板蓝' },
-  { id: 'indigo', color: '#1c1c1c', label: '靛蓝' },
-  { id: 'forest', color: '#262626', label: '森绿' },
-  { id: 'wine', color: '#303030', label: '酒红' },
-  { id: 'amber', color: '#383838', label: '琥珀' },
-  { id: 'graphite', color: '#141414', label: '墨黑' },
-] as const
-
-export type TextFrameColorId = (typeof TEXT_FRAME_COLOR_PRESETS)[number]['id']
+import {
+  resolveTextFrameColor,
+  TEXT_FRAME_COLOR_PRESETS,
+} from '../utils/textFrameColors'
 
 interface TextActionCardProps {
   frameColor: string
@@ -36,6 +29,7 @@ export function TextActionCard({
   onCopyAll,
   onExpand,
 }: TextActionCardProps) {
+  const resolvedFrameColor = resolveTextFrameColor(frameColor)
   const [colorMenuOpen, setColorMenuOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -77,7 +71,7 @@ export function TextActionCard({
           <span>颜色</span>
           <span
             className="text-action-color-swatch"
-            style={{ background: frameColor }}
+            style={{ background: resolvedFrameColor }}
             aria-hidden="true"
           />
         </button>
@@ -88,8 +82,7 @@ export function TextActionCard({
             aria-label="选择文本框颜色"
           >
             {TEXT_FRAME_COLOR_PRESETS.map((preset) => {
-              const active =
-                preset.color.toLowerCase() === frameColor.toLowerCase()
+              const active = preset.color === resolvedFrameColor
               return (
                 <button
                   key={preset.id}
