@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+
+Object.assign(globalThis, { React })
 
 test('MentionablePromptEditor supports @ mention with upstream images', () => {
   const source = readFileSync('apps/web/src/components/MentionablePromptEditor.tsx', 'utf8')
@@ -38,6 +42,37 @@ test('MentionablePromptEditor supports @ mention with upstream images', () => {
   assert.match(css, /\.mention-token/)
   assert.match(css, /\.prompt-editor-highlight\b/)
   assert.match(css, /\.mention-textarea/)
+  assert.match(css, /-webkit-text-fill-color:\s*transparent/)
+})
+
+test('MentionablePromptEditor only mounts the duplicate text layer for an actual mention token', async () => {
+  const { MentionablePromptEditor } = await import(
+    '../src/components/MentionablePromptEditor'
+  )
+  const sharedProps = {
+    disabled: false,
+    mentionImages: [{ assetId: 'asset_1', label: '图片1' }],
+    onChange: () => undefined,
+  }
+
+  const plainHtml = renderToStaticMarkup(
+    React.createElement(MentionablePromptEditor, {
+      ...sharedProps,
+      value: '自然风景延时动画，保持画面稳定。',
+    }),
+  )
+  assert.equal(plainHtml.includes('prompt-editor-highlight'), false)
+  assert.equal(plainHtml.includes('mention-textarea'), false)
+
+  const mentionHtml = renderToStaticMarkup(
+    React.createElement(MentionablePromptEditor, {
+      ...sharedProps,
+      value: '@图片1 生成自然风景延时动画',
+    }),
+  )
+  assert.equal(mentionHtml.includes('prompt-editor-highlight'), true)
+  assert.equal(mentionHtml.includes('mention-textarea'), true)
+  assert.equal(mentionHtml.includes('mention-token'), true)
 })
 
 test('VideoGenerationPanel passes mentionImages to the editor', () => {

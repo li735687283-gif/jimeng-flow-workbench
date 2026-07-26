@@ -220,7 +220,10 @@ export function MentionablePromptEditor({
   }, [expanded, activeMention])
 
   const showMentionPopup = !!activeMention && filteredImages.length > 0
-  const hasHighlight = mentionImages.length > 0
+  const hasHighlight = useMemo(
+    () => mentionImages.some((image) => value.includes(`@${image.label}`)),
+    [mentionImages, value],
+  )
 
   const renderTextarea = (isExpanded: boolean) => {
     const ref = isExpanded ? expandedTextareaRef : textareaRef

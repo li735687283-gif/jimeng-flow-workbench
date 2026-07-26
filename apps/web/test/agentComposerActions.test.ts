@@ -26,19 +26,38 @@ test('Agent panel has an execution mode dropdown next to the model picker', () =
   // 模式开关在输入框一排（composer）里，是弹层按钮而不是顶部横条
   assert.doesNotMatch(source, /agent-mode-bar|agent-mode-toggle|role="radiogroup"/)
   assert.match(source, /agent-model-picker agent-mode-picker/)
-  assert.match(source, /aria-label="执行模式"/)
-  assert.match(source, /aria-label="执行模式选项"/)
+  assert.match(source, /<SecondaryMenuSelect\s*\n\s*label="执行模式"/)
+  assert.match(source, /menuClassName="agent-model-menu"/)
   assert.match(source, /手动执行/)
   assert.match(source, /全自动执行/)
-  assert.match(source, /setExecutionMode\('manual'\)/)
-  assert.match(source, /setExecutionMode\('auto'\)/)
+  assert.match(source, /setExecutionMode\(value === 'auto' \? 'auto' : 'manual'\)/)
   assert.match(source, /useAgentStore\(\(s\) => s\.executionMode\)/)
-  // 模式菜单与模型菜单都在点击外部时关闭
+  // Portal 内点击不触发外部关闭，模式菜单与模型菜单仍可在外部点击时关闭
+  assert.match(source, /target\?\.closest\('\.viewport-menu-layer'\)/)
   assert.match(source, /target\?\.closest\('\.agent-model-picker'\)/)
   assert.match(source, /setModeMenuOpen\(false\)/)
 })
 
-test('Agent pending image action cards offer model, aspect ratio and resolution selects', () => {
+test('Agent composer keeps canvas controls left and model controls right', () => {
+  assert.match(
+    styles,
+    /\.agent-composer-actions\s*\{[^}]*display:\s*flex;/s,
+  )
+  assert.match(
+    styles,
+    /\.agent-composer-actions\s*\{[^}]*width:\s*100%;/s,
+  )
+  assert.match(
+    styles,
+    /\.agent-composer-actions > \.agent-model-picker:not\(\.agent-mode-picker\)\s*\{[^}]*margin-left:\s*auto;/s,
+  )
+  assert.match(
+    styles,
+    /\.agent-send-btn\s*\{[^}]*margin-left:\s*0;/s,
+  )
+})
+
+test('Agent pending media action cards expose editable generation parameters', () => {
   // 手动模式确认前可调整模型/比例/清晰度,用统一的 SecondaryMenuSelect 模板
   assert.match(source, /className="agent-action-params"/)
   assert.match(source, /label="模型"/)
@@ -49,8 +68,14 @@ test('Agent pending image action cards offer model, aspect ratio and resolution 
   assert.match(source, /applyParamOverrides\(action\)/)
   assert.match(source, /paramOverrides\[action\.id\]/)
   assert.match(source, /AGENT_DEFAULT_IMAGE_ASPECT_RATIO/)
-  // 图片卡片 3 个选择器(模型/比例/清晰度) + 视频卡片 1 个(模型)
-  assert.equal((source.match(/<SecondaryMenuSelect/g) ?? []).length, 4)
+  // 图片卡片 3 个选择器；视频卡片 4 个选择器（模型/比例/分辨率/时长）
+  assert.match(source, /VIDEO_ASPECT_RATIOS/)
+  assert.match(source, /VIDEO_RESOLUTIONS/)
+  assert.match(source, /VIDEO_DURATIONS/)
+  assert.match(source, /label="分辨率"/)
+  assert.match(source, /label="时长"/)
+  assert.match(source, /videoParamValue\(action,\s*'durationSeconds'\)/)
+  assert.equal((source.match(/<SecondaryMenuSelect/g) ?? []).length, 9)
   assert.doesNotMatch(source, /<select/)
 
   assert.match(styles, /\.agent-action-params/)
@@ -67,7 +92,8 @@ test('Agent media model selects use settings lists and never mix image and video
   // 图片卡片用图片模型,视频卡片用视频模型
   assert.match(source, /effectiveImageModel\(action\)/)
   assert.match(source, /effectiveVideoModel\(action\)/)
-  assert.match(source, /pendingVideoCard && videoModelOptions\.length > 0/)
+  assert.match(source, /pendingVideoCard && \(/)
+  assert.match(source, /videoModelOptions\.length > 0 && \(/)
   // 切换模型时不支持的清晰度会被清掉
   assert.match(source, /delete next\.resolution/)
 })

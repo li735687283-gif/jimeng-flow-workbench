@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import type { Node } from '@xyflow/react'
 import {
   computeHelperLines,
@@ -56,6 +57,20 @@ test('when tops align and heights match, top/center/bottom lines all show', () =
   assert.ok(result.horizontals.includes(200)) // bottom
 })
 
+test('merges nearby guide candidates and keeps the exact snapped guides', () => {
+  const dragged = box('a', 203, 40)
+  const nearLeft = box('b', 200, 200)
+  const exactLeft = box('c', 204, 320)
+  const result = computeHelperLines(
+    dragged,
+    [dragged, nearLeft, exactLeft],
+    20,
+  )
+
+  assert.deepEqual(result.position, { x: 204, y: 40 })
+  assert.deepEqual(result.verticals, [204, 254, 304])
+})
+
 test('ignores other selected nodes during multi-drag', () => {
   const dragged = box('a', 203, 40, 100, 80, true)
   const other = box('b', 200, 200, 100, 80, true)
@@ -64,6 +79,17 @@ test('ignores other selected nodes during multi-drag', () => {
   assert.equal(result.snapped, false)
   assert.equal(result.verticals.length, 0)
   assert.equal(result.horizontals.length, 0)
+})
+
+test('CanvasView commits the remembered snap coordinate when dragging stops', () => {
+  const source = readFileSync(
+    'apps/web/src/components/canvas/CanvasView.tsx',
+    'utf8',
+  )
+
+  assert.match(source, /lastNodeSnapRef/)
+  assert.match(source, /lastNodeSnapRef\.current\.position/)
+  assert.match(source, /dragging:\s*false/)
 })
 
 test('snap threshold scales with zoom', () => {

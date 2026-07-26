@@ -26,9 +26,27 @@ test('SecondaryMenuSelect reuses the canvas double-click menu template', async (
 
   assert.match(html, /role="combobox"/)
   assert.match(html, /add-node-menu secondary-menu-options/)
+  assert.match(html, /viewport-menu-layer/)
+  assert.match(html, /data-placement="down"/)
   assert.match(html, /add-node-menu-item secondary-menu-option selected/)
   assert.match(html, /aria-checked="true"/)
   assert.equal(html.includes('<select'), false)
+})
+
+test('SecondaryMenuSelect portals above clipping containers and follows the viewport', () => {
+  const portalSource = readFileSync(
+    'apps/web/src/components/menus/ViewportMenuPortal.tsx',
+    'utf8',
+  )
+  const css = readFileSync('apps/web/src/App.css', 'utf8')
+
+  assert.match(portalSource, /createPortal\(menu, document\.body\)/)
+  assert.match(portalSource, /getFloatingMenuPlacement/)
+  assert.match(portalSource, /addEventListener\('scroll', updatePlacement, true\)/)
+  assert.match(portalSource, /maxHeight: next\.maxHeight/)
+  assert.match(css, /\.viewport-menu-layer\s*\{[^}]*z-index:\s*2147483000\s*!important;/s)
+  assert.match(css, /\.secondary-menu-options\s*\{[^}]*position:\s*fixed;/s)
+  assert.match(css, /scrollbar-gutter:\s*stable/)
 })
 
 test('project rules require the unified secondary-menu template', () => {

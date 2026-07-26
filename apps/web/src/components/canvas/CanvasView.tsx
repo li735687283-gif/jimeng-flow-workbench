@@ -339,6 +339,10 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
   const [fileDragActive, setFileDragActive] = useState(false)
   const [helperLines, setHelperLines] = useState<HelperLinesState | null>(null)
   const [snapAlignEnabled, setSnapAlignEnabled] = useState(readSnapAlignEnabled)
+  const lastNodeSnapRef = useRef<{
+    nodeId: string
+    position: { x: number; y: number }
+  } | null>(null)
   const lastRestoredFlowIdRef = useRef<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -396,6 +400,7 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
   const handleNodeDrag: OnNodeDrag = useCallback(
     (_event, node) => {
       if (!snapAlignEnabled) {
+        lastNodeSnapRef.current = null
         setHelperLines(null)
         return
       }
@@ -404,6 +409,7 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
       const selectedCount = allNodes.filter((item) => item.selected).length
       // 多选整体拖动时不吸附，避免成员相对位置被拆散
       if (selectedCount > 1) {
+        lastNodeSnapRef.current = null
         setHelperLines(null)
         return
       }
@@ -420,6 +426,9 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
             }
           : null,
       )
+      lastNodeSnapRef.current = hasLine
+        ? { nodeId: node.id, position: result.position }
+        : null
 
       if (!result.snapped) return
 
@@ -435,9 +444,37 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
     [snapAlignEnabled, zoom],
   )
 
-  const handleNodeDragStop: OnNodeDrag = useCallback(() => {
-    setHelperLines(null)
-  }, [])
+  const handleNodeDragStop: OnNodeDrag = useCallback(
+    (_event, node) => {
+      let finalPosition =
+        snapAlignEnabled && lastNodeSnapRef.current?.nodeId === node.id
+          ? lastNodeSnapRef.current.position
+          : null
+
+      if (!finalPosition && snapAlignEnabled) {
+        const allNodes = useCanvasStore.getState().nodes as Node[]
+        const result = computeHelperLines(node, allNodes, getSnapThreshold(zoom))
+        const hasLine =
+          result.verticals.length > 0 || result.horizontals.length > 0
+        if (hasLine) finalPosition = result.position
+      }
+
+      if (finalPosition) {
+        useCanvasStore.getState().onNodesChange([
+          {
+            type: 'position',
+            id: node.id,
+            position: finalPosition,
+            dragging: false,
+          },
+        ])
+      }
+
+      lastNodeSnapRef.current = null
+      setHelperLines(null)
+    },
+    [snapAlignEnabled, zoom],
+  )
 
   const handleNodeContextMenu = useCallback(
     (event: ReactMouseEvent, node: Node) => {

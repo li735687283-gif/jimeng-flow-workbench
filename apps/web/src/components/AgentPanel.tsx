@@ -5,7 +5,6 @@ import {
   AtSign,
   Bot,
   Check,
-  ChevronDown,
   History,
   Loader2,
   MousePointer2,
@@ -16,6 +15,11 @@ import type {
   AgentMessage,
   AgentToolCall,
 } from '@jimeng-flow/shared/agentMessage'
+import {
+  VIDEO_ASPECT_RATIOS,
+  VIDEO_DURATIONS,
+  VIDEO_RESOLUTIONS,
+} from '@jimeng-flow/shared/videoNode'
 import { sendAgentChat } from '../api/agent'
 import { startCodexLogin } from '../api/settings'
 import { AgentConversationHistory } from './AgentConversationHistory'
@@ -29,6 +33,7 @@ import {
   executeAgentToolCall,
   summarizeCanvasNodes,
 } from '../utils/agentTools'
+import { shouldFinishAgentTurnAfterToolResults } from '../utils/agentExecution'
 import {
   AGENT_IMAGE_ASPECT_RATIOS,
   getAgentImageResolutionOptions,
@@ -114,9 +119,14 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([])
   const [pickingCanvasNode, setPickingCanvasNode] = useState(false)
   const [executingMessageId, setExecutingMessageId] = useState<string | null>(null)
-  // 手动模式下，待确认的图片参数覆盖（模型/比例/清晰度），key 为 action id
+  // 手动模式下，待确认的图片/视频参数覆盖，key 为 action id
   const [paramOverrides, setParamOverrides] = useState<
-    Record<string, { aspectRatio?: string; resolution?: string; model?: string }>
+    Record<string, {
+      aspectRatio?: string
+      resolution?: string
+      model?: string
+      durationSeconds?: number
+    }>
   >({})
   const [openParamSelect, setOpenParamSelect] = useState<string | null>(null)
   const [codexLoginState, setCodexLoginState] = useState<'idle' | 'starting' | 'opened'>('idle')
@@ -183,6 +193,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     () => AGENT_IMAGE_ASPECT_RATIOS.map((ratio) => ({ value: ratio, label: ratio })),
     [],
   )
+  const videoAspectRatioOptions = useMemo(
+    () => VIDEO_ASPECT_RATIOS.map((value) => ({ value, label: value })),
+    [],
+  )
+  const videoResolutionOptions = useMemo(
+    () => VIDEO_RESOLUTIONS.map((value) => ({ value, label: value })),
+    [],
+  )
+  const videoDurationOptions = useMemo(
+    () => VIDEO_DURATIONS.map((value) => ({ value: String(value), label: `${value}s` })),
+    [],
+  )
 
   const maxPanelWidth =
     typeof window === 'undefined'
@@ -211,6 +233,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     if (!modelOpen && !modeMenuOpen) return
     const closeMenus = (event: MouseEvent) => {
       const target = event.target as Element | null
+      if (target?.closest('.viewport-menu-layer')) return
       if (target?.closest('.agent-model-picker')) return
       setModelOpen(false)
       setModeMenuOpen(false)
@@ -369,6 +392,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         }
         executedAnyAction = true
         useAgentStore.getState().addActionResults(assistantMessage.id, results)
+        if (shouldFinishAgentTurnAfterToolResults(results)) break
 
         // 手动模式下还有未确认的写操作：停下来等用户确认
         const hasPendingWrites = response.actions.some(
@@ -410,8 +434,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const pending = pendingActionsOf(message)
     if (pending.length === 0 || loading) return
     setExecutingMessageId(message.id)
+    const results = []
     try {
-      const results = []
       for (const action of pending) {
         results.push(await executeAgentToolCall(applyParamOverrides(action), { getDropPosition }))
       }
@@ -419,7 +443,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     } finally {
       setExecutingMessageId(null)
     }
-    await runAgentLoop(true)
+    if (!shouldFinishAgentTurnAfterToolResults(results)) {
+      await runAgentLoop(true)
+    }
   }
 
   /** 卡片生效的图片模型：用户覆盖 > 模型指定(须在配置列表内) > 设置默认 */
@@ -472,6 +498,42 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
       }
       return { ...prev, [action.id]: next }
     })
+  }
+
+  /** 待确认的视频参数：用户覆盖 > 模型参数 > 设置默认值 */
+  const videoParamValue = (
+    action: AgentToolCall,
+    key: 'aspectRatio' | 'resolution' | 'durationSeconds',
+  ): string => {
+    const override = paramOverrides[action.id]?.[key]
+    if (override !== undefined) return String(override)
+
+    const arg = action.args[key]
+    if (key === 'durationSeconds') {
+      const duration = typeof arg === 'number' ? arg : Number(arg)
+      if (VIDEO_DURATIONS.includes(duration)) return String(duration)
+      return String(settings?.defaultVideoDurationSeconds ?? 5)
+    }
+
+    if (typeof arg === 'string' && arg.trim()) {
+      return key === 'resolution' ? arg.trim().toUpperCase() : arg.trim()
+    }
+    if (key === 'aspectRatio') return settings?.defaultVideoAspectRatio ?? '16:9'
+    return settings?.defaultVideoResolution ?? '720P'
+  }
+
+  const setVideoParam = (
+    action: AgentToolCall,
+    key: 'aspectRatio' | 'resolution' | 'model' | 'durationSeconds',
+    value: string | number,
+  ) => {
+    setParamOverrides((prev) => ({
+      ...prev,
+      [action.id]: {
+        ...prev[action.id],
+        [key]: value,
+      },
+    }))
   }
 
   function applyParamOverrides(action: AgentToolCall): AgentToolCall {
@@ -678,17 +740,57 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                             />
                           </div>
                         )}
-                        {pendingVideoCard && videoModelOptions.length > 0 && (
+                        {pendingVideoCard && (
                           <div className="agent-action-params">
+                            {videoModelOptions.length > 0 && (
+                              <SecondaryMenuSelect
+                                label="模型"
+                                value={effectiveVideoModel(action)}
+                                options={videoModelOptions}
+                                open={openParamSelect === `${action.id}:model`}
+                                onOpenChange={(open) =>
+                                  setOpenParamSelect(open ? `${action.id}:model` : null)
+                                }
+                                onChange={(value) => setVideoParam(action, 'model', value)}
+                              />
+                            )}
                             <SecondaryMenuSelect
-                              label="模型"
-                              value={effectiveVideoModel(action)}
-                              options={videoModelOptions}
-                              open={openParamSelect === `${action.id}:model`}
+                              label="尺寸"
+                              value={videoParamValue(action, 'aspectRatio')}
+                              options={videoAspectRatioOptions}
+                              open={openParamSelect === `${action.id}:aspectRatio`}
                               onOpenChange={(open) =>
-                                setOpenParamSelect(open ? `${action.id}:model` : null)
+                                setOpenParamSelect(open ? `${action.id}:aspectRatio` : null)
                               }
-                              onChange={(value) => setImageParam(action, 'model', value)}
+                              onChange={(value) =>
+                                setVideoParam(action, 'aspectRatio', value)
+                              }
+                            />
+                            <SecondaryMenuSelect
+                              label="分辨率"
+                              value={videoParamValue(action, 'resolution')}
+                              options={videoResolutionOptions}
+                              open={openParamSelect === `${action.id}:resolution`}
+                              onOpenChange={(open) =>
+                                setOpenParamSelect(open ? `${action.id}:resolution` : null)
+                              }
+                              onChange={(value) =>
+                                setVideoParam(action, 'resolution', value)
+                              }
+                            />
+                            <SecondaryMenuSelect
+                              label="时长"
+                              value={videoParamValue(action, 'durationSeconds')}
+                              options={videoDurationOptions}
+                              open={openParamSelect === `${action.id}:durationSeconds`}
+                              onOpenChange={(open) =>
+                                setOpenParamSelect(
+                                  open ? `${action.id}:durationSeconds` : null,
+                                )
+                              }
+                              onChange={(value) =>
+                                setVideoParam(action, 'durationSeconds', Number(value))
+                              }
                             />
                           </div>
                         )}
@@ -823,84 +925,51 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
           </div>
 
           <div className="agent-model-picker agent-mode-picker">
-            <button
-              type="button"
-              className="agent-model-btn"
-              onClick={() => {
-                setModeMenuOpen((open) => !open)
-                setModelOpen(false)
+            <SecondaryMenuSelect
+              label="执行模式"
+              value={executionMode}
+              displayValue={executionMode === 'auto' ? '全自动' : '手动'}
+              options={[
+                { value: 'manual', label: '手动执行' },
+                { value: 'auto', label: '全自动执行' },
+              ]}
+              open={modeMenuOpen}
+              onOpenChange={(open) => {
+                setModeMenuOpen(open)
+                if (open) setModelOpen(false)
               }}
+              onChange={(value) =>
+                setExecutionMode(value === 'auto' ? 'auto' : 'manual')
+              }
+              triggerClassName="agent-model-btn"
+              menuClassName="agent-model-menu"
+              optionClassName="agent-model-option"
               title={executionMode === 'auto'
                 ? '全自动执行：模型直接操作画布，不再逐一确认'
                 : '手动执行：操作画布前先询问，确认后才执行'}
-              aria-expanded={modeMenuOpen}
-              aria-haspopup="menu"
-              aria-label="执行模式"
-            >
-              {executionMode === 'auto' ? '全自动' : '手动'}
-              <ChevronDown size={13} />
-            </button>
-            {modeMenuOpen && (
-              <div className="agent-model-menu" role="menu" aria-label="执行模式选项">
-                <button
-                  type="button"
-                  className="agent-model-option"
-                  role="menuitemradio"
-                  aria-checked={executionMode === 'manual'}
-                  onClick={() => {
-                    setExecutionMode('manual')
-                    setModeMenuOpen(false)
-                  }}
-                >
-                  <span>手动执行</span>
-                  {executionMode === 'manual' && <Check size={13} />}
-                </button>
-                <button
-                  type="button"
-                  className="agent-model-option"
-                  role="menuitemradio"
-                  aria-checked={executionMode === 'auto'}
-                  onClick={() => {
-                    setExecutionMode('auto')
-                    setModeMenuOpen(false)
-                  }}
-                >
-                  <span>全自动执行</span>
-                  {executionMode === 'auto' && <Check size={13} />}
-                </button>
-              </div>
-            )}
+            />
           </div>
 
           <div className="agent-model-picker">
-            <button
-              type="button"
-              className="agent-model-btn"
-              onClick={() => {
-                setModelOpen((open) => !open)
-                setModeMenuOpen(false)
+            <SecondaryMenuSelect
+              label="Agent 模型"
+              value={currentModel ?? ''}
+              displayValue={
+                currentModel ? `Agent · ${currentModel}` : '未配置 Agent 模型'
+              }
+              options={models.map((model) => ({ value: model, label: model }))}
+              open={modelOpen}
+              onOpenChange={(open) => {
+                setModelOpen(open)
+                if (open) setModeMenuOpen(false)
               }}
+              onChange={changeModel}
+              triggerClassName="agent-model-btn"
+              menuClassName="agent-model-menu"
+              optionClassName="agent-model-option"
               disabled={models.length === 0}
               title={models.length === 0 ? '请先在设置中添加大语言模型' : '切换 Agent 模型'}
-            >
-              {currentModel ? `Agent · ${currentModel}` : '未配置 Agent 模型'}
-              <ChevronDown size={13} />
-            </button>
-            {modelOpen && models.length > 0 && (
-              <div className="agent-model-menu">
-                {models.map((model) => (
-                  <button
-                    type="button"
-                    key={model}
-                    className="agent-model-option"
-                    onClick={() => changeModel(model)}
-                  >
-                    <span>{model}</span>
-                    {model === currentModel && <Check size={13} />}
-                  </button>
-                ))}
-              </div>
-            )}
+            />
           </div>
 
           <button

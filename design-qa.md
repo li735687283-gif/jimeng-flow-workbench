@@ -394,3 +394,156 @@ final result: passed
 5. Added a cascade-order assertion after independent review and reran the focused tests.
 
 final result: passed
+
+---
+
+# Agent Composer Toolbar Design QA
+
+- Source visual truth: `C:\tmp\mok-agent-toolbar-reference.png`
+- Implementation screenshot: `C:\tmp\mok-agent-toolbar-implementation.png`
+- Combined comparison: `C:\tmp\mok-agent-toolbar-comparison.png`
+- Viewport: 1229 × 720 CSS px
+- Source pixels: 999 × 258
+- Implementation pixels: 1229 × 720
+- CSS viewport: 1229 × 720
+- Density normalization: implementation pixels matched the CSS viewport at 1:1; the source was treated as a focused before-state reference rather than scaled as an exact viewport target.
+- State: dark canvas, Agent panel open and resized to 820 px, empty conversation, no menus open.
+
+## Full-view comparison evidence
+
+The final browser capture shows the Agent panel at a wide desktop size. The canvas-pick arrow and execution-mode control remain aligned to the lower-left edge, while the Agent model control and send button align to the lower-right edge. The action row spans 778 px inside the 820 px panel and reports no horizontal overflow.
+
+## Focused-region comparison evidence
+
+The combined comparison places the supplied before-state directly above the final footer crop. It confirms that the original four controls were clustered on the left, while the implementation preserves the same controls, sizing, order, color, typography, and spacing within two edge-aligned groups separated by flexible empty space.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged from the existing Agent controls; labels, weight, line wrapping, and model-name treatment remain consistent.
+- Spacing and layout rhythm: left and right groups are edge-aligned with the existing 8 px intra-group gap; the middle absorbs resizing space.
+- Colors and visual tokens: unchanged; existing dark surfaces and control states are preserved.
+- Image quality and asset fidelity: no image assets were changed or introduced; existing Lucide control icons remain intact.
+- Copy and content: unchanged; “手动”, Agent model name, and button labels remain the same.
+
+## Comparison history
+
+### Pass 1 — blocked
+
+- Finding: P1, `.agent-composer-actions` remained content-width `inline-flex`, so assigning automatic margin to the model picker did not create visible separation when the panel was widened.
+- Evidence: the panel measured 810 px while the action row measured only 296 px.
+- Fix: explicitly set the action row to `display: flex` and `width: 100%`.
+
+### Pass 2 — passed
+
+- Post-fix evidence: at a 1229 × 720 viewport, the panel measured 820 px and the action row measured 778 px. The left group ended at 522 px, the right group began at 1013 px, the send button ended at 1201 px, and no overflow was detected.
+- Interactions tested: opened the Agent panel, resized it to the wide state, toggled the execution-mode menu, and toggled the Agent-model menu.
+- Console errors: none.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for the requested toolbar grouping.
+
+## Follow-up polish
+
+No P3 changes are necessary for this focused adjustment.
+final result: passed
+
+---
+
+# Agent Video Parameters, Prompt Text, and Alignment Guides Design QA
+
+- Source visual truth:
+  - `docs/design-qa/2026-07-27-video-text-reference.png`
+  - `docs/design-qa/2026-07-27-guide-lines-reference.png`
+- Implementation screenshots:
+  - `docs/design-qa/2026-07-27-video-text-implementation.png`
+  - `docs/design-qa/2026-07-27-guide-lines-implementation.png`
+- Combined comparisons:
+  - `docs/design-qa/2026-07-27-video-text-comparison.png`
+  - `docs/design-qa/2026-07-27-guide-lines-comparison.png`
+- Browser viewport: 1280 × 720 CSS px.
+- Source pixels: 1158 × 570 for prompt text and 1071 × 1374 for guide lines.
+- Implementation pixels: 1280 × 720 for each browser capture.
+- Density normalization: the implementation captures matched the CSS viewport at 1:1. The supplied images were treated as focused before-state references; the comparisons use contain scaling and letterboxing without cropping.
+- State: saved local canvas, video editor open for prompt inspection, then an overview canvas state during node drag.
+
+## Functional verification
+
+- Opened an Agent video action in manual mode and confirmed four unified dark-menu controls: model, size, resolution, and duration.
+- Opened each new menu and changed size from `16:9` to `9:16`, resolution from `1080P` to `720P`, and duration from `8s` to `5s`; cancelled before starting a real generation job.
+- Opened the saved video node with one reference image and a plain long prompt. The editor rendered no highlight layer and no `mention-textarea` class because no real `@图片` token was present.
+- Dragged an image node into simultaneous horizontal and vertical alignment. Mid-drag there were exactly three vertical and three horizontal guides (edge, center, edge), with no near-duplicate pairs.
+- The dragged node position was identical immediately before and after pointer release; measured release delta was `0 px` on both axes. All helper lines disappeared after release.
+
+## Visual comparison
+
+### Prompt text
+
+The source reference shows two visible text layers offset over the same paragraph. The implementation comparison shows a single crisp text layer while preserving the existing panel surface, typography, wrapping, controls, and spacing. When a real `@图片` token is present, the highlight layer remains available and the textarea text fill is explicitly transparent.
+
+### Alignment guides
+
+The source reference shows paired dashed guides at nearly identical positions. The implementation comparison shows one guide for each aligned edge or center. The final snap coordinate is retained through drag stop, removing the small release-time displacement.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: the guide-line implementation screenshot uses the current saved canvas state and a wider overview than the supplied source; the focused comparison evaluates guide multiplicity and release stability rather than identical node composition.
+
+## Runtime and regression checks
+
+- Browser console errors: none.
+- Focused regression tests: 20 passed.
+- Full project check: passed.
+- Tests: 525 passed, 0 failed.
+- Type checks: passed for desktop, server, web, and shared workspaces.
+- Lint: 0 errors; 11 pre-existing warnings remain.
+- Production build: passed; the existing main-chunk size warning remains.
+final result: passed
+
+---
+
+# Viewport Dropdown Menus Design QA
+
+- Source visual truth: `docs/design-qa/2026-07-27-viewport-menu-reference.png`
+- Implementation screenshot: `docs/design-qa/2026-07-27-viewport-menu-implementation.jpg`
+- Flip-up screenshot: `docs/design-qa/2026-07-27-viewport-menu-flip-up.jpg`
+- Combined comparison: `docs/design-qa/2026-07-27-viewport-menu-comparison.jpg`
+- Browser viewport: 1280 × 720 CSS px.
+- Source pixels: 607 × 349.
+- Implementation pixels: 1280 × 720.
+- State: saved local canvas, Agent panel open, manual video action waiting for confirmation, resolution menu open; second capture shows the footer execution-mode menu near the viewport bottom.
+
+## Behavior verification
+
+- Unified parameter dropdowns render under `document.body`, outside conversation and canvas clipping containers.
+- The shared menu layer resolves to `z-index: 2147483000`.
+- The video resolution menu opened downward when space was available, stayed inside the 720 px viewport, displayed all four options, and measured 148 px wide.
+- The footer execution-mode menu detected the bottom collision and opened upward: trigger top 661.33 px, menu bottom 656.67 px.
+- Menus recompute their position on window resize and capturing scroll events; long option lists receive the available-side maximum height and internal scrolling.
+- Selection remained functional: resolution changed from 1080P to 720P and back, and execution mode changed from manual to auto and back. Test generation cards were cancelled without starting a media job.
+
+## Visual comparison
+
+The supplied reference shows the resolution list trapped below the conversation content and partially hidden by the lower panel. The implementation comparison shows the same menu above surrounding cards and footer content. The flip-up capture confirms that a trigger near the viewport bottom places the complete list above the trigger instead of extending below the screen.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: the implementation uses the current saved canvas and a wider viewport than the focused source crop; the comparison evaluates menu stacking, visibility, and collision behavior rather than identical canvas composition.
+
+## Runtime and regression checks
+
+- Browser console errors: none.
+- Focused menu tests: 17 passed.
+- Full project check: passed.
+- Tests: 528 passed, 0 failed.
+- Type checks: passed for desktop, server, web, and shared workspaces.
+- Lint: 0 errors; 11 pre-existing warnings remain.
+- Production build: passed; the existing main-chunk size warning remains.
+
+final result: passed

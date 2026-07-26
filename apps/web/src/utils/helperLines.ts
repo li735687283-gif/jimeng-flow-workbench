@@ -63,15 +63,33 @@ export function getNodeBox(node: Node): NodeBox {
   }
 }
 
-function uniqueSorted(values: number[], epsilon = 0.5): number[] {
+function uniqueSorted(
+  values: number[],
+  epsilon = 0.5,
+  preferred: readonly number[] = [],
+): number[] {
   const sorted = [...values].sort((a, b) => a - b)
-  const out: number[] = []
+  const clusters: number[][] = []
+
   for (const value of sorted) {
-    if (out.length === 0 || Math.abs(out[out.length - 1] - value) > epsilon) {
-      out.push(value)
+    const cluster = clusters[clusters.length - 1]
+    if (!cluster || value - cluster[0] > epsilon) {
+      clusters.push([value])
+    } else {
+      cluster.push(value)
     }
   }
-  return out
+
+  const preferredDistance = (value: number) =>
+    preferred.length === 0
+      ? 0
+      : Math.min(...preferred.map((candidate) => Math.abs(candidate - value)))
+
+  return clusters.map((cluster) =>
+    cluster.reduce((best, candidate) =>
+      preferredDistance(candidate) < preferredDistance(best) ? candidate : best,
+    ),
+  )
 }
 
 /**
@@ -186,6 +204,8 @@ export function computeHelperLines(
 
   // 吸附后收集所有已对齐的边（阈值稍松一点，保证顶对齐时中/底也画出来）
   const lineEpsilon = Math.max(1, threshold * 0.35)
+  // 多个参考节点只差几像素时，把相邻候选线合成一条，避免双虚线。
+  const lineMergeEpsilon = Math.max(lineEpsilon, threshold * 0.6)
   const verticals: number[] = []
   const horizontals: number[] = []
 
@@ -222,8 +242,16 @@ export function computeHelperLines(
   return {
     position: { x: snapX, y: snapY },
     snapped,
-    verticals: uniqueSorted(verticals),
-    horizontals: uniqueSorted(horizontals),
+    verticals: uniqueSorted(
+      verticals,
+      lineMergeEpsilon,
+      [finalBox.left, finalBox.centerX, finalBox.right],
+    ),
+    horizontals: uniqueSorted(
+      horizontals,
+      lineMergeEpsilon,
+      [finalBox.top, finalBox.centerY, finalBox.bottom],
+    ),
   }
 }
 
