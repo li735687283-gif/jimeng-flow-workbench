@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   getImageGenerationProgressState,
+  isImageGenerationRequestInFlight,
   isInterruptedImageGeneration,
   shouldShowImagePlaceholderIcon,
 } from '../src/utils/imageGenerationProgress'
@@ -13,6 +14,25 @@ test('persisted running image nodes without a generation id are interrupted', ()
   assert.equal(isInterruptedImageGeneration('running', 'gen-1', false), false)
   assert.equal(isInterruptedImageGeneration('running', undefined, true), false)
   assert.equal(isInterruptedImageGeneration('success', undefined, false), false)
+})
+
+test('agent queued and running store states keep image generation in flight', () => {
+  assert.equal(isImageGenerationRequestInFlight(false, 'queued'), true)
+  assert.equal(isImageGenerationRequestInFlight(false, 'running'), true)
+  assert.equal(isImageGenerationRequestInFlight(true, 'idle'), true)
+  assert.equal(isImageGenerationRequestInFlight(false, 'idle'), false)
+  assert.equal(isImageGenerationRequestInFlight(false, 'success'), false)
+  assert.equal(isImageGenerationRequestInFlight(false, undefined), false)
+})
+
+test('agent-created image nodes keep the scanning overlay before the task id arrives', () => {
+  const requestInFlight = isImageGenerationRequestInFlight(false, 'queued')
+
+  assert.equal(
+    isInterruptedImageGeneration('running', undefined, requestInFlight),
+    false,
+  )
+  assert.equal(getImageGenerationProgressState('running', requestInFlight).visible, true)
 })
 
 test('image generation progress shows while the node is queued or running', () => {

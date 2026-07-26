@@ -87,7 +87,25 @@ test('no-update result stays silent and does not open a dialog', async () => {
   assert.equal(updater.autoInstallOnAppQuit, true)
 })
 
-test('available updates download, prompt, and can restart to install', async () => {
+test('available update waits for confirmation before downloading', async () => {
+  const updater = new FakeUpdater()
+  initializeAutoUpdates({
+    dialog: {
+      showMessageBox: async () => ({ response: 0 }),
+    },
+    enabled: true,
+    logger: createLogger(),
+    updater,
+  })
+
+  updater.emit('update-available', { version: '0.2.0' })
+  await nextTurn()
+
+  assert.equal(updater.downloadCalls, 0)
+  assert.equal(updater.quitCalls, 0)
+})
+
+test('confirmed update downloads and installs after download completes', async () => {
   const updater = new FakeUpdater()
   const prompts: Parameters<UpdateDialogLike['showMessageBox']>[0][] = []
   initializeAutoUpdates({
@@ -104,13 +122,39 @@ test('available updates download, prompt, and can restart to install', async () 
 
   updater.emit('update-available', { version: '0.2.0' })
   await nextTurn()
+  assert.equal(updater.downloadCalls, 1)
+  assert.equal(updater.quitCalls, 0)
+
   updater.emit('update-downloaded', { version: '0.2.0' })
   await nextTurn()
 
-  assert.equal(updater.downloadCalls, 1)
   assert.equal(prompts.length, 1)
   assert.match(prompts[0]?.detail ?? '', /0\.2\.0/)
+  assert.equal(prompts[0]?.buttons[1], '下载并安装')
   assert.equal(updater.quitCalls, 1)
+})
+
+test('duplicate available events only show one prompt and start one download', async () => {
+  const updater = new FakeUpdater()
+  let dialogCalls = 0
+  initializeAutoUpdates({
+    dialog: {
+      showMessageBox: async () => {
+        dialogCalls += 1
+        return { response: 1 }
+      },
+    },
+    enabled: true,
+    logger: createLogger(),
+    updater,
+  })
+
+  updater.emit('update-available', { version: '0.2.0' })
+  updater.emit('update-available', { version: '0.2.0' })
+  await nextTurn()
+
+  assert.equal(dialogCalls, 1)
+  assert.equal(updater.downloadCalls, 1)
 })
 
 test('network, version, and download failures are logged without throwing', async () => {
@@ -119,7 +163,7 @@ test('network, version, and download failures are logged without throwing', asyn
   updater.checkError = new Error('network unavailable')
   updater.downloadError = new Error('download interrupted')
   initializeAutoUpdates({
-    dialog: { showMessageBox: async () => ({ response: 0 }) },
+    dialog: { showMessageBox: async () => ({ response: 1 }) },
     enabled: true,
     logger,
     updater,

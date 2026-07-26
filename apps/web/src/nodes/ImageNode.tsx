@@ -68,6 +68,7 @@ import {
 } from '../utils/imageGenerationHistory'
 import {
   getImageGenerationProgressState,
+  isImageGenerationRequestInFlight,
   isInterruptedImageGeneration,
   shouldShowImagePlaceholderIcon,
 } from '../utils/imageGenerationProgress'
@@ -239,6 +240,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
   const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const generationStoreStatus = useGenerateStore(
+    (state) => state.states[id]?.status,
+  )
   const fetchAsset = useAssetStore((state) => state.fetchAsset)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
@@ -317,6 +321,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     initialImageDefaults.count as (typeof COUNT_OPTIONS)[number],
   )
   const [isGenerating, setIsGenerating] = useState(false)
+  const generationRequestInFlight = isImageGenerationRequestInFlight(
+    isGenerating,
+    generationStoreStatus,
+  )
   const [sendError, setSendError] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
@@ -352,7 +360,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       !isInterruptedImageGeneration(
         nodeData.status,
         nodeData.generationId,
-        isGenerating,
+        generationRequestInFlight,
       )
     ) {
       return
@@ -370,7 +378,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     void useFlowStore.getState().saveCurrent().catch(() => undefined)
   }, [
     id,
-    isGenerating,
+    generationRequestInFlight,
     nodeData.generationId,
     nodeData.status,
     updateNodeData,
@@ -486,7 +494,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const hasImage = !!imageSrc && !imgError
   const generationProgress = getImageGenerationProgressState(
     nodeData.status,
-    isGenerating,
+    generationRequestInFlight,
   )
   const showPlaceholderIcon = shouldShowImagePlaceholderIcon(
     generationProgress.visible,

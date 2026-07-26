@@ -4,6 +4,11 @@
   --theme-app-bg: #111111;
   --theme-canvas-bg: #0f0f0f;
   --theme-panel: #181818;
+  --theme-agent-bg: color-mix(
+    in srgb,
+    var(--theme-panel) 42%,
+    var(--theme-canvas-bg)
+  );
   --theme-card: #242424;
   --theme-card-hover: #282828;
   --theme-control: #202020;
@@ -464,9 +469,14 @@ body,
   background: var(--theme-border);
 }
 
-.agent-chat-panel,
+.agent-chat-panel {
+  border-color: var(--theme-border);
+  background: var(--theme-agent-bg);
+  color: var(--theme-text);
+  box-shadow: var(--theme-panel-shadow);
+}
+
 .agent-conversation-history,
-.agent-composer,
 .agent-skill-library,
 .agent-model-menu,
 .agent-role-dropdown,
@@ -475,6 +485,19 @@ body,
   background: var(--theme-panel);
   color: var(--theme-text);
   box-shadow: var(--theme-panel-shadow);
+}
+
+.agent-composer {
+  border-color: transparent;
+  background: var(--theme-agent-bg);
+  color: var(--theme-text);
+  box-shadow: none;
+}
+
+.agent-composer:focus-within {
+  background: var(--theme-agent-bg);
+  box-shadow: inset 0 0 0 1px var(--theme-border);
+  transform: none;
 }
 
 .agent-bubble.user,

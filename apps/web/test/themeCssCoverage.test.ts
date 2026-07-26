@@ -25,4 +25,26 @@ test('global skin stylesheet covers every theme and major application surface', 
 
   assert.match(css, /--theme-edge:/)
   assert.match(css, /--theme-particle-base:/)
+  assert.equal(css.includes('--theme-agent-bg: color-mix('), true)
+  assert.equal(css.includes('var(--theme-panel) 42%'), true)
+
+  const agentPanelStyles = css.slice(
+    css.indexOf('.agent-chat-panel'),
+    css.indexOf('.agent-conversation-history'),
+  )
+  assert.equal(agentPanelStyles.includes('background: var(--theme-agent-bg)'), true)
+
+  const agentComposerStyles = css.slice(
+    css.indexOf('.agent-composer {'),
+    css.indexOf('.agent-composer:focus-within'),
+  )
+  assert.equal(agentComposerStyles.includes('background: var(--theme-agent-bg)'), true)
+  assert.equal(agentComposerStyles.includes('box-shadow: none'), true)
+
+  const focusedComposerStyles = css.slice(
+    css.indexOf('.agent-composer:focus-within'),
+    css.indexOf('.agent-bubble.user'),
+  )
+  assert.equal(focusedComposerStyles.includes('background: var(--theme-agent-bg)'), true)
+  assert.equal(focusedComposerStyles.includes('transform: none'), true)
 })

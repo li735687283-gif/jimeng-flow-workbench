@@ -57,32 +57,41 @@ async function downloadUpdate(
   }
 }
 
-async function showDownloadedUpdate(
-  updater: UpdaterLike,
+async function confirmUpdateDownload(
   dialog: UpdateDialogLike,
   logger: UpdateLogger,
   info: unknown,
-): Promise<void> {
+): Promise<boolean> {
   const version = updateVersion(info)
   const detail = version
-    ? `MO.K ${version} has been downloaded. Choose restart now, or close MO.K later to install it for the next launch.`
-    : 'A MO.K update has been downloaded. Choose restart now, or close MO.K later to install it for the next launch.'
+    ? `发现 MO.K ${version}。确认后将自动下载，下载完成时会关闭并重启应用以完成安装。`
+    : '发现 MO.K 新版本。确认后将自动下载，下载完成时会关闭并重启应用以完成安装。'
   try {
     const result = await dialog.showMessageBox({
-      buttons: ['Later', 'Restart and install'],
+      buttons: ['暂不更新', '下载并安装'],
       cancelId: 0,
-      defaultId: 0,
+      defaultId: 1,
       detail,
-      message: 'MO.K update is ready',
+      message: 'MO.K 有可用更新',
       noLink: true,
-      title: 'MO.K Update',
+      title: 'MO.K 更新',
       type: 'info',
     })
-    if (result.response === 1) {
-      updater.quitAndInstall(false, true)
-    }
+    return result.response === 1
   } catch (error) {
     logger.error('[updater] update prompt failed', errorMessage(error))
+    return false
+  }
+}
+
+function installDownloadedUpdate(
+  updater: UpdaterLike,
+  logger: UpdateLogger,
+): void {
+  try {
+    updater.quitAndInstall(false, true)
+  } catch (error) {
+    logger.error('[updater] update install failed', errorMessage(error))
   }
 }
 
@@ -107,12 +116,23 @@ export function initializeAutoUpdates(options: {
   updater.on('update-not-available', () => {
     logger.info('[updater] no update available')
   })
+  let downloadApproved = false
+  let updatePromptShown = false
   updater.on('update-available', (info) => {
     logger.info('[updater] update available', updateVersion(info) ?? 'unknown')
-    void downloadUpdate(updater, logger)
+    if (updatePromptShown) return
+    updatePromptShown = true
+    void confirmUpdateDownload(options.dialog, logger, info).then((approved) => {
+      if (!approved) return
+      downloadApproved = true
+      return downloadUpdate(updater, logger)
+    })
   })
   updater.on('update-downloaded', (info) => {
-    void showDownloadedUpdate(updater, options.dialog, logger, info)
+    logger.info('[updater] update downloaded', updateVersion(info) ?? 'unknown')
+    if (downloadApproved) {
+      installDownloadedUpdate(updater, logger)
+    }
   })
 
   void checkForUpdates(updater, logger)
