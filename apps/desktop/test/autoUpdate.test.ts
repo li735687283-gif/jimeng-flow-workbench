@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import test from 'node:test'
+import type { DesktopUpdateState } from '@jimeng-flow/shared/desktopUpdate'
 import {
   initializeAutoUpdates,
-  type UpdateDialogLike,
   type UpdateLogger,
   type UpdaterLike,
 } from '../src/autoUpdate'
@@ -52,28 +52,20 @@ function createLogger(): UpdateLogger & { errors: string[]; infos: string[] } {
 test('development mode never checks the real update service', async () => {
   const updater = new FakeUpdater()
   const logger = createLogger()
-  const started = initializeAutoUpdates({
-    dialog: { showMessageBox: async () => ({ response: 0 }) },
+  const controller = initializeAutoUpdates({
     enabled: false,
     logger,
     updater,
   })
   await nextTurn()
 
-  assert.equal(started, false)
+  assert.equal(controller, null)
   assert.equal(updater.checkCalls, 0)
 })
 
-test('no-update result stays silent and does not open a dialog', async () => {
+test('no-update result stays idle and never downloads', async () => {
   const updater = new FakeUpdater()
-  let dialogCalls = 0
-  initializeAutoUpdates({
-    dialog: {
-      showMessageBox: async () => {
-        dialogCalls += 1
-        return { response: 0 }
-      },
-    },
+  const controller = initializeAutoUpdates({
     enabled: true,
     logger: createLogger(),
     updater,
@@ -82,19 +74,19 @@ test('no-update result stays silent and does not open a dialog', async () => {
   await nextTurn()
 
   assert.equal(updater.checkCalls, 1)
-  assert.equal(dialogCalls, 0)
+  assert.deepEqual(controller?.getState(), { status: 'idle' })
+  assert.equal(updater.downloadCalls, 0)
   assert.equal(updater.autoDownload, false)
   assert.equal(updater.autoInstallOnAppQuit, true)
 })
 
-test('available update waits for confirmation before downloading', async () => {
+test('available update publishes a passive state and waits for a click', async () => {
   const updater = new FakeUpdater()
-  initializeAutoUpdates({
-    dialog: {
-      showMessageBox: async () => ({ response: 0 }),
-    },
+  const states: DesktopUpdateState[] = []
+  const controller = initializeAutoUpdates({
     enabled: true,
     logger: createLogger(),
+    onStateChange: (state) => states.push(state),
     updater,
   })
 
@@ -103,67 +95,79 @@ test('available update waits for confirmation before downloading', async () => {
 
   assert.equal(updater.downloadCalls, 0)
   assert.equal(updater.quitCalls, 0)
+  assert.deepEqual(controller?.getState(), {
+    status: 'available',
+    version: '0.2.0',
+  })
+  assert.deepEqual(states.at(-1), {
+    status: 'available',
+    version: '0.2.0',
+  })
 })
 
-test('confirmed update downloads and installs after download completes', async () => {
+test('clicked update reports progress and installs after download completes', async () => {
   const updater = new FakeUpdater()
-  const prompts: Parameters<UpdateDialogLike['showMessageBox']>[0][] = []
-  initializeAutoUpdates({
-    dialog: {
-      showMessageBox: async (options) => {
-        prompts.push(options)
-        return { response: 1 }
-      },
-    },
+  const states: DesktopUpdateState[] = []
+  const controller = initializeAutoUpdates({
     enabled: true,
     logger: createLogger(),
+    onStateChange: (state) => states.push(state),
     updater,
   })
 
   updater.emit('update-available', { version: '0.2.0' })
-  await nextTurn()
+  assert.equal(await controller?.download(), true)
   assert.equal(updater.downloadCalls, 1)
   assert.equal(updater.quitCalls, 0)
+
+  updater.emit('download-progress', { percent: 46.4 })
+  assert.deepEqual(controller?.getState(), {
+    status: 'downloading',
+    version: '0.2.0',
+    percent: 46.4,
+  })
 
   updater.emit('update-downloaded', { version: '0.2.0' })
   await nextTurn()
 
-  assert.equal(prompts.length, 1)
-  assert.match(prompts[0]?.detail ?? '', /0\.2\.0/)
-  assert.equal(prompts[0]?.buttons[1], '下载并安装')
+  assert.deepEqual(states.at(-1), {
+    status: 'installing',
+    version: '0.2.0',
+  })
   assert.equal(updater.quitCalls, 1)
 })
 
-test('duplicate available events only show one prompt and start one download', async () => {
+test('repeated clicks reuse one download', async () => {
   const updater = new FakeUpdater()
-  let dialogCalls = 0
-  initializeAutoUpdates({
-    dialog: {
-      showMessageBox: async () => {
-        dialogCalls += 1
-        return { response: 1 }
-      },
-    },
+  let resolveDownload: (() => void) | undefined
+  updater.downloadUpdate = () => {
+    updater.downloadCalls += 1
+    return new Promise<void>((resolve) => {
+      resolveDownload = resolve
+    })
+  }
+  const controller = initializeAutoUpdates({
     enabled: true,
     logger: createLogger(),
     updater,
   })
 
   updater.emit('update-available', { version: '0.2.0' })
-  updater.emit('update-available', { version: '0.2.0' })
-  await nextTurn()
+  const firstDownload = controller?.download()
+  const secondDownload = controller?.download()
 
-  assert.equal(dialogCalls, 1)
   assert.equal(updater.downloadCalls, 1)
+  resolveDownload?.()
+  assert.equal(await firstDownload, true)
+  assert.equal(await secondDownload, true)
 })
 
-test('network, version, and download failures are logged without throwing', async () => {
+test('network, version, and download failures are logged and allow retry', async () => {
   const updater = new FakeUpdater()
   const logger = createLogger()
   updater.checkError = new Error('network unavailable')
   updater.downloadError = new Error('download interrupted')
-  initializeAutoUpdates({
-    dialog: { showMessageBox: async () => ({ response: 1 }) },
+  const controller = initializeAutoUpdates({
     enabled: true,
     logger,
     updater,
@@ -171,7 +175,7 @@ test('network, version, and download failures are logged without throwing', asyn
 
   updater.emit('error', new Error('invalid version'))
   updater.emit('update-available', { version: null })
-  await nextTurn()
+  assert.equal(await controller?.download(), false)
   await nextTurn()
 
   assert.equal(updater.downloadCalls, 1)
@@ -179,4 +183,8 @@ test('network, version, and download failures are logged without throwing', asyn
   assert.match(logger.errors.join('\n'), /network unavailable/)
   assert.match(logger.errors.join('\n'), /invalid version/)
   assert.match(logger.errors.join('\n'), /download interrupted/)
+  assert.deepEqual(controller?.getState(), {
+    status: 'available',
+    version: null,
+  })
 })

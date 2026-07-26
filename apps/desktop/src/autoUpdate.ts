@@ -1,3 +1,5 @@
+import type { DesktopUpdateState } from '@jimeng-flow/shared/desktopUpdate'
+
 export interface UpdaterLike {
   autoDownload: boolean
   autoInstallOnAppQuit: boolean
@@ -7,17 +9,9 @@ export interface UpdaterLike {
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
 }
 
-export interface UpdateDialogLike {
-  showMessageBox(options: {
-    buttons: string[]
-    cancelId: number
-    defaultId: number
-    detail: string
-    message: string
-    noLink: boolean
-    title: string
-    type: 'info'
-  }): Promise<{ response: number }>
+export interface AutoUpdateController {
+  download(): Promise<boolean>
+  getState(): DesktopUpdateState
 }
 
 export interface UpdateLogger {
@@ -35,6 +29,13 @@ function updateVersion(value: unknown): string | null {
   return typeof version === 'string' && version.trim() ? version.trim() : null
 }
 
+function updatePercent(value: unknown): number | null {
+  if (!value || typeof value !== 'object') return null
+  const percent = (value as { percent?: unknown }).percent
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return null
+  return Math.min(100, Math.max(0, percent))
+}
+
 async function checkForUpdates(
   updater: UpdaterLike,
   logger: UpdateLogger,
@@ -43,44 +44,6 @@ async function checkForUpdates(
     await updater.checkForUpdates()
   } catch (error) {
     logger.error('[updater] update check failed', errorMessage(error))
-  }
-}
-
-async function downloadUpdate(
-  updater: UpdaterLike,
-  logger: UpdateLogger,
-): Promise<void> {
-  try {
-    await updater.downloadUpdate()
-  } catch (error) {
-    logger.error('[updater] update download failed', errorMessage(error))
-  }
-}
-
-async function confirmUpdateDownload(
-  dialog: UpdateDialogLike,
-  logger: UpdateLogger,
-  info: unknown,
-): Promise<boolean> {
-  const version = updateVersion(info)
-  const detail = version
-    ? `发现 MO.K ${version}。确认后将自动下载，下载完成时会关闭并重启应用以完成安装。`
-    : '发现 MO.K 新版本。确认后将自动下载，下载完成时会关闭并重启应用以完成安装。'
-  try {
-    const result = await dialog.showMessageBox({
-      buttons: ['暂不更新', '下载并安装'],
-      cancelId: 0,
-      defaultId: 1,
-      detail,
-      message: 'MO.K 有可用更新',
-      noLink: true,
-      title: 'MO.K 更新',
-      type: 'info',
-    })
-    return result.response === 1
-  } catch (error) {
-    logger.error('[updater] update prompt failed', errorMessage(error))
-    return false
   }
 }
 
@@ -96,18 +59,55 @@ function installDownloadedUpdate(
 }
 
 export function initializeAutoUpdates(options: {
-  dialog: UpdateDialogLike
   enabled: boolean
   logger?: UpdateLogger
+  onStateChange?: (state: DesktopUpdateState) => void
   updater: UpdaterLike
-}): boolean {
+}): AutoUpdateController | null {
   const logger = options.logger ?? console
   if (!options.enabled) {
     logger.info('[updater] disabled outside packaged production')
-    return false
+    return null
   }
 
   const { updater } = options
+  let state: DesktopUpdateState = { status: 'idle' }
+  let availableVersion: string | null = null
+  let downloadRequested = false
+  let downloadPromise: Promise<boolean> | null = null
+
+  const setState = (nextState: DesktopUpdateState) => {
+    state = nextState
+    options.onStateChange?.(state)
+  }
+
+  const controller: AutoUpdateController = {
+    getState: () => state,
+    download: () => {
+      if (downloadPromise) return downloadPromise
+      if (state.status !== 'available') return Promise.resolve(false)
+
+      downloadRequested = true
+      setState({
+        status: 'downloading',
+        version: availableVersion,
+        percent: 0,
+      })
+      downloadPromise = updater.downloadUpdate()
+        .then(() => true)
+        .catch((error) => {
+          logger.error('[updater] update download failed', errorMessage(error))
+          downloadRequested = false
+          setState({ status: 'available', version: availableVersion })
+          return false
+        })
+        .finally(() => {
+          downloadPromise = null
+        })
+      return downloadPromise
+    },
+  }
+
   updater.autoDownload = false
   updater.autoInstallOnAppQuit = true
   updater.on('error', (error) => {
@@ -115,26 +115,31 @@ export function initializeAutoUpdates(options: {
   })
   updater.on('update-not-available', () => {
     logger.info('[updater] no update available')
+    setState({ status: 'idle' })
   })
-  let downloadApproved = false
-  let updatePromptShown = false
   updater.on('update-available', (info) => {
-    logger.info('[updater] update available', updateVersion(info) ?? 'unknown')
-    if (updatePromptShown) return
-    updatePromptShown = true
-    void confirmUpdateDownload(options.dialog, logger, info).then((approved) => {
-      if (!approved) return
-      downloadApproved = true
-      return downloadUpdate(updater, logger)
+    if (downloadRequested) return
+    availableVersion = updateVersion(info)
+    logger.info('[updater] update available', availableVersion ?? 'unknown')
+    setState({ status: 'available', version: availableVersion })
+  })
+  updater.on('download-progress', (info) => {
+    if (!downloadRequested) return
+    const percent = updatePercent(info)
+    if (percent === null) return
+    setState({
+      status: 'downloading',
+      version: availableVersion,
+      percent,
     })
   })
   updater.on('update-downloaded', (info) => {
     logger.info('[updater] update downloaded', updateVersion(info) ?? 'unknown')
-    if (downloadApproved) {
-      installDownloadedUpdate(updater, logger)
-    }
+    if (!downloadRequested) return
+    setState({ status: 'installing', version: availableVersion })
+    installDownloadedUpdate(updater, logger)
   })
 
   void checkForUpdates(updater, logger)
-  return true
+  return controller
 }

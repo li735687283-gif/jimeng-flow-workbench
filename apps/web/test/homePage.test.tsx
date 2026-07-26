@@ -97,6 +97,42 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('/api/assets/asset_showcase/file'), true)
 })
 
+test('home page shows a compact update badge and circular download progress', async () => {
+  const { HomePage } = await import('../src/components/HomePage')
+  const baseProps = {
+    recentFlows: [],
+    showcaseAssets: [],
+    workAssets: [],
+    mokHeroImageUrl: '/mok-hero-test.png',
+    onCreateFlow: () => undefined,
+    onOpenFlow: () => undefined,
+    onOpenAllFlows: () => undefined,
+    onOpenAssetLibrary: () => undefined,
+    onOpenSettings: () => undefined,
+  }
+
+  const availableHtml = renderToStaticMarkup(
+    <HomePage
+      {...baseProps}
+      updateState={{ status: 'available', version: '0.1.4' }}
+      onDownloadUpdate={() => undefined}
+    />,
+  )
+  assert.equal(availableHtml.includes('home-update-indicator is-available'), true)
+  assert.equal(availableHtml.includes('有新版本，是否下载？'), true)
+  assert.equal(availableHtml.includes('有新版本 0.1.4，点击下载'), true)
+
+  const downloadingHtml = renderToStaticMarkup(
+    <HomePage
+      {...baseProps}
+      updateState={{ status: 'downloading', version: '0.1.4', percent: 42 }}
+    />,
+  )
+  assert.equal(downloadingHtml.includes('role="progressbar"'), true)
+  assert.equal(downloadingHtml.includes('aria-valuenow="42"'), true)
+  assert.equal(downloadingHtml.includes('home-update-progress-value'), true)
+})
+
 test('home page uses quiet empty states without fake projects or assets', async () => {
   const { HomePage } = await import('../src/components/HomePage')
 

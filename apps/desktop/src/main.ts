@@ -1,8 +1,13 @@
 import { dirname, join, resolve } from 'node:path'
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import {
+  DESKTOP_UPDATE_CHANNELS,
+  type DesktopUpdateState,
+} from '@jimeng-flow/shared/desktopUpdate'
+import {
   initializeAutoUpdates,
+  type AutoUpdateController,
   type UpdaterLike,
 } from './autoUpdate'
 import {
@@ -25,6 +30,24 @@ if (configuredUserData) {
 }
 
 let serverHandle: LocalServerHandle | null = null
+let updateController: AutoUpdateController | null = null
+
+function broadcastUpdateState(state: DesktopUpdateState): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(DESKTOP_UPDATE_CHANNELS.stateChanged, state)
+  }
+}
+
+function registerUpdateIpc(): void {
+  ipcMain.handle(
+    DESKTOP_UPDATE_CHANNELS.getState,
+    () => updateController?.getState() ?? { status: 'idle' },
+  )
+  ipcMain.handle(
+    DESKTOP_UPDATE_CHANNELS.download,
+    () => updateController?.download() ?? false,
+  )
+}
 
 async function createMainWindow(): Promise<BrowserWindow> {
   const mainWindow = new BrowserWindow(
@@ -79,15 +102,14 @@ async function startDesktop(): Promise<void> {
     workspaceDir,
   })
 
-  await createMainWindow()
-  initializeAutoUpdates({
-    dialog: {
-      showMessageBox: (options) => dialog.showMessageBox(options),
-    },
+  updateController = initializeAutoUpdates({
     enabled:
       app.isPackaged && process.env.MOK_DISABLE_AUTO_UPDATE !== '1',
+    onStateChange: broadcastUpdateState,
     updater: autoUpdater as unknown as UpdaterLike,
   })
+  registerUpdateIpc()
+  await createMainWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow()

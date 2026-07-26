@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
   ChevronRight,
+  Download,
   Film,
   FolderClock,
   Images,
@@ -11,6 +12,7 @@ import {
   Settings,
   Trash2,
 } from 'lucide-react'
+import type { DesktopUpdateState } from '@jimeng-flow/shared/desktopUpdate'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
@@ -29,6 +31,8 @@ export interface HomePageProps {
   logoImageUrl?: string
   loadingFlows?: boolean
   loadingAssets?: boolean
+  updateState?: DesktopUpdateState
+  onDownloadUpdate?: () => void
   onCreateFlow: () => void
   onOpenFlow: (id: string) => void
   onOpenAllFlows: () => void
@@ -38,6 +42,60 @@ export interface HomePageProps {
   onPlayVideo?: (src: string, title?: string) => void
   onRenameFlow?: (id: string, name: string) => void
   onDeleteFlow?: (id: string) => void
+}
+
+const UPDATE_PROGRESS_CIRCUMFERENCE = 2 * Math.PI * 9
+
+function HomeUpdateIndicator({
+  state,
+  onDownload,
+}: {
+  state: DesktopUpdateState
+  onDownload?: () => void
+}) {
+  if (state.status === 'idle') return null
+
+  if (state.status === 'available') {
+    const versionLabel = state.version ? ` ${state.version}` : ''
+    return (
+      <button
+        type="button"
+        className="home-update-indicator is-available"
+        aria-label={`有新版本${versionLabel}，点击下载`}
+        data-tooltip="有新版本，是否下载？"
+        onClick={onDownload}
+      >
+        <Download size={13} strokeWidth={2.6} aria-hidden="true" />
+      </button>
+    )
+  }
+
+  const installing = state.status === 'installing'
+  const percent = installing ? 100 : Math.round(state.percent)
+  const progressOffset = UPDATE_PROGRESS_CIRCUMFERENCE * (1 - percent / 100)
+  return (
+    <span
+      className={`home-update-indicator is-progress${installing ? ' is-installing' : ''}`}
+      role="progressbar"
+      aria-label={installing ? '下载完成，正在安装' : `正在下载更新 ${percent}%`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+      data-tooltip={installing ? '下载完成，正在安装…' : `正在下载 ${percent}%`}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle className="home-update-progress-track" cx="12" cy="12" r="9" />
+        <circle
+          className="home-update-progress-value"
+          cx="12"
+          cy="12"
+          r="9"
+          strokeDasharray={UPDATE_PROGRESS_CIRCUMFERENCE}
+          strokeDashoffset={progressOffset}
+        />
+      </svg>
+    </span>
+  )
 }
 
 function assetLabel(asset: Asset): string {
@@ -290,6 +348,8 @@ export function HomePage({
   logoImageUrl,
   loadingFlows = false,
   loadingAssets = false,
+  updateState = { status: 'idle' },
+  onDownloadUpdate,
   onCreateFlow,
   onOpenFlow,
   onOpenAllFlows,
@@ -355,6 +415,10 @@ export function HomePage({
               </button>
             </div>
           </div>
+          <HomeUpdateIndicator
+            state={updateState}
+            onDownload={onDownloadUpdate}
+          />
           <span className="home-brand-name">MO.K</span>
         </div>
       </header>

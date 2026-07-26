@@ -19,6 +19,7 @@ import { useFlowStore } from './state/flowStore'
 import { useSettingsStore } from './state/settingsStore'
 import { useVideoPlayerStore } from './state/videoPlayerStore'
 import { useAutoSave } from './hooks/useAutoSave'
+import { useDesktopUpdate } from './hooks/useDesktopUpdate'
 import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
@@ -107,6 +108,7 @@ function AppInner() {
   const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
   const [galleryWorks, setGalleryWorks] = useState<ManagedWork[]>([])
   const [assetsLoading, setAssetsLoading] = useState(false)
+  const { downloadUpdate, updateState } = useDesktopUpdate()
 
   const addNode = useCanvasStore((s) => s.addNode)
   const nodes = useCanvasStore((s) => s.nodes)
@@ -356,6 +358,10 @@ function AppInner() {
           logoImageUrl={agentAvatarUrl}
           loadingFlows={flowsLoading}
           loadingAssets={assetsLoading}
+          updateState={updateState}
+          onDownloadUpdate={() => {
+            void downloadUpdate()
+          }}
           onCreateFlow={handleCreateFlow}
           onOpenFlow={handleOpenFlow}
           onOpenAllFlows={() => setOpenModalOpen(true)}
