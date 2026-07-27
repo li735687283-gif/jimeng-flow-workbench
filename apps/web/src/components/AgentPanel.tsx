@@ -795,7 +795,9 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                           </div>
                         )}
                         {result && (
-                          <div className="agent-action-card-result">{result.summary}</div>
+                          <div className="agent-action-card-result">
+                            {result.displaySummary ?? result.summary}
+                          </div>
                         )}
                       </div>
                     )

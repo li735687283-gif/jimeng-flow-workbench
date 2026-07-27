@@ -24,6 +24,8 @@ export interface AgentToolResult {
   ok: boolean
   /** 给模型看的结果摘要，例如「已创建图片节点 node_123 并提交生成」 */
   summary: string
+  /** 给用户看的简短结果（不含节点 id、任务号等内部信息）；缺省时回退显示 summary */
+  displaySummary?: string
 }
 
 /** Agent 消息角色 */

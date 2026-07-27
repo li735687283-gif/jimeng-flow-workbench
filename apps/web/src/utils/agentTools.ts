@@ -75,8 +75,8 @@ interface CanvasNodeLike {
   position?: { x: number; y: number }
 }
 
-function ok(call: AgentToolCall, summary: string): AgentToolResult {
-  return { callId: call.id, tool: call.tool, ok: true, summary }
+function ok(call: AgentToolCall, summary: string, displaySummary?: string): AgentToolResult {
+  return { callId: call.id, tool: call.tool, ok: true, summary, displaySummary }
 }
 
 function fail(call: AgentToolCall, summary: string): AgentToolResult {
@@ -472,6 +472,7 @@ async function runGenerateImage(
     return ok(
       call,
       `已创建图片节点 ${imageNodeId} 并提交生成（任务 ${response.id}，${count} 张 ${aspectRatio}），生成完成后图片会自动出现在该节点。`,
+      `已创建图片节点并提交生成（${count} 张 ${aspectRatio}），完成后图片会自动出现在画布上。`,
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -667,6 +668,9 @@ async function runGenerateVideo(
       existingVideoNodeId
         ? `已在视频节点 ${videoNodeId} 上重新提交生成（任务 ${response.id}），完成后视频会自动出现在该节点。`
         : `已创建视频节点 ${videoNodeId} 并提交生成（任务 ${response.id}），完成后视频会自动出现在该节点。`,
+      existingVideoNodeId
+        ? '已在原视频节点上重新提交生成，完成后视频会自动更新。'
+        : '已创建视频节点并提交生成，完成后视频会自动出现在画布上。',
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -780,7 +784,11 @@ async function runEditImage(
 
     return response.status === 'error'
       ? fail(call, `图片编辑失败：${response.error ?? '未知错误'}`)
-      : ok(call, `已创建编辑节点 ${imageNodeId}，生成 ${outputAssetIds.length} 张结果图。`)
+      : ok(
+          call,
+          `已创建编辑节点 ${imageNodeId}，生成 ${outputAssetIds.length} 张结果图。`,
+          `图片编辑完成，生成了 ${outputAssetIds.length} 张结果图。`,
+        )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     generateStore.setError(imageNodeId, message)
@@ -794,7 +802,7 @@ async function runEditImage(
 }
 
 function runReadCanvas(call: AgentToolCall): AgentToolResult {
-  return ok(call, describeCanvas(useCanvasStore.getState().nodes))
+  return ok(call, describeCanvas(useCanvasStore.getState().nodes), '已读取画布内容。')
 }
 
 /** 执行一个工具调用，返回可回传给模型的结果摘要。 */

@@ -176,3 +176,17 @@ test('agent-created generations notify the chat when they fail in the background
   assert.equal((source.match(/data\.status === 'error'/g) ?? []).length >= 2, true)
   assert.equal((source.match(/notifyAgentGenerationFailure\(/g) ?? []).length >= 5, true)
 })
+
+test('tool results carry a user-facing displaySummary free of internal ids', () => {
+  // summary 是给模型看的工作日志(带节点 id / 任务号);面板必须展示
+  // displaySummary,不能把内部编号糊到用户脸上。
+  const source = readFileSync('apps/web/src/utils/agentTools.ts', 'utf8')
+  const panel = readFileSync('apps/web/src/components/AgentPanel.tsx', 'utf8')
+  // 四类工具的成功结果都要提供用户友好文案
+  assert.match(source, /已创建图片节点并提交生成（\$\{count\} 张 \$\{aspectRatio\}）/)
+  assert.match(source, /已创建视频节点并提交生成，完成后视频会自动出现在画布上。/)
+  assert.match(source, /图片编辑完成，生成了 \$\{outputAssetIds\.length\} 张结果图。/)
+  assert.match(source, /已读取画布内容。/)
+  // 面板渲染优先 displaySummary
+  assert.match(panel, /result\.displaySummary \?\? result\.summary/)
+})
