@@ -44,7 +44,7 @@ export interface HomePageProps {
   onDeleteFlow?: (id: string) => void
 }
 
-const UPDATE_PROGRESS_CIRCUMFERENCE = 2 * Math.PI * 9
+const UPDATE_PROGRESS_CIRCUMFERENCE = 2 * Math.PI * 6
 
 function HomeUpdateIndicator({
   state,
@@ -60,12 +60,12 @@ function HomeUpdateIndicator({
     return (
       <button
         type="button"
-        className="home-update-indicator is-available"
+        className="home-update-pill is-available"
         aria-label={`有新版本${versionLabel}，点击下载`}
-        data-tooltip="有新版本，是否下载？"
         onClick={onDownload}
       >
-        <Download size={13} strokeWidth={2.6} aria-hidden="true" />
+        <Download size={12} strokeWidth={2.4} aria-hidden="true" />
+        <span>新版本{versionLabel}</span>
       </button>
     )
   }
@@ -75,25 +75,25 @@ function HomeUpdateIndicator({
   const progressOffset = UPDATE_PROGRESS_CIRCUMFERENCE * (1 - percent / 100)
   return (
     <span
-      className={`home-update-indicator is-progress${installing ? ' is-installing' : ''}`}
+      className={`home-update-pill is-progress${installing ? ' is-installing' : ''}`}
       role="progressbar"
       aria-label={installing ? '下载完成，正在安装' : `正在下载更新 ${percent}%`}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={percent}
-      data-tooltip={installing ? '下载完成，正在安装…' : `正在下载 ${percent}%`}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle className="home-update-progress-track" cx="12" cy="12" r="9" />
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle className="home-update-progress-track" cx="8" cy="8" r="6" />
         <circle
           className="home-update-progress-value"
-          cx="12"
-          cy="12"
-          r="9"
+          cx="8"
+          cy="8"
+          r="6"
           strokeDasharray={UPDATE_PROGRESS_CIRCUMFERENCE}
           strokeDashoffset={progressOffset}
         />
       </svg>
+      <span>{installing ? '安装中…' : `${percent}%`}</span>
     </span>
   )
 }
@@ -415,11 +415,11 @@ export function HomePage({
               </button>
             </div>
           </div>
+          <span className="home-brand-name">MO.K</span>
           <HomeUpdateIndicator
             state={updateState}
             onDownload={onDownloadUpdate}
           />
-          <span className="home-brand-name">MO.K</span>
         </div>
       </header>
 

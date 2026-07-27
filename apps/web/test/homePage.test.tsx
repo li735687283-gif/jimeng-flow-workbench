@@ -97,7 +97,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('/api/assets/asset_showcase/file'), true)
 })
 
-test('home page shows a compact update badge and circular download progress', async () => {
+test('home page shows a compact update pill and circular download progress', async () => {
   const { HomePage } = await import('../src/components/HomePage')
   const baseProps = {
     recentFlows: [],
@@ -118,8 +118,8 @@ test('home page shows a compact update badge and circular download progress', as
       onDownloadUpdate={() => undefined}
     />,
   )
-  assert.equal(availableHtml.includes('home-update-indicator is-available'), true)
-  assert.equal(availableHtml.includes('有新版本，是否下载？'), true)
+  assert.equal(availableHtml.includes('home-update-pill is-available'), true)
+  assert.equal(availableHtml.includes('新版本 0.1.4'), true)
   assert.equal(availableHtml.includes('有新版本 0.1.4，点击下载'), true)
 
   const downloadingHtml = renderToStaticMarkup(
