@@ -8,14 +8,17 @@
 
 | 编号 | 级别 | 状态 | 问题摘要 |
 | --- | --- | --- | --- |
-| BUG-001 | P1 功能错误 | 待修复 | 普通 OpenAI-compatible 图片供应商忽略 1K/2K/4K 分辨率选择 |
-| BUG-002 | P1 功能错误 | 待修复 | 非法 MIME 类型文件上传被接受并被错误识别为图片 |
-| BUG-003 | P1 安全/功能错误 | 待修复 | 生成输入图片路径允许绝对路径和目录穿越路径 |
-| BUG-004 | P2 边界问题 | 待修复 | 缺少 nodes/edges 的旧格式或损坏项目可能导致生成状态写回崩溃 |
+| BUG-001 | P1 功能错误 | 已修复 | 普通 OpenAI-compatible 图片供应商忽略 1K/2K/4K 分辨率选择 |
+| BUG-002 | P1 功能错误 | 已修复 | 非法 MIME 类型文件上传被接受并被错误识别为图片 |
+| BUG-003 | P1 安全/功能错误 | 已修复 | 生成输入图片路径允许绝对路径和目录穿越路径 |
+| BUG-004 | P2 边界问题 | 已修复 | 缺少 nodes/edges 的旧格式或损坏项目可能导致生成状态写回崩溃 |
+
+当前状态复核日期：2026-07-27。下文保留最初发现时的复现证据和代码位置；修复后的行为分别由 OpenAI-compatible 图片尺寸、上传类型校验、生成输入路径边界和旧项目归一化测试覆盖。
 
 ## BUG-001：普通 OpenAI-compatible 图片路径忽略分辨率设置
 
 - 级别：P1 功能错误
+- 当前状态（2026-07-27）：已修复。文本生成与图片编辑共用统一的 1K/2K/4K 尺寸映射，并有供应商请求参数测试覆盖。
 - 代码位置：
   - `apps/server/src/services/openaiImage.ts:327`
   - 同一文件编辑图片请求组装逻辑约 `apps/server/src/services/openaiImage.ts:300-313`
@@ -35,6 +38,7 @@
 ## BUG-002：非法 MIME 类型上传成功并被识别为图片
 
 - 级别：P1 功能错误
+- 当前状态（2026-07-27）：已修复。JSON 与 multipart 上传会同时校验支持的扩展名和 MIME 类型，不支持或不匹配的文件返回 4xx。
 - 代码位置：
   - `apps/server/src/routes/assets.ts:261`
   - `apps/server/src/routes/assets.ts:289`
@@ -54,6 +58,7 @@
 ## BUG-003：生成输入图片路径允许绝对路径和目录穿越
 
 - 级别：P1 安全/功能错误
+- 当前状态（2026-07-27）：已修复。生成输入只接受合法素材引用、数据 URL 或工作区内路径，绝对路径和目录穿越会在调用供应商前被拒绝。
 - 代码位置：
   - `apps/server/src/config/index.ts:59-65`
   - `apps/server/src/services/jimeng/index.ts:279-295`
@@ -80,6 +85,7 @@
 ## BUG-004：缺少 nodes/edges 的项目可能导致生成状态写回崩溃
 
 - 级别：P2 边界问题
+- 当前状态（2026-07-27）：已修复。缺失的 `nodes` 或 `edges` 会归一化为空数组；字段类型损坏时返回明确错误。
 - 代码位置：
   - `apps/server/src/services/flows.ts:281`
   - `apps/server/src/services/generations.ts:174-178`
