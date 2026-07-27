@@ -5,6 +5,10 @@ export interface ApiHealthResponse {
   status: "ok" | "error";
   service?: string;
   timestamp?: number;
+  /** 服务进程 PID，供桌面端识别并清理残留进程。 */
+  pid?: number;
+  /** 是否提供前端页面（启动时带了 webRoot）。 */
+  servesApp?: boolean;
 }
 
 /** 节点类型枚举（占位示例，后续按 PRD 扩展） */

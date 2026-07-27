@@ -42,6 +42,8 @@ export function createApp(
       status: 'ok',
       service: 'jimeng-flow-server',
       timestamp: Date.now(),
+      pid: process.pid,
+      servesApp: Boolean(options.webRoot),
     }
     return body
   })

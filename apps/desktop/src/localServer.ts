@@ -19,10 +19,15 @@ export interface LocalServerHandle {
   process: ChildProcess | null
 }
 
-export async function probeLocalServer(
+export interface LocalServerHealth {
+  state: LocalServerState
+  pid?: number
+}
+
+export async function probeLocalServerHealth(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 1_000,
-): Promise<LocalServerState> {
+): Promise<LocalServerHealth> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -30,19 +35,31 @@ export async function probeLocalServer(
       signal: controller.signal,
     })
     const body = await response.json() as {
+      pid?: unknown
       service?: unknown
       status?: unknown
     }
-    return response.ok &&
+    const state = response.ok &&
       body.status === 'ok' &&
       body.service === LOCAL_SERVER_SERVICE
       ? 'ready'
       : 'occupied'
+    return {
+      state,
+      pid: typeof body.pid === 'number' ? body.pid : undefined,
+    }
   } catch {
-    return 'unavailable'
+    return { state: 'unavailable' }
   } finally {
     clearTimeout(timeout)
   }
+}
+
+export async function probeLocalServer(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 1_000,
+): Promise<LocalServerState> {
+  return (await probeLocalServerHealth(fetchImpl, timeoutMs)).state
 }
 
 export async function probeCanvasPage(
@@ -72,6 +89,7 @@ export function createServerEnvironment(options: {
   const environment: NodeJS.ProcessEnv = {
     ...options.baseEnv,
     ELECTRON_RUN_AS_NODE: '1',
+    MOK_PARENT_PID: String(process.pid),
     MOK_PROJECT_ROOT: resolve(options.projectRoot),
     MOK_WORKSPACE_DIR: resolve(options.workspaceDir),
     PORT: '8787',
@@ -86,10 +104,34 @@ function wait(delayMs: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs))
 }
 
+type KillProcess = (pid: number) => void
+
+const STALE_SERVER_STOP_TIMEOUT_MS = 3_000
+
+// 结束一个确认属于 MO.K 的残留服务进程，并等它把端口让出来。
+async function stopStaleLocalServer(
+  pid: number,
+  fetchImpl: typeof fetch,
+  killImpl: KillProcess,
+): Promise<void> {
+  killImpl(pid)
+  const deadline = Date.now() + STALE_SERVER_STOP_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    await wait(150)
+    const { state } = await probeLocalServerHealth(fetchImpl)
+    if (state === 'unavailable') return
+  }
+  throw new Error(
+    'A stale MO.K server on port 8787 did not stop in time. ' +
+      'Close it manually, then start MO.K again.',
+  )
+}
+
 export async function startOrReuseLocalServer(options: {
   entryPath: string
   execPath: string
   fetchImpl?: typeof fetch
+  killImpl?: KillProcess
   projectRoot: string
   spawnImpl?: SpawnServer
   startupTimeoutMs?: number
@@ -97,17 +139,30 @@ export async function startOrReuseLocalServer(options: {
   workspaceDir: string
 }): Promise<LocalServerHandle> {
   const fetchImpl = options.fetchImpl ?? fetch
-  const initialState = await probeLocalServer(fetchImpl)
+  const initialHealth = await probeLocalServerHealth(fetchImpl)
+  let initialState = initialHealth.state
   if (initialState === 'ready') {
     // 打包模式下，8787 上可能是一个不提供前端页面的开发服务器；
     // 直接复用会让窗口只拿到 /canvas 的 404，呈现为黑屏。
     if (options.webRoot && !(await probeCanvasPage(fetchImpl))) {
-      throw new Error(
-        'Port 8787 is running a MO.K server that does not serve the app ' +
-          '(most likely `npm run dev`). Stop it, then start MO.K again.',
-      )
+      if (typeof initialHealth.pid === 'number') {
+        // 健康响应带了 PID，说明是确认属于 MO.K 的残留进程，
+        // 自动清理后重新启动，不再让用户手动处理。
+        await stopStaleLocalServer(
+          initialHealth.pid,
+          fetchImpl,
+          options.killImpl ?? ((pid) => process.kill(pid)),
+        )
+        initialState = 'unavailable'
+      } else {
+        throw new Error(
+          'Port 8787 is running a MO.K server that does not serve the app ' +
+            '(most likely `npm run dev`). Stop it, then start MO.K again.',
+        )
+      }
+    } else {
+      return { owned: false, process: null }
     }
-    return { owned: false, process: null }
   }
   if (initialState === 'occupied') {
     throw new Error('Port 8787 is already used by a service other than MO.K.')

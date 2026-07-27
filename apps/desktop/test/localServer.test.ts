@@ -20,6 +20,16 @@ function healthResponse(service = 'jimeng-flow-server'): Response {
   })
 }
 
+function healthResponseWithPid(pid: number): Response {
+  return new Response(
+    JSON.stringify({ pid, service: 'jimeng-flow-server', status: 'ok' }),
+    {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    },
+  )
+}
+
 function createFakeChild(): ChildProcess & { killCalls: number } {
   const child = new EventEmitter() as ChildProcess & { killCalls: number }
   Object.defineProperty(child, 'exitCode', { configurable: true, value: null })
@@ -63,6 +73,7 @@ test('server environment keeps the backend on the fixed loopback port and stable
     resolve('C:', 'Users', 'test', 'MO.K', 'workspace'),
   )
   assert.equal(environment.MOK_WEB_ROOT, resolve('C:', 'MO.K', 'web'))
+  assert.equal(environment.MOK_PARENT_PID, String(process.pid))
 })
 
 test('desktop reuses an existing MO.K server without spawning or owning it', async () => {
@@ -84,7 +95,7 @@ test('desktop reuses an existing MO.K server without spawning or owning it', asy
   assert.equal(handle.process, null)
 })
 
-test('packaged desktop refuses to reuse a server that cannot serve the app', async () => {
+test('packaged desktop refuses a stale server without a process identity', async () => {
   let spawnCalls = 0
   await assert.rejects(
     startOrReuseLocalServer({
@@ -107,6 +118,64 @@ test('packaged desktop refuses to reuse a server that cannot serve the app', asy
     /does not serve the app/,
   )
   assert.equal(spawnCalls, 0)
+})
+
+test('packaged desktop replaces a stale MO.K server that has a pid', async () => {
+  let killedPid: number | null = null
+  let spawnCalls = 0
+  const child = createFakeChild()
+  const handle = await startOrReuseLocalServer({
+    entryPath: 'server.cjs',
+    execPath: 'electron.exe',
+    fetchImpl: async (url) => {
+      if (String(url) === LOCAL_CANVAS_URL) {
+        return new Response('Not Found', { status: 404 })
+      }
+      // 残留进程被 kill 前端口仍在服务；kill 后端口释放；
+      // spawn 新进程后健康检查恢复。
+      if (killedPid === null) return healthResponseWithPid(1234)
+      if (spawnCalls === 0) throw new Error('connection refused')
+      return healthResponseWithPid(5678)
+    },
+    killImpl: (pid) => {
+      killedPid = pid
+    },
+    projectRoot: 'project',
+    spawnImpl: () => {
+      spawnCalls += 1
+      return child
+    },
+    startupTimeoutMs: 1_000,
+    webRoot: 'web',
+    workspaceDir: 'workspace',
+  })
+
+  assert.equal(killedPid, 1234)
+  assert.equal(spawnCalls, 1)
+  assert.equal(handle.owned, true)
+  assert.equal(handle.process, child)
+})
+
+test('packaged desktop reports a stale server that refuses to stop', { timeout: 10_000 }, async () => {
+  await assert.rejects(
+    startOrReuseLocalServer({
+      entryPath: 'server.cjs',
+      execPath: 'electron.exe',
+      fetchImpl: async (url) => {
+        if (String(url) === LOCAL_CANVAS_URL) {
+          return new Response('Not Found', { status: 404 })
+        }
+        // kill 之后端口仍被占用，模拟结束不掉的残留进程。
+        return healthResponseWithPid(1234)
+      },
+      killImpl: () => {},
+      projectRoot: 'project',
+      spawnImpl: () => createFakeChild(),
+      webRoot: 'web',
+      workspaceDir: 'workspace',
+    }),
+    /did not stop in time/,
+  )
 })
 
 test('packaged desktop reuses a healthy server that serves the app', async () => {
