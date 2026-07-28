@@ -71,6 +71,8 @@
 - 供应商选择集中在 Server 的生成服务和共享设置模型中。React 组件不得按 Dreamina、Codex、OpenAI 等供应商分别复制完整业务流程。
 - Kimi API、Kimi Coding Plan 与 DeepSeek 使用各自独立的 Base URL 和 API Key；不得共享字段、互相回退或用一个入口覆盖另一个入口。
 - 浏览器 localStorage 只适合视图偏好、最近项目、生成默认值等轻量客户端状态；项目内容、素材和运行时设置以 Server 持久化为准。
+- 画布与首页的图片展示统一走缩略图接口（`/api/assets/:id/thumb?w=`，服务端按需生成并落盘缓存）；原图只用于大图预览、编辑器和下载。新增图片展示场景必须沿用缩略图，不得在列表/节点里直接渲染 4K 原图。
+- 画布编组使用 `groupFrame` 画框节点加成员 `data.groupId` 标记，不引入 React Flow `parentId` 子流；窗口控制按钮为渲染层自绘（`WindowControls`），不恢复原生 `titleBarOverlay`。
 
 ## 编码与修改规则
 
