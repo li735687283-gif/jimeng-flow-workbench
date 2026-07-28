@@ -47,17 +47,29 @@ export function WindowControls() {
   }
 
   return (
-    <div
-      className={`window-controls-zone${visible ? ' visible' : ''}`}
-      onMouseEnter={show}
-      onMouseLeave={scheduleHide}
-    >
-      <div className="window-controls-notch" aria-hidden="true">
-        <svg width="14" height="6" viewBox="0 0 14 6" fill="none">
+    <div className={`window-controls-zone${visible ? ' visible' : ''}`}>
+      {/* 只有与缺口箭头本身交互才落下按钮栏；栏内空白与画布 hover 不触发 */}
+      <button
+        type="button"
+        className="window-controls-notch"
+        aria-label="显示窗口控制按钮"
+        aria-expanded={visible}
+        onMouseEnter={show}
+        onMouseLeave={scheduleHide}
+        onFocus={show}
+        onBlur={scheduleHide}
+      >
+        <svg width="14" height="6" viewBox="0 0 14 6" fill="none" aria-hidden="true">
           <path d="M1 1l6 4 6-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
-      </div>
-      <div className="window-controls" role="toolbar" aria-label="窗口控制">
+      </button>
+      <div
+        className="window-controls"
+        role="toolbar"
+        aria-label="窗口控制"
+        onMouseEnter={show}
+        onMouseLeave={scheduleHide}
+      >
         <button
           type="button"
           className="window-controls-button"
