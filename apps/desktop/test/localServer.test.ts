@@ -58,21 +58,24 @@ test('local server probe distinguishes MO.K from another service on port 8787', 
 })
 
 test('server environment keeps the backend on the fixed loopback port and stable paths', () => {
+  const projectRoot = join('C:', 'MO.K', 'project')
+  const webRoot = join('C:', 'MO.K', 'web')
+  const workspaceDir = join('C:', 'Users', 'test', 'MO.K', 'workspace')
   const environment = createServerEnvironment({
     baseEnv: { PATH: 'test-path' },
-    projectRoot: join('C:', 'MO.K', 'project'),
-    webRoot: join('C:', 'MO.K', 'web'),
-    workspaceDir: join('C:', 'Users', 'test', 'MO.K', 'workspace'),
+    projectRoot,
+    webRoot,
+    workspaceDir,
   })
 
   assert.equal(environment.PORT, '8787')
   assert.equal(environment.ELECTRON_RUN_AS_NODE, '1')
-  assert.equal(environment.MOK_PROJECT_ROOT, resolve('C:', 'MO.K', 'project'))
+  assert.equal(environment.MOK_PROJECT_ROOT, resolve(projectRoot))
   assert.equal(
     environment.MOK_WORKSPACE_DIR,
-    resolve('C:', 'Users', 'test', 'MO.K', 'workspace'),
+    resolve(workspaceDir),
   )
-  assert.equal(environment.MOK_WEB_ROOT, resolve('C:', 'MO.K', 'web'))
+  assert.equal(environment.MOK_WEB_ROOT, resolve(webRoot))
   assert.equal(environment.MOK_PARENT_PID, String(process.pid))
 })
 
