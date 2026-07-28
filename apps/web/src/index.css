@@ -21,12 +21,10 @@
   --status-error: #a8a8a8;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   --shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.45);
-  /* 画布节点阴影：全类型统一单层，仅 hover/selected 做克制的差异化 */
-  --node-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  --node-shadow-hover: 0 12px 30px rgba(0, 0, 0, 0.42);
-  --node-shadow-selected:
-    0 8px 24px rgba(0, 0, 0, 0.35),
-    0 0 20px rgba(74, 158, 255, 0.16);
+  /* 画布节点不使用阴影（用户视觉决策 0.2.3），保留令牌便于状态规则统一引用 */
+  --node-shadow: none;
+  --node-shadow-hover: none;
+  --node-shadow-selected: none;
 
   font: 13px/1.5 var(--font-ui);
   letter-spacing: 0.1px;
