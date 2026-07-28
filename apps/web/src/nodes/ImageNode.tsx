@@ -103,7 +103,10 @@ import {
   type PersistedImageEditorPatch,
 } from '../utils/imageEditorState'
 import { resumeGenerationSubscription } from '../utils/generationResume'
-import { replaceGenerationSubscription } from '../utils/generationSubscription'
+import {
+  hasExternalGenerationSubscription,
+  replaceGenerationSubscription,
+} from '../utils/generationSubscription'
 import {
   releaseGenerationSubmission,
   tryAcquireGenerationSubmission,
@@ -272,6 +275,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     if (!nodeData.generationId) return
     if (nodeData.status !== 'running' && nodeData.status !== 'queued') return
     if (generationUnsubscribeRef.current) return
+    // 组件外发起的生成（如宫格生成）已在跟踪该任务，
+    // 再恢复订阅会形成双重订阅，把 success 覆盖回 running
+    if (hasExternalGenerationSubscription(id)) return
     const unsubscribe = resumeGenerationSubscription({
       nodeId: id,
       generationId: nodeData.generationId,
