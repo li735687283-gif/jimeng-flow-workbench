@@ -15,6 +15,7 @@ import type {
   EdgeChange,
 } from '@xyflow/react'
 import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNode'
+import { GRID_PRESET_CONFIGS, buildGridImagePrompt } from '@jimeng-flow/shared/grid'
 import type { VideoMode } from '@jimeng-flow/shared/videoNode'
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
@@ -38,6 +39,8 @@ const VIDEO_MODES = new Set<VideoMode>([
 ])
 
 type UpscaleResolution = '2k' | '4k' | '8k'
+
+type GridGeneratePreset = '2x2' | '3x3' | '4x4'
 
 function getAssetId(node: Node | undefined): string | null {
   const data = node?.data as BaseNodeData | undefined
@@ -337,6 +340,7 @@ interface CanvasState {
     sourceId: string,
     resolution: UpscaleResolution,
   ) => string
+  createGridImageNode: (sourceId: string, grid: GridGeneratePreset) => string
   removeNode: (id: string) => void
   clearDeletedNodeIds: () => void
   removeEdge: (id: string) => void
@@ -487,6 +491,65 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       inputImageAssetIds: assetId ? [assetId] : [],
       upscaleSourceNodeId: sourceId,
       upscaleResolution: resolution,
+      width: sourceData.width,
+      height: sourceData.height,
+      ratio: sourceData.ratio,
+    }
+    const derivedNode: Node = {
+      ...node,
+      data: nextData,
+    }
+
+    set((state) => ({
+      nodes: [...state.nodes, derivedNode],
+      edges: addEdge(
+        {
+          source: sourceId,
+          target: derivedNode.id,
+          sourceHandle: null,
+          targetHandle: null,
+          type: 'cut',
+        },
+        state.edges,
+      ),
+      selectedNodeId: derivedNode.id,
+    }))
+    return derivedNode.id
+  },
+
+  createGridImageNode: (sourceId, grid) => {
+    const nodes = get().nodes
+    const source = nodes.find((node) => node.id === sourceId)
+    const def = nodeRegistry.image
+    if (!source || !def) return ''
+
+    const sourceSize = getNodeSize(source)
+    const sourceData = source.data as BaseNodeData
+    const assetId = getAssetId(source)
+    const existingGridCount = nodes.filter((node) => {
+      const data = node.data as BaseNodeData
+      return node.type === 'image' && data.gridSourceNodeId === sourceId
+    }).length
+    const sameTypeCount = nodes.filter((node) => node.type === 'image').length + 1
+    const node = def.create(
+      {
+        x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
+        y:
+          source.position.y +
+          existingGridCount * (sourceSize.height + UPSCALE_NODE_STACK_GAP),
+      },
+      sameTypeCount,
+    )
+    const { rows, cols } = GRID_PRESET_CONFIGS[grid]
+    const nextData: BaseNodeData = {
+      ...node.data,
+      title: `${sourceData.title ?? '图片'} ${grid}宫格`,
+      status: 'running',
+      inputImageAssetIds: assetId ? [assetId] : [],
+      gridSourceNodeId: sourceId,
+      gridSpec: { rows, cols },
+      prompt: buildGridImagePrompt(rows, cols),
+      resolution: '4k',
       width: sourceData.width,
       height: sourceData.height,
       ratio: sourceData.ratio,

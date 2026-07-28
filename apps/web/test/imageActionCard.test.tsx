@@ -88,3 +88,81 @@ test('image action card uses the two-arrow maximize icon for enlargement', async
   assert.match(source, /\bMaximize2\b/)
   assert.doesNotMatch(source, /\bExpand\b/)
 })
+
+test('image action card hides grid actions without grid handlers', async () => {
+  const { ImageActionCard } = await import('../src/components/ImageActionCard')
+
+  const html = renderToStaticMarkup(
+    <ImageActionCard
+      upscaleResolution="4k"
+      onUpscale={() => undefined}
+      onUpscaleResolutionChange={() => undefined}
+      onValidate={() => undefined}
+      onDownload={() => undefined}
+      onOpenFullSize={() => undefined}
+    />,
+  )
+
+  assert.equal(html.includes('宫格生成'), false)
+  assert.equal(html.includes('宫格切分'), false)
+})
+
+test('image action card renders grid generate and grid crop actions', async () => {
+  const { ImageActionCard } = await import('../src/components/ImageActionCard')
+
+  const html = renderToStaticMarkup(
+    <ImageActionCard
+      upscaleResolution="4k"
+      onUpscale={() => undefined}
+      onUpscaleResolutionChange={() => undefined}
+      onValidate={() => undefined}
+      onDownload={() => undefined}
+      onOpenFullSize={() => undefined}
+      onGridGenerate={() => undefined}
+      onGridCrop={() => undefined}
+    />,
+  )
+
+  assert.equal(html.includes('aria-label="宫格生成"'), true)
+  assert.equal(html.includes('aria-label="宫格切分"'), true)
+  // 菜单初始关闭，选项不渲染
+  assert.equal(html.includes('宫格生成规格'), false)
+  assert.equal(html.includes('3×3'), false)
+})
+
+test('image action card disables grid actions when gridDisabled', async () => {
+  const { ImageActionCard } = await import('../src/components/ImageActionCard')
+
+  const html = renderToStaticMarkup(
+    <ImageActionCard
+      upscaleResolution="4k"
+      gridDisabled={true}
+      onUpscale={() => undefined}
+      onUpscaleResolutionChange={() => undefined}
+      onValidate={() => undefined}
+      onDownload={() => undefined}
+      onOpenFullSize={() => undefined}
+      onGridGenerate={() => undefined}
+      onGridCrop={() => undefined}
+    />,
+  )
+
+  assert.match(html, /disabled="" aria-label="宫格生成"/)
+  assert.match(html, /disabled="" aria-label="宫格切分"/)
+})
+
+test('image action card wires grid callbacks with 3x3 default first', async () => {
+  const source = await readFile(
+    new URL('../src/components/ImageActionCard.tsx', import.meta.url),
+    'utf8',
+  )
+
+  // 宫格生成菜单顺序：3×3 默认在最前，其次 2×2、4×4
+  assert.match(source, /\['3x3', '2x2', '4x4'\]/)
+  // 点选项即触发回调并关闭菜单
+  assert.match(source, /setGridMenuOpen\(false\)\s+onGridGenerate\(grid\)/)
+  assert.match(source, /onClick=\{onGridCrop\}/)
+  // 菜单支持点外部关闭与 Escape 关闭
+  assert.match(source, /addEventListener\('pointerdown', handlePointerDown\)/)
+  assert.match(source, /event\.key === 'Escape'/)
+})

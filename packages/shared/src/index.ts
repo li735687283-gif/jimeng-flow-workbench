@@ -20,4 +20,5 @@ export type FlowNodeType =
   | "custom";
 
 export * from './settings'
+export * from './grid'
 export * from './video'
