@@ -550,6 +550,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       gridSpec: { rows, cols },
       prompt: buildGridImagePrompt(rows, cols),
       resolution: '4k',
+      // 继承源节点的生成配置，避免落到默认模型（如 GPT image）导致比例/风格不符
+      model: sourceData.model,
+      quality: sourceData.quality,
       width: sourceData.width,
       height: sourceData.height,
       ratio: sourceData.ratio,

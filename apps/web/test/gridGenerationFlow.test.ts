@@ -26,7 +26,7 @@ function makeResponse(partial: Partial<GenerationResponse>): GenerationResponse 
 }
 
 /** 种一个源节点 + 宫格派生节点，返回派生节点 id */
-function seedGridNode(): string {
+function seedGridNode(sourceDataExtra: Record<string, unknown> = {}): string {
   const sourceNode: Node = {
     id: 'image-source',
     type: 'image',
@@ -39,6 +39,8 @@ function seedGridNode(): string {
       width: 1536,
       height: 864,
       ratio: '16:9',
+      model: 'jimeng-5.0-pro',
+      ...sourceDataExtra,
     },
   }
   useCanvasStore.setState({ nodes: [sourceNode], edges: [], selectedNodeId: null })
@@ -119,6 +121,11 @@ test('startGridGeneration 收尾为 success 并写回真实尺寸，迟到事件
   assert.equal(requests[0].count, 1)
   assert.equal(requests[0].mediaType, 'image')
   assert.equal(requests[0].flowId, 'flow-grid')
+  // 回归：模型必须继承源节点，不能落到默认模型（如 GPT image 只会出 1:1 方图）
+  assert.equal(requests[0].model, 'jimeng-5.0-pro')
+  // 回归：比例必须是源图的 16:9（4K 长边 4096），不能默认 1:1
+  assert.equal(requests[0].width, 4096)
+  assert.equal(requests[0].height, 2304)
 
   // 回归：同一订阅在终态后迟到的 running/重复 complete 不得把状态覆盖回去
   sseCallbacks!.onUpdate?.(makeResponse({ status: 'running' }))
@@ -127,6 +134,36 @@ test('startGridGeneration 收尾为 success 并写回真实尺寸，迟到事件
     .getState()
     .nodes.find((item) => item.id === nodeId)
   assert.equal(nodeAfter?.data.status, 'success')
+})
+
+test('startGridGeneration 源节点无 ratio 时用宽高推导比例', async () => {
+  const nodeId = seedGridNode({ ratio: undefined, width: 2000, height: 1000 })
+  stubFlowStore()
+  const requests: GenerationRequest[] = []
+  let sseCallbacks: GenerationSseCallback | undefined
+
+  const done = startGridGeneration(nodeId, {
+    createGenerationImpl: async (req) => {
+      requests.push(req)
+      return makeResponse({ status: 'queued', nodeId: req.nodeId })
+    },
+    subscribeGenerationImpl: (_id, callbacks) => {
+      sseCallbacks = callbacks
+      return () => undefined
+    },
+    measureImageSizeImpl: async () => null,
+  })
+
+  await waitFor(() => sseCallbacks !== undefined, '订阅已建立')
+  sseCallbacks!.onComplete?.(
+    makeResponse({ status: 'success', results: [{ assetId: 'asset-grid' }] }),
+  )
+  await done
+
+  assert.equal(requests.length, 1)
+  // 2000:1000 = 2:1，4K 长边 4096 → 4096×2048，而不是 1:1
+  assert.equal(requests[0].width, 4096)
+  assert.equal(requests[0].height, 2048)
 })
 
 test('startGridGeneration 失败时写 error 并解除订阅登记', async () => {

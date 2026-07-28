@@ -17,6 +17,8 @@ function seedSourceNode() {
       width: 1536,
       height: 864,
       ratio: '16:9',
+      model: 'jimeng-5.0-pro',
+      quality: 'high',
     },
   }
 
@@ -47,6 +49,8 @@ test('createGridImageNode creates a running grid image node to the right and con
   assert.equal(targetNode.data.width, 1536)
   assert.equal(targetNode.data.height, 864)
   assert.equal(targetNode.data.ratio, '16:9')
+  assert.equal(targetNode.data.model, 'jimeng-5.0-pro')
+  assert.equal(targetNode.data.quality, 'high')
   assert.deepEqual(targetNode.data.inputImageAssetIds, ['asset-source'])
   assert.equal(selectedNodeId, targetId)
 

@@ -37,6 +37,8 @@ interface GridNodeDataLike {
   prompt?: unknown
   model?: unknown
   ratio?: unknown
+  width?: unknown
+  height?: unknown
   inputImageAssetIds?: unknown
   generationRuns?: unknown
 }
@@ -105,7 +107,15 @@ export async function startGridGeneration(
     return
   }
 
-  const ratio = typeof data.ratio === 'string' && data.ratio ? data.ratio : '1:1'
+  // 比例优先取节点 ratio；源节点未存 ratio 时用其实际宽高推导，避免默认 1:1 方图
+  const dataWidth = typeof data.width === 'number' ? data.width : 0
+  const dataHeight = typeof data.height === 'number' ? data.height : 0
+  const ratio =
+    typeof data.ratio === 'string' && data.ratio
+      ? data.ratio
+      : dataWidth > 0 && dataHeight > 0
+        ? `${dataWidth}:${dataHeight}`
+        : '1:1'
   const size = getImageDimensionsByRatio(ratio, '4K')
   const rememberedModel = useGenerationDefaultsStore.getState().image?.model
   const nodeModel = typeof data.model === 'string' ? data.model.trim() : ''
