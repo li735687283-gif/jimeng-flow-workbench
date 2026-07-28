@@ -1,5 +1,8 @@
 # Design QA
 
+> 本文件是按任务追加的历史设计 QA 日志，各节中的绝对路径、测试数量和运行状态只代表当次验收现场，不是当前能力或质量门禁的权威来源。
+> 当前命令、端口和质量状态以根 `README.md`、源码、测试及实际命令输出为准；已标记 `blocked` 的历史记录不代表当前实现仍被阻塞。
+
 - Source visual truth: `F:/AI/vs code/claudecode/即梦CLI调用-agent-skill/reference-font.png`
 - Implementation screenshot: `F:/AI/vs code/claudecode/即梦CLI调用/.codex-logs/font-qa-menu.png`
 - Agent menu screenshot: `F:/AI/vs code/claudecode/即梦CLI调用/.codex-logs/font-qa-agent-role.png`
