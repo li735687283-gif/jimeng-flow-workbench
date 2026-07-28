@@ -110,3 +110,16 @@
 - 菜单面板通过 `ViewportMenuPortal` 挂到视口顶层，不能受节点、面板或滚动容器的 `overflow` 裁剪；接近窗口底部时自动向上弹出，并在可视区域内限制高度和滚动。
 - 菜单面板与选项必须沿用 `--menu-surface-*`、`--menu-control-*`、`--menu-item-*` 令牌，以及统一的 hover、focus、selected、disabled 状态；不得为单个业务菜单另写颜色、圆角或阴影模板。
 - 菜单必须支持点击空白处关闭、按 Escape 关闭、选择后关闭；新增或修改菜单时要补回归测试，防止重新引入原生下拉。
+
+## 发布流程（默认一键走完）
+
+用户已授权：功能修改完成并验证通过后，无需逐步确认，直接按以下链路一次走完：
+
+1. `npm run check` 全绿（typecheck、lint、test、build）。
+2. 升级版本号：新功能 `npm version minor --no-git-tag-version`，修复 `npm version patch --no-git-tag-version`，然后 `npm install --package-lock-only` 同步锁文件。
+3. `npm run package:win` 打包 NSIS 安装包（产物在 `release/`，exe 与 blockmap、latest.yml 必须同一轮构建）。
+4. 提交：功能改动一个 `feat:`/`fix:` commit，版本号单独一个 `chore(release): vX.Y.Z` commit；在功能分支上则合并回 main。
+5. `git push origin main`，打 `git tag -a vX.Y.Z` 并推送标签。
+6. `gh release create vX.Y.Z` 创建正式 Release（非 Draft），上传 `release/MO.K-Setup-X.Y.Z.exe`、`.exe.blockmap`、`latest.yml` 三个文件。
+
+任一步失败即停下报告，不跳过不降级。纯文档或试验性改动不发版时，用户会另行说明。
