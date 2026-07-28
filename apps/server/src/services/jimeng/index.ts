@@ -3,7 +3,7 @@
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readdir, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type {
@@ -300,9 +300,9 @@ async function resolveInputPaths(inputImages: string[] | undefined): Promise<str
 async function listDownloadedFiles(
   dir: string,
   mediaType: MediaType,
-): Promise<string[]> {
+): Promise<Array<{ path: string; size: number }>> {
   const exts = mediaType === 'image' ? IMAGE_EXTENSIONS : VIDEO_EXTENSIONS
-  const files: string[] = []
+  const files = new Map<string, number>()
 
   async function walk(current: string): Promise<void> {
     let entries: import('node:fs').Dirent[]
@@ -321,12 +321,65 @@ async function listDownloadedFiles(
       const ext = lower.slice(lower.lastIndexOf('.'))
       if (!exts.has(ext)) continue
       const info = await stat(full)
-      if (info.size > 0) files.push(full)
+      if (info.size > 0) files.set(full, info.size)
     }
   }
 
   await walk(dir)
-  return Array.from(new Set(files))
+  return [...files.entries()].map(([path, size]) => ({ path, size }))
+}
+
+const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+
+/**
+ * 校验图片内容是否写完整（dreamina 下载器会预分配大小、乱序写入，
+ * 文件大小稳定不代表写完）：PNG 必须含结尾 IEND 块，JPEG 必须以 EOI 结尾，
+ * WEBP 的 RIFF 声明长度要与实际一致，gif/bmp 等按完整处理。
+ */
+export function isCompleteImageBuffer(buf: Buffer): boolean {
+  if (buf.length < 16) return false
+  if (buf.subarray(0, 4).equals(PNG_HEADER)) return buf.subarray(buf.length - 16).includes('IEND')
+  if (buf[0] === 0xff && buf[1] === 0xd8) return buf[buf.length - 2] === 0xff && buf[buf.length - 1] === 0xd9
+  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') {
+    return buf.length >= buf.readUInt32LE(4) + 8
+  }
+  return true
+}
+
+async function isFileComplete(path: string, mediaType: MediaType): Promise<boolean> {
+  try {
+    if (mediaType !== 'image') return (await stat(path)).size > 0
+    return isCompleteImageBuffer(await readFile(path))
+  } catch {
+    return false
+  }
+}
+
+/** 解析 query_result 的 JSON 输出：任务状态与结果文件路径（路径列表是权威结果数） */
+export function parseQueryResultPayload(text: string): { status: string | null; paths: string[] } {
+  const match = text.match(/\{[\s\S]*\}/)
+  if (!match) return { status: null, paths: [] }
+  try {
+    const payload = JSON.parse(match[0])
+    const status = typeof payload?.gen_status === 'string' ? payload.gen_status.toLowerCase() : null
+    const images = Array.isArray(payload?.result_json?.images) ? payload.result_json.images : []
+    const videos = Array.isArray(payload?.result_json?.videos) ? payload.result_json.videos : []
+    const paths = [...images, ...videos]
+      .map((item: unknown) => (item as { path?: unknown })?.path)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+    return { status, paths }
+  } catch {
+    return { status: null, paths: [] }
+  }
+}
+
+async function listCompleteFiles(dir: string, mediaType: MediaType): Promise<string[]> {
+  const files = await listDownloadedFiles(dir, mediaType)
+  const complete: string[] = []
+  for (const file of files) {
+    if (await isFileComplete(file.path, mediaType)) complete.push(file.path)
+  }
+  return complete
 }
 
 async function waitForResults(
@@ -335,9 +388,18 @@ async function waitForResults(
   downloadDir: string,
   timeoutMs: number,
   settings: Settings,
+  expectedCount = 1,
 ): Promise<GenerationResult[]> {
   const started = Date.now()
   let lastOutput = ''
+
+  const filterComplete = async (paths: string[]): Promise<string[]> => {
+    const usable: string[] = []
+    for (const path of paths) {
+      if (await isFileComplete(path, mediaType)) usable.push(path)
+    }
+    return usable
+  }
 
   while (Date.now() - started < timeoutMs) {
     const remaining = timeoutMs - (Date.now() - started)
@@ -354,38 +416,58 @@ async function waitForResults(
       )
     } catch (err) {
       lastOutput = err instanceof Error ? err.message : String(err)
-      const downloaded = await listDownloadedFiles(downloadDir, mediaType)
-      if (downloaded.length > 0) {
-        return downloaded.map((localPath) => ({ localPath }))
-      }
       if (isTransientQueryError(err)) {
         await waitBeforeNextQuery(remaining)
         continue
       }
+      // 硬错误兜底：目录里已有完整文件就交付，不再抛错丢弃
+      const fallback = await listCompleteFiles(downloadDir, mediaType)
+      if (fallback.length > 0) return fallback.map((localPath) => ({ localPath }))
       throw err
     }
     lastOutput = summarizeOutput(query.stdout, query.stderr)
-    const downloaded = await listDownloadedFiles(downloadDir, mediaType)
-    if (downloaded.length > 0) {
-      return downloaded.map((localPath) => ({ localPath }))
-    }
+    const { status, paths } = parseQueryResultPayload(`${query.stdout}\n${query.stderr}`)
 
-    const urls = parseMediaUrls(`${query.stdout}\n${query.stderr}`, mediaType)
-    if (urls.length > 0) {
-      return urls.map((remoteUrl) => ({ remoteUrl }))
-    }
-
-    if (hasFailed(lastOutput)) {
+    if (status && status !== 'success' && hasFailed(status)) {
       throw new JimengError(
         'JIMENG_BAD_RESPONSE',
-        `dreamina 任务失败：${lastOutput}`,
+        `dreamina 任务失败（${status}）：${lastOutput}`,
         502,
       )
+    }
+
+    if (paths.length > 0) {
+      const usable = await filterComplete(paths)
+      // 任务成功时按实际交付数返回（可能少于 generate_num）；
+      // 任务进行中但完整文件已够数也提前返回。
+      if (usable.length > 0 && (status === 'success' || usable.length >= expectedCount)) {
+        return usable.map((localPath) => ({ localPath }))
+      }
+    } else if (!status) {
+      // 老版本 CLI 无 JSON 输出时的兜底：扫描目录中的完整文件
+      const scanned = await listCompleteFiles(downloadDir, mediaType)
+      if (scanned.length >= expectedCount) {
+        return scanned.map((localPath) => ({ localPath }))
+      }
+      const urls = parseMediaUrls(`${query.stdout}\n${query.stderr}`, mediaType)
+      if (urls.length > 0) {
+        return urls.map((remoteUrl) => ({ remoteUrl }))
+      }
+      if (hasFailed(lastOutput)) {
+        throw new JimengError(
+          'JIMENG_BAD_RESPONSE',
+          `dreamina 任务失败：${lastOutput}`,
+          502,
+        )
+      }
     }
 
     await waitBeforeNextQuery(remaining)
   }
 
+  // 超时兜底：交付已有的完整结果，没有才抛超时
+  const scanned = await listCompleteFiles(downloadDir, mediaType)
+  if (scanned.length > 0) return scanned.map((localPath) => ({ localPath }))
   throw new JimengError(
     'JIMENG_TIMEOUT',
     `dreamina 任务仍未完成，请稍后用 submit_id 查询：${submitId}${lastOutput ? `。最近输出：${lastOutput}` : ''}`,
@@ -397,6 +479,7 @@ async function submitAndCollect(
   args: string[],
   mediaType: MediaType,
   timeoutMs: number,
+  expectedCount = 1,
 ): Promise<GenerationResult[]> {
   const settings = await getSettings()
   const startedAt = Date.now()
@@ -423,6 +506,7 @@ async function submitAndCollect(
     downloadDir,
     getRemainingGenerationTimeoutMs(timeoutMs, Date.now() - startedAt),
     settings,
+    expectedCount,
   )
 }
 
@@ -431,12 +515,13 @@ export async function generateImage(
 ): Promise<GenerationResult[]> {
   const inputPaths = await resolveInputPaths(params.inputImages)
   const command = inputPaths.length > 0 ? 'image2image' : 'text2image'
+  const generateNum = Math.max(1, Math.min(params.count ?? 1, 10))
   const args = [
     command,
     `--prompt=${params.prompt}`,
     `--ratio=${getClosestRatio(params.width, params.height)}`,
     `--resolution_type=${getImageResolutionType(params.width, params.height, params.model)}`,
-    `--generate_num=${Math.max(1, Math.min(params.count ?? 1, 10))}`,
+    `--generate_num=${generateNum}`,
   ]
 
   const modelVersion = getImageModelVersion(params.model)
@@ -445,7 +530,7 @@ export async function generateImage(
     args.push(`--images=${inputPaths.join(',')}`)
   }
 
-  return submitAndCollect(args, 'image', params.timeoutMs ?? getImageGenerationTimeoutMs(params.count))
+  return submitAndCollect(args, 'image', params.timeoutMs ?? getImageGenerationTimeoutMs(params.count), generateNum)
 }
 
 export async function generateVideo(

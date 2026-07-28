@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_API_URL = 'http://127.0.0.1:8787';
-const TERMINAL = new Set(['succeeded', 'completed', 'failed', 'error', 'cancelled']);
+const TERMINAL = new Set(['success', 'succeeded', 'completed', 'failed', 'error', 'cancelled']);
 const NODE_TYPES = new Set(['text', 'image', 'video', 'agentPrompt', 'note']);
 
 export class MokCliError extends Error {
@@ -46,6 +46,30 @@ export function buildNode(type, options = {}) {
   return { id: options.id || makeId('node'), type, position: { x: numberValue(options.x, 'x', 0), y: numberValue(options.y, 'y', 0) }, data };
 }
 
+export function parseBatchSpec(content) {
+  let spec;
+  try { spec = JSON.parse(content); } catch { throw new MokCliError('批量清单不是有效的 JSON。', 'INVALID_BATCH_FILE'); }
+  if (!spec || typeof spec !== 'object' || !Array.isArray(spec.items) || spec.items.length === 0) throw new MokCliError('批量清单必须包含非空的 items 数组。', 'INVALID_BATCH_FILE');
+  const items = spec.items.map((item, index) => {
+    if (!item || typeof item !== 'object') throw new MokCliError(`第 ${index + 1} 条不是有效对象。`, 'INVALID_BATCH_ITEM');
+    const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
+    if (!prompt) throw new MokCliError(`第 ${index + 1} 条缺少 prompt。`, 'INVALID_BATCH_ITEM');
+    return { title: typeof item.title === 'string' && item.title.trim() ? item.title.trim() : `批量图片 ${index + 1}`, prompt, model: item.model ?? spec.model, width: item.width ?? spec.width, height: item.height ?? spec.height, count: item.count ?? spec.count };
+  });
+  return { items };
+}
+
+export function buildBatchNodes(spec, existingNodes = [], options = {}) {
+  const startX = options.startX ?? (existingNodes.length ? Math.max(...existingNodes.map((node) => Number(node?.position?.x) || 0)) + 480 : 0);
+  const startY = options.startY ?? 0;
+  const columns = options.columns ?? 3;
+  return spec.items.map((item, index) => {
+    const node = buildNode('image', { title: item.title, prompt: item.prompt, model: item.model, width: item.width, height: item.height, count: item.count, x: startX + (index % columns) * 480, y: startY + Math.floor(index / columns) * 420 });
+    node.data.updatedAt = new Date().toISOString();
+    return node;
+  });
+}
+
 export function createApiClient({ baseUrl = process.env.MOK_API_URL || DEFAULT_API_URL, fetchImpl = globalThis.fetch } = {}) {
   const apiUrl = assertLoopbackUrl(baseUrl); if (typeof fetchImpl !== 'function') throw new MokCliError('当前 Node 环境没有可用的 fetch。', 'FETCH_UNAVAILABLE');
   return { baseUrl: apiUrl, async request(path, { method = 'GET', body } = {}) {
@@ -62,7 +86,7 @@ const putFlow = (client, flow, changes) => client.request(`/api/flows/${encodeUR
 async function mutateFlow(client, id, mutate) { const flow = await getFlow(client, id); const result = await mutate({ flow, nodes: [...(flow.nodes || [])], edges: [...(flow.edges || [])] }); const updated = await putFlow(client, flow, result); return { flowId: id, flow: updated, result }; }
 async function waitGeneration(client, id, timeout) { const end = Date.now() + timeout; while (Date.now() < end) { const item = await client.request(`/api/generations/${encodeURIComponent(id)}`); if (TERMINAL.has(String(item?.status || '').toLowerCase())) return item; await new Promise((resolve) => setTimeout(resolve, 1000)); } throw new MokCliError(`生成任务等待超时：${id}`, 'GENERATION_TIMEOUT'); }
 
-function help() { return { name: 'mok', brand: '墨K / MO.K', api: DEFAULT_API_URL, commands: ['health', 'flow list|get|create|update|duplicate|delete', 'canvas inspect|nodes|edges', 'node list|add|update|delete', 'edge connect|delete', 'generate image|video|status', 'agent prompt'], security: '仅连接 127.0.0.1/localhost/::1' }; }
+function help() { return { name: 'mok', brand: '墨K / MO.K', api: DEFAULT_API_URL, commands: ['health', 'flow list|get|create|update|duplicate|delete', 'canvas inspect|nodes|edges', 'node list|add|update|delete', 'edge connect|delete', 'generate image|video|batch|status', 'agent prompt'], security: '仅连接 127.0.0.1/localhost/::1' }; }
 
 export async function executeCli(argv, dependencies = {}) {
   const { positionals, options } = parseCliArgs(argv); if (options.help || !positionals.length) return help();
@@ -92,6 +116,50 @@ export async function executeCli(argv, dependencies = {}) {
   }
   if (group === 'generate') {
     if (action === 'status') { const generationId = value || options.id; const item = await client.request(`/api/generations/${encodeURIComponent(required({ id: generationId }, 'id'))}`); return options.wait ? waitGeneration(client, generationId, numberValue(options.timeout, 'timeout', 600000)) : item; }
+    if (action === 'batch') {
+      const flowIdOpt = options.flow; const newName = options.new;
+      if ((!flowIdOpt && !newName) || (flowIdOpt && newName)) throw new MokCliError('generate batch 需要且只能二选一：--flow <id> 或 --new <项目名>。', 'MISSING_OPTION');
+      const spec = parseBatchSpec(await readFile(required(options, 'file'), 'utf8'));
+      let flow;
+      if (newName) flow = await client.request('/api/flows', { method: 'POST', body: { name: String(newName) } });
+      else flow = await getFlow(client, flowIdOpt);
+      const flowId = flow.id;
+      const nodes = buildBatchNodes(spec, flow.nodes || [], { startX: options['start-x'] !== undefined ? numberValue(options['start-x'], 'start-x') : undefined, startY: options['start-y'] !== undefined ? numberValue(options['start-y'], 'start-y') : undefined, columns: options.columns !== undefined ? numberValue(options.columns, 'columns') : undefined });
+      await putFlow(client, flow, { nodes: [...(flow.nodes || []), ...nodes] });
+      const items = [];
+      for (const node of nodes) {
+        const entry = { title: node.data.title, nodeId: node.id };
+        try {
+          const created = await client.request('/api/generations', { method: 'POST', body: { flowId, nodeId: node.id, mediaType: 'image', prompt: node.data.prompt, model: node.data.model, width: node.data.width, height: node.data.height, count: node.data.count } });
+          entry.generationId = created.id; entry.status = created.status || 'queued';
+          node.data.generationId = created.id; node.data.status = 'queued'; node.data.updatedAt = new Date().toISOString();
+        } catch (error) { entry.status = 'submit_failed'; entry.error = error.message; }
+        items.push(entry);
+      }
+      if (items.some((entry) => entry.generationId)) {
+        const latest = await getFlow(client, flowId);
+        const merged = [...(latest.nodes || [])];
+        for (const node of nodes) {
+          if (!node.data.generationId) continue;
+          const index = merged.findIndex((item) => item.id === node.id);
+          if (index >= 0) merged[index] = { ...merged[index], data: { ...merged[index].data, ...node.data } };
+        }
+        await putFlow(client, latest, { nodes: merged });
+      }
+      if (options.wait) {
+        await Promise.all(items.map(async (entry) => {
+          if (!entry.generationId) return;
+          try {
+            const final = await waitGeneration(client, entry.generationId, numberValue(options.timeout, 'timeout', 600000));
+            entry.status = final.status;
+            const assetIds = (final.results || []).map((result) => result?.assetId).filter(Boolean);
+            if (assetIds.length) entry.assetIds = assetIds;
+            if (final.error) entry.error = final.error;
+          } catch (error) { entry.status = 'wait_failed'; entry.error = error.message; }
+        }));
+      }
+      return { flowId, total: items.length, submitted: items.filter((entry) => entry.generationId).length, failed: items.filter((entry) => !entry.generationId).length, items };
+    }
     if (action === 'image' || action === 'video') { const flowId = required(options, 'flow'); const nodeId = required(options, 'node'); const prompt = positionals.slice(2).join(' ') || options.prompt || ''; const body = action === 'image' ? { flowId, nodeId, mediaType: 'image', prompt, model: options.model || 'codex:gpt-5.5', width: numberValue(options.width, 'width', 1024), height: numberValue(options.height, 'height', 1024), count: numberValue(options.count, 'count', 1), ...(options['input-images'] ? { inputImages: json(options['input-images']) } : {}) } : { flowId, nodeId, mediaType: 'video', mode: options.mode || 'text_to_video', prompt, inputImages: options['input-images'] ? json(options['input-images']) : [], model: options.model || 'seedance-2.0-vip', aspectRatio: options['aspect-ratio'] || '16:9', resolution: options.resolution || '720P', quality: options.quality || 'standard', durationSeconds: numberValue(options.duration, 'duration', 5), count: numberValue(options.count, 'count', 1), generateAudio: options.audio !== 'false' }; const created = await client.request('/api/generations', { method: 'POST', body }); return options.wait ? waitGeneration(client, created.id, numberValue(options.timeout, 'timeout', 600000)) : created; }
   }
   if (group === 'agent' && action === 'prompt') { const userIdea = positionals.slice(2).join(' ') || options.prompt || ''; if (!userIdea) throw new MokCliError('缺少 Agent 提示词。', 'MISSING_PROMPT'); return client.request('/api/agent/chat', { method: 'POST', body: { history: [{ role: 'user', content: userIdea }], canvas: [], ...(options.model ? { model: options.model } : {}) } }); }

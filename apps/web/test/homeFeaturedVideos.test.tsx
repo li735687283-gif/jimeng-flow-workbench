@@ -22,7 +22,7 @@ test('home page renders featured work cards with cover and muted loop playback',
           mediaAssetId: 'asset_video_featured',
           coverAssetId: 'asset_cover_featured',
           mediaUrl: '/api/assets/asset_video_featured/file',
-          coverUrl: '/api/assets/asset_cover_featured/file',
+          coverUrl: '/api/assets/asset_cover_featured/thumb?w=640',
           isFeatured: true,
           isPinned: false,
           isPublished: true,
@@ -42,7 +42,7 @@ test('home page renders featured work cards with cover and muted loop playback',
   )
 
   assert.equal(html.includes('home-featured-video-card'), true)
-  assert.equal(html.includes('/api/assets/asset_cover_featured/file'), true)
+  assert.equal(html.includes('/api/assets/asset_cover_featured/thumb?w=640'), true)
   assert.equal(html.includes('/api/assets/asset_video_featured/file'), true)
   assert.match(html, /<video[^>]+muted/)
   assert.match(html, /<video[^>]+loop/)

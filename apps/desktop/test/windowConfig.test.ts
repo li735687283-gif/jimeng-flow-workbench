@@ -28,11 +28,8 @@ test('desktop window uses a frameless dark title bar without a menu strip', () =
 
   assert.equal(options.autoHideMenuBar, true)
   assert.equal(options.titleBarStyle, 'hidden')
-  assert.deepEqual(options.titleBarOverlay, {
-    color: '#0b0b0c',
-    symbolColor: '#f2f2f2',
-    height: 36,
-  })
+  // 不用原生 titleBarOverlay：窗口按钮由渲染层自绘，支持悬停动画与自动隐藏
+  assert.equal(options.titleBarOverlay, undefined)
 })
 
 test('only HTTPS links may leave the desktop window', () => {

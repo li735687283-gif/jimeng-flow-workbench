@@ -8,6 +8,7 @@ import { ImageNode } from './ImageNode'
 import { VideoNode } from './VideoNode'
 import { AgentPromptNode } from './AgentPromptNode'
 import { NoteNode } from './NoteNode'
+import { GroupFrameNode } from './GroupFrameNode'
 
 export interface NodeDefinition {
   type: FlowNodeType
@@ -37,25 +38,25 @@ export const nodeRegistry: Record<FlowNodeType, NodeDefinition> = {
   text: {
     type: 'text',
     label: '文本',
-    defaultTitle: '文本节点',
+    defaultTitle: '文本',
     icon: FileText,
-    create: makeCreate('text', '文本节点'),
+    create: makeCreate('text', '文本'),
     Component: TextNode,
   },
   image: {
     type: 'image',
     label: '图片',
-    defaultTitle: '图片节点',
+    defaultTitle: '图片',
     icon: ImageIcon,
-    create: makeCreate('image', '图片节点'),
+    create: makeCreate('image', '图片'),
     Component: ImageNode,
   },
   video: {
     type: 'video',
     label: '视频',
-    defaultTitle: '视频节点',
+    defaultTitle: '视频',
     icon: Video,
-    create: makeCreate('video', '视频节点'),
+    create: makeCreate('video', '视频'),
     Component: VideoNode,
   },
   agentPrompt: {
@@ -69,10 +70,19 @@ export const nodeRegistry: Record<FlowNodeType, NodeDefinition> = {
   note: {
     type: 'note',
     label: '备注',
-    defaultTitle: '备注节点',
+    defaultTitle: '备注',
     icon: StickyNote,
-    create: makeCreate('note', '备注节点'),
+    create: makeCreate('note', '备注'),
     Component: NoteNode,
+  },
+  // 画框组：不出现在添加节点菜单，由多选工具栏“打组”创建
+  groupFrame: {
+    type: 'groupFrame',
+    label: '组',
+    defaultTitle: '组',
+    icon: StickyNote,
+    create: makeCreate('groupFrame', '组'),
+    Component: GroupFrameNode,
   },
 }
 

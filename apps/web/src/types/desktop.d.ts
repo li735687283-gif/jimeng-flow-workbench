@@ -9,6 +9,13 @@ declare global {
       isDesktop: boolean
       platform: string
       electronVersion: string
+      windowControls: {
+        minimize(): Promise<void>
+        /** 返回切换后的最大化状态 */
+        toggleMaximize(): Promise<boolean>
+        close(): Promise<void>
+        isMaximized(): Promise<boolean>
+      }
       updates: {
         getState(): Promise<DesktopUpdateState>
         download(): Promise<boolean>

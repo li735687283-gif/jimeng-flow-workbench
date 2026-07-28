@@ -3,6 +3,7 @@ import {
   DESKTOP_UPDATE_CHANNELS,
   type DesktopUpdateState,
 } from '@jimeng-flow/shared/desktopUpdate'
+import { DESKTOP_WINDOW_CHANNELS } from '@jimeng-flow/shared/desktopWindow'
 
 contextBridge.exposeInMainWorld(
   'mokDesktop',
@@ -10,6 +11,16 @@ contextBridge.exposeInMainWorld(
     isDesktop: true,
     platform: process.platform,
     electronVersion: process.versions.electron,
+    windowControls: Object.freeze({
+      minimize: (): Promise<void> =>
+        ipcRenderer.invoke(DESKTOP_WINDOW_CHANNELS.minimize),
+      toggleMaximize: (): Promise<boolean> =>
+        ipcRenderer.invoke(DESKTOP_WINDOW_CHANNELS.toggleMaximize),
+      close: (): Promise<void> =>
+        ipcRenderer.invoke(DESKTOP_WINDOW_CHANNELS.close),
+      isMaximized: (): Promise<boolean> =>
+        ipcRenderer.invoke(DESKTOP_WINDOW_CHANNELS.isMaximized),
+    }),
     updates: Object.freeze({
       getState: (): Promise<DesktopUpdateState> =>
         ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.getState),

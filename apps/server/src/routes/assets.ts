@@ -26,6 +26,10 @@ import {
   getAssetUploadValidationError,
 } from '../services/assets'
 import {
+  getAssetThumbnail,
+  normalizeThumbWidth,
+} from '../services/thumbnails'
+import {
   createAssetContentHash,
   findDuplicateImportedImage,
 } from '../services/assetDedup'
@@ -378,6 +382,43 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         `attachment; filename="${asset.id}${extname(absPath) || '.png'}"`,
       )
       return reply.send(createReadStream(absPath))
+    },
+  )
+
+  // GET /api/assets/:assetId/thumb?w=640
+  // 画布展示用小尺寸缩略图：按需生成并落盘缓存，原图只用于大图预览与下载
+  app.get<{ Params: { assetId: string }; Querystring: { w?: string } }>(
+    '/api/assets/:assetId/thumb',
+    async (req, reply) => {
+      const asset = await getAsset(req.params.assetId)
+      if (!asset) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: '资产不存在',
+        })
+      }
+      if (asset.type !== 'image') {
+        return reply.code(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: '只有图片资产支持缩略图',
+        })
+      }
+      const width = normalizeThumbWidth(req.query.w)
+      try {
+        const thumbPath = await getAssetThumbnail(asset.id, width)
+        if (!thumbPath) throw new Error('缩略图生成失败')
+        reply.header('Content-Type', 'image/jpeg')
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable')
+        return reply.send(createReadStream(thumbPath))
+      } catch (err) {
+        // 生成失败（如源文件损坏）时回退原图，保证节点有图可显示
+        req.log.warn({ err, assetId: asset.id }, '[assets/thumb] 生成失败，回退原图')
+        const absPath = getAssetFilePath(asset)
+        reply.header('Content-Type', mimeForFile(absPath, 'image/png'))
+        return reply.send(createReadStream(absPath))
+      }
     },
   )
 

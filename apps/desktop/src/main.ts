@@ -5,6 +5,7 @@ import {
   DESKTOP_UPDATE_CHANNELS,
   type DesktopUpdateState,
 } from '@jimeng-flow/shared/desktopUpdate'
+import { DESKTOP_WINDOW_CHANNELS } from '@jimeng-flow/shared/desktopWindow'
 import {
   initializeAutoUpdates,
   type AutoUpdateController,
@@ -47,6 +48,26 @@ function registerUpdateIpc(): void {
     DESKTOP_UPDATE_CHANNELS.download,
     () => updateController?.download() ?? false,
   )
+}
+
+/** 自绘窗口控制按钮：最小化 / 最大化切换 / 关闭 */
+function registerWindowControlIpc(): void {
+  ipcMain.handle(DESKTOP_WINDOW_CHANNELS.minimize, (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize()
+  })
+  ipcMain.handle(DESKTOP_WINDOW_CHANNELS.toggleMaximize, (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return false
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+    return window.isMaximized()
+  })
+  ipcMain.handle(DESKTOP_WINDOW_CHANNELS.close, (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close()
+  })
+  ipcMain.handle(DESKTOP_WINDOW_CHANNELS.isMaximized, (event) => {
+    return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false
+  })
 }
 
 async function createMainWindow(): Promise<BrowserWindow> {
@@ -109,6 +130,7 @@ async function startDesktop(): Promise<void> {
     updater: autoUpdater as unknown as UpdaterLike,
   })
   registerUpdateIpc()
+  registerWindowControlIpc()
   await createMainWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

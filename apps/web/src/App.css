@@ -80,12 +80,12 @@
   pointer-events: none;
 }
 
-/* 无边框窗口：首页顶栏作为窗口拖拽区域，
-   右端为系统窗口按钮预留空间，交互控件保持可点击 */
+/* 无边框窗口：首页顶栏右端为窗口按钮预留空间。
+   窗口拖拽由根层 .window-drag-strip 统一提供，顶栏不再声明拖拽区，
+   避免拖拽区吃掉右上角窗口按钮的鼠标事件 */
 .is-desktop .home-topbar {
   padding-right: 178px;
   pointer-events: auto;
-  -webkit-app-region: drag;
 }
 
 .is-desktop .home-topbar * {
@@ -516,6 +516,7 @@
   height: 100%;
   object-fit: cover;
   opacity: 1;
+  will-change: transform;
   transition:
     opacity var(--motion-base) var(--ease-standard),
     transform var(--motion-slow) var(--ease-standard);
@@ -5945,8 +5946,8 @@
   pointer-events: none;
 }
 
-/* 无边框窗口：画布顶部留出可拖拽移动窗口的横条，
-   左端避开返回按钮、右端避开系统窗口按钮（titleBarOverlay）区域 */
+/* 无边框窗口：顶部留出可拖拽移动窗口的横条，
+   左端避开返回按钮、右端避开自绘窗口按钮区域 */
 .window-drag-strip {
   position: absolute;
   top: 0;
@@ -10464,4 +10465,139 @@
 .prompt-editor-modal *::-webkit-scrollbar-corner,
 .text-node-modal *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* 画框组：固定边界的组框，颜色可通过 --group-frame-color 定制 */
+.group-frame {
+  width: 100%;
+  height: 100%;
+  border: 1.5px solid var(--group-frame-color, #757575);
+  border-radius: 10px;
+  position: relative;
+  cursor: grab;
+}
+.group-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--group-frame-color, #757575);
+  opacity: 0.12;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+.group-frame.active::before {
+  opacity: 0.3;
+}
+.group-frame-resize-handle {
+  width: 10px;
+  height: 10px;
+  background: #2a2a2b;
+  border: 1.5px solid #e8e8e8;
+  border-radius: 2px;
+}
+.group-frame-resize-line {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* 节点标题重命名输入框 */
+.node-title.editing {
+  user-select: text;
+}
+.node-title-input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  color: #f3f3f3;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 6px;
+  outline: none;
+  min-width: 120px;
+  font-family: inherit;
+}
+.node-title-input:focus {
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+/* 自绘窗口控制按钮：平时收起，鼠标进入顶部热区时落下 */
+.window-controls-zone {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 400;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-bottom: 10px;
+  -webkit-app-region: no-drag;
+}
+/* 常驻的小缺口提示：告诉用户这里可以下拉出窗口按钮 */
+.window-controls-notch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(24, 24, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.window-controls-zone:hover .window-controls-notch,
+.window-controls-zone.visible .window-controls-notch {
+  color: rgba(255, 255, 255, 0.85);
+}
+.window-controls {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+  padding: 4px;
+  margin-top: 4px;
+  background: rgba(24, 24, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
+}
+.window-controls-zone.visible .window-controls {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.window-controls-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: #d8d8d8;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    transform 0.12s ease;
+}
+.window-controls-button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  transform: translateY(1px);
+}
+.window-controls-button.close:hover {
+  background: #ff5c5c;
+  color: #ffffff;
 }

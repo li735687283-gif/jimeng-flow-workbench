@@ -18,6 +18,7 @@ import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNo
 import type { VideoMode } from '@jimeng-flow/shared/videoNode'
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
+import { createGroupFrame, isGroupFrame } from '../utils/nodeGroup'
 import { useGenerationDefaultsStore } from './generationDefaultsStore'
 
 const ARRANGE_GAP = 40
@@ -328,6 +329,9 @@ interface CanvasState {
   arrangeGrid: (nodeIds: string[]) => void
   arrangeHorizontal: (nodeIds: string[]) => void
   arrangeVertical: (nodeIds: string[]) => void
+  groupNodes: (nodeIds: string[]) => void
+  ungroupNodes: (nodeIds: string[]) => void
+  selectNodes: (nodeIds: string[]) => void
   saveFlow: () => void
 }
 
@@ -559,7 +563,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const { nodes } = get()
     const selected = nodeIds
       .map((id) => nodes.find((n) => n.id === id))
-      .filter((n): n is Node => !!n)
+      .filter((n): n is Node => !!n && !isGroupFrame(n))
     if (selected.length < 2) return
 
     const minX = Math.min(...selected.map((n) => n.position.x))
@@ -592,7 +596,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const { nodes } = get()
     const selected = nodeIds
       .map((id) => nodes.find((n) => n.id === id))
-      .filter((n): n is Node => !!n)
+      .filter((n): n is Node => !!n && !isGroupFrame(n))
       .sort((a, b) => a.position.x - b.position.x)
     if (selected.length < 2) return
 
@@ -620,7 +624,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const { nodes } = get()
     const selected = nodeIds
       .map((id) => nodes.find((n) => n.id === id))
-      .filter((n): n is Node => !!n)
+      .filter((n): n is Node => !!n && !isGroupFrame(n))
       .sort((a, b) => a.position.y - b.position.y)
     if (selected.length < 2) return
 
@@ -640,6 +644,59 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         nextPositions.has(n.id)
           ? { ...n, position: nextPositions.get(n.id)! }
           : n,
+      ),
+    }))
+  },
+
+  groupNodes: (nodeIds) => {
+    const frame = createGroupFrame(get().nodes, nodeIds)
+    if (!frame) return
+    const targets = new Set(nodeIds)
+    set((state) => ({
+      nodes: [
+        frame,
+        ...state.nodes.map((n) =>
+          targets.has(n.id) && !isGroupFrame(n)
+            ? { ...n, data: { ...n.data, groupId: frame.id } }
+            : n,
+        ),
+      ],
+    }))
+  },
+
+  ungroupNodes: (nodeIds) => {
+    const frameIds = new Set<string>()
+    for (const id of nodeIds) {
+      const node = get().nodes.find((n) => n.id === id)
+      if (!node) continue
+      if (isGroupFrame(node)) frameIds.add(node.id)
+      else if (typeof node.data.groupId === 'string') frameIds.add(node.data.groupId)
+    }
+    if (frameIds.size === 0) return
+    set((state) => ({
+      nodes: state.nodes
+        .filter((n) => !isGroupFrame(n) || !frameIds.has(n.id))
+        .map((n) => {
+          const groupId = typeof n.data.groupId === 'string' ? n.data.groupId : null
+          if (!groupId || !frameIds.has(groupId)) return n
+          const data = { ...n.data }
+          delete data.groupId
+          return { ...n, data }
+        }),
+      selectedNodeId:
+        state.selectedNodeId && frameIds.has(state.selectedNodeId)
+          ? null
+          : state.selectedNodeId,
+    }))
+  },
+
+  selectNodes: (nodeIds) => {
+    const targets = new Set(nodeIds)
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        Boolean(n.selected) === targets.has(n.id)
+          ? n
+          : { ...n, selected: targets.has(n.id) },
       ),
     }))
   },

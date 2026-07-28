@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { Download, Maximize2, Minimize2 } from 'lucide-react'
-import { getAssetFileUrl } from '../api/assets'
+import { getAssetThumbUrl } from '../api/assets'
 
 export interface ImageResultGalleryProps {
   assetIds: string[]
@@ -43,18 +43,21 @@ export function ImageResultGallery({
     ? primaryAssetId
     : normalizedAssetIds[0]
 
-  const renderImage = (assetId: string, className: string) => (
+  // 画布内固定缩略图；查看原图走全屏预览
+  const renderImage = (assetId: string, className: string, width = 640) => (
     <img
       className={className}
-      src={getAssetFileUrl(assetId)}
+      src={getAssetThumbUrl(assetId, width)}
       alt={title}
       draggable={false}
+      loading="lazy"
+      decoding="async"
       onLoad={assetId === activePrimaryAssetId ? onPrimaryImageLoad : undefined}
     />
   )
 
   if (normalizedAssetIds.length === 1) {
-    return renderImage(activePrimaryAssetId, 'image-result-gallery-single-image')
+    return renderImage(activePrimaryAssetId, 'image-result-gallery-single-image', 960)
   }
 
   if (!expanded) {
@@ -92,7 +95,7 @@ export function ImageResultGallery({
 
   return (
     <div
-      className="image-result-gallery-expanded-shell nodrag nopan"
+      className="image-result-gallery-expanded-shell"
       aria-label={`展开的${normalizedAssetIds.length}张图片`}
       onClick={(event) => event.stopPropagation()}
     >

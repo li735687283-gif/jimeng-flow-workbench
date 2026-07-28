@@ -80,7 +80,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('home-featured-layer'), true)
   assert.equal(html.includes('home-works-layer'), true)
   assert.equal(html.includes('home-works-grid five-up'), true)
-  assert.equal(html.includes('/api/assets/asset_cover/file'), true)
+  assert.equal(html.includes('/api/assets/asset_cover/thumb?w=640'), true)
   assert.equal(html.includes('从空白创意板开始'), false)
   assert.equal(html.includes('8 个节点'), false)
   assert.equal(html.includes('分钟前'), false)
@@ -94,7 +94,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('alt="首页 Logo"'), true)
   assert.equal(html.includes('home-logo-circle'), true)
   assert.equal(html.includes('home-logo-ripple'), true)
-  assert.equal(html.includes('/api/assets/asset_showcase/file'), true)
+  assert.equal(html.includes('/api/assets/asset_showcase/thumb?w=640'), true)
 })
 
 test('home page shows a compact update pill and circular download progress', async () => {

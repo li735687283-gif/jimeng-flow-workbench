@@ -53,6 +53,12 @@ import {
   type ReferenceNodeMenuState,
 } from '../menus/ReferenceNodeMenu'
 import { SelectionToolbar } from './SelectionToolbar'
+import {
+  buildMissingGroupFrames,
+  getGroupMembers,
+  isGroupFrame,
+  reconcileGroupMembership,
+} from '../../utils/nodeGroup'
 import { NODE_HANDLE_OFFSET_FLOW } from '../../utils/nodeHandleGeometry'
 
 const edgeTypes = { cut: CutEdge }
@@ -343,6 +349,12 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
     nodeId: string
     position: { x: number; y: number }
   } | null>(null)
+  // 画框拖动：拖动 frame 本体时按相同位移同步搬移全部成员（整组移动）
+  const frameDragRef = useRef<{
+    nodeId: string
+    start: { x: number; y: number }
+    members: Array<{ id: string; x: number; y: number }>
+  } | null>(null)
   const lastRestoredFlowIdRef = useRef<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -379,8 +391,8 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
   }, [currentFlowId, getViewport])
 
   const handleSelectionChange = useCallback(
-    ({ nodes }: { nodes: Node[] }) => {
-      setSelectedNodeIds(nodes.map((n) => n.id))
+    ({ nodes: selectedNodes }: { nodes: Node[] }) => {
+      setSelectedNodeIds(selectedNodes.map((n) => n.id))
     },
     [],
   )
@@ -394,11 +406,64 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
     })
   }, [])
 
+  // 旧数据迁移：历史项目只有 groupId 标记没有画框节点时，自动补建画框
+  useEffect(() => {
+    const missing = buildMissingGroupFrames(nodes as Node[])
+    if (missing.length > 0) {
+      useCanvasStore.setState((state) => ({
+        nodes: [...missing, ...state.nodes],
+      }))
+    }
+  }, [nodes])
+
+  const handleNodeDragStart: OnNodeDrag = useCallback((_event, node) => {
+    if (!isGroupFrame(node)) {
+      frameDragRef.current = null
+      // 拖普通节点时把画框从选中里摘出：画框不被连带拖动，节点任何情况下都能单独拖动
+      useCanvasStore.setState((state) => ({
+        nodes: state.nodes.map((n) =>
+          isGroupFrame(n) && n.selected ? { ...n, selected: false } : n,
+        ),
+      }))
+      return
+    }
+    frameDragRef.current = {
+      nodeId: node.id,
+      start: { x: node.position.x, y: node.position.y },
+      members: getGroupMembers(
+        useCanvasStore.getState().nodes as Node[],
+        node.id,
+      ).map((n) => ({ id: n.id, x: n.position.x, y: n.position.y })),
+    }
+  }, [])
+
   /**
    * 单节点拖动：与其它卡片边对齐时出现虚线并吸附（可在左下角控件开关）。
    */
   const handleNodeDrag: OnNodeDrag = useCallback(
     (_event, node) => {
+      // 拖动画框：同步搬移全部成员，实现“按住框内空白移动整组”
+      if (isGroupFrame(node)) {
+        const drag = frameDragRef.current
+        if (!drag || drag.nodeId !== node.id) return
+        const dx = node.position.x - drag.start.x
+        const dy = node.position.y - drag.start.y
+        const moved = new Map(
+          drag.members.map((m) => [m.id, { x: m.x + dx, y: m.y + dy }]),
+        )
+        useCanvasStore.setState((state) => ({
+          nodes: state.nodes.map((n) => {
+            // 已被 React Flow 多选拖动带走的成员不再重复位移
+            if (n.selected) return n
+            const position = moved.get(n.id)
+            return position ? { ...n, position } : n
+          }),
+        }))
+        lastNodeSnapRef.current = null
+        setHelperLines(null)
+        return
+      }
+
       if (!snapAlignEnabled) {
         lastNodeSnapRef.current = null
         setHelperLines(null)
@@ -446,6 +511,25 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
 
   const handleNodeDragStop: OnNodeDrag = useCallback(
     (_event, node) => {
+      frameDragRef.current = null
+      // 拖入拖出判定：成员中心点出框自动脱离，外部节点入框自动加入
+      if (!isGroupFrame(node)) {
+        const change = reconcileGroupMembership(
+          useCanvasStore.getState().nodes as Node[],
+          node.id,
+        )
+        if (change) {
+          useCanvasStore.setState((state) => ({
+            nodes: state.nodes.map((n) => {
+              if (n.id !== change.id) return n
+              const data = { ...n.data }
+              if (change.groupId) data.groupId = change.groupId
+              else delete data.groupId
+              return { ...n, data }
+            }),
+          }))
+        }
+      }
       let finalPosition =
         snapAlignEnabled && lastNodeSnapRef.current?.nodeId === node.id
           ? lastNodeSnapRef.current.position
@@ -826,6 +910,7 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
         onEdgesDelete={onEdgesDelete}
         onNodeClick={handleNodeClick}
         onNodeContextMenu={handleNodeContextMenu}
+        onNodeDragStart={handleNodeDragStart}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={handlePaneClick}
@@ -836,6 +921,8 @@ export const CanvasView = forwardRef<CanvasViewHandle>(function CanvasView(_, re
         edgeTypes={edgeTypes}
         selectionOnDrag
         selectionMode={SelectionMode.Partial}
+        onlyRenderVisibleElements
+        elevateNodesOnSelect={false}
         panOnDrag={[1]}
         zoomOnDoubleClick={false}
         connectionRadius={connectionRadius}

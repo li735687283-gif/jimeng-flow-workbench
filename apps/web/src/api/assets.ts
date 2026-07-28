@@ -10,6 +10,11 @@ export function getAssetFileUrl(id: string): string {
   return `/api/assets/${encodeURIComponent(id)}/file`
 }
 
+/** 返回画布展示用的缩略图 URL（服务端按需生成并缓存，原图仅用于大图预览与下载） */
+export function getAssetThumbUrl(id: string, width = 640): string {
+  return `/api/assets/${encodeURIComponent(id)}/thumb?w=${width}`
+}
+
 /** 返回资产下载 URL（触发浏览器下载） */
 export function getAssetDownloadUrl(id: string): string {
   return `/api/assets/${encodeURIComponent(id)}/download`

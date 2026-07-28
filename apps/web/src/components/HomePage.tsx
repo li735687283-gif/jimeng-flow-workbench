@@ -16,7 +16,7 @@ import type { DesktopUpdateState } from '@jimeng-flow/shared/desktopUpdate'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
-import { getAssetFileUrl } from '../api/assets'
+import { getAssetFileUrl, getAssetThumbUrl } from '../api/assets'
 import { HomeParticleField } from './HomeParticleField'
 
 export interface HomePageProps {
@@ -134,7 +134,7 @@ function FeaturedWorkCard({ work, onPlay }: { work: ManagedWork; onPlay?: () => 
     >
       {isVideo ? (
         <>
-          <img className="home-featured-video-cover" src={work.coverUrl} alt="" />
+          <img className="home-featured-video-cover" src={getAssetThumbUrl(work.coverAssetId, 640)} alt="" />
           <video
             className="home-featured-video-media"
             src={work.mediaUrl}
@@ -147,7 +147,7 @@ function FeaturedWorkCard({ work, onPlay }: { work: ManagedWork; onPlay?: () => 
       ) : (
         <img
           className="home-featured-video-cover home-featured-video-static"
-          src={work.coverUrl}
+          src={getAssetThumbUrl(work.coverAssetId, 640)}
           alt={work.title}
         />
       )}
@@ -172,7 +172,7 @@ function GalleryWorkCard({
         {isVideo ? (
           <video src={work.mediaUrl} muted playsInline preload="metadata" />
         ) : (
-          <img src={work.mediaUrl} alt={work.title} />
+          <img src={getAssetThumbUrl(work.mediaAssetId, 640)} alt={work.title} />
         )}
         {isVideo && (
           <span className="home-work-badge">
@@ -314,7 +314,7 @@ function FlowProjectCard({ flow, onOpen, onRename, onDelete }: FlowProjectCardPr
       {flow.coverAssetId ? (
         <img
           className="home-project-cover"
-          src={getAssetFileUrl(flow.coverAssetId)}
+          src={getAssetThumbUrl(flow.coverAssetId, 640)}
           alt=""
           aria-hidden="true"
         />
@@ -509,7 +509,7 @@ export function HomePage({
                     {isVideoAsset ? (
                       <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
                     ) : (
-                      <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
+                      <img src={getAssetThumbUrl(asset.id, 640)} alt={assetLabel(asset)} />
                     )}
                     <div className="home-featured-caption">
                       <span>{assetLabel(asset)}</span>
@@ -559,7 +559,7 @@ export function HomePage({
                       {isVideoAsset ? (
                         <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
                       ) : (
-                        <img src={getAssetFileUrl(asset.id)} alt={assetLabel(asset)} />
+                        <img src={getAssetThumbUrl(asset.id, 640)} alt={assetLabel(asset)} />
                       )}
                       {isVideoAsset && (
                         <span className="home-work-badge">

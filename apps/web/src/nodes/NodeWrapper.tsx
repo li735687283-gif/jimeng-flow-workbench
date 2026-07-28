@@ -10,6 +10,7 @@ import {
 import { Handle, Position, useStore, useUpdateNodeInternals } from '@xyflow/react'
 import type { LucideIcon } from 'lucide-react'
 import type { NodeStatus } from '../types/nodeTypes'
+import { EditableNodeTitle } from './EditableNodeTitle'
 import {
   NODE_HANDLE_ZONE_INSET_FLOW,
   NODE_HANDLE_ZONE_SIZE_FLOW,
@@ -172,16 +173,13 @@ export function NodeWrapper({
       style={style}
     >
       {!hideTitle && (
-        <div className="node-title">
-          <Icon size={12} strokeWidth={1.8} />
-          <span>{title}</span>
-          {!mediaDisplay && status === 'success' && (
-            <span className="node-status-dot success" />
-          )}
-          {!mediaDisplay && status === 'error' && (
-            <span className="node-status-dot error" />
-          )}
-        </div>
+        <EditableNodeTitle
+          icon={Icon}
+          title={title}
+          nodeId={nodeId}
+          status={status}
+          showStatusDot={!mediaDisplay}
+        />
       )}
       <div className="node-card">
         <MagneticHandle

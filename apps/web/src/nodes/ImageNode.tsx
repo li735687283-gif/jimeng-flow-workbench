@@ -37,6 +37,7 @@ import type { BaseNodeData } from '../types/nodeTypes'
 import {
   downloadAssetFile,
   getAssetFileUrl,
+  getAssetThumbUrl,
   upscaleImageAsset,
 } from '../api/assets'
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
@@ -469,11 +470,17 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     return () => clearCloseTimer()
   }, [clearCloseTimer])
 
-  const imageSrc = nodeData.assetId
-    ? getAssetFileUrl(nodeData.assetId)
-    : (nodeData as unknown as { outputAssetIds?: string[] }).outputAssetIds?.[0]
-      ? getAssetFileUrl((nodeData as unknown as { outputAssetIds: string[] }).outputAssetIds[0])
-      : nodeData.localPreviewUrl
+  // 画布内固定使用缩略图，不随缩放切换（避免换源闪黑）；放大查看走原图
+  const imageAssetId =
+    nodeData.assetId ??
+    (nodeData as unknown as { outputAssetIds?: string[] }).outputAssetIds?.[0]
+  const imageSrc = imageAssetId
+    ? getAssetThumbUrl(imageAssetId, 960)
+    : nodeData.localPreviewUrl
+  // 大图预览/全屏查看仍用原图
+  const originalImageSrc = imageAssetId
+    ? getAssetFileUrl(imageAssetId)
+    : nodeData.localPreviewUrl
   const handleImageLoad = useCallback(
     (event: SyntheticEvent<HTMLImageElement>) => {
       const latestNode = useCanvasStore
@@ -906,11 +913,11 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   }, [nodeData.height, nodeData.width])
 
   const fullSizeImageSrc = useMemo(() => {
-    if (!imageSrc) return ''
-    if (!fullSizeReloadVersion) return imageSrc
-    const joiner = imageSrc.includes('?') ? '&' : '?'
-    return `${imageSrc}${joiner}viewerReload=${fullSizeReloadVersion}`
-  }, [fullSizeReloadVersion, imageSrc])
+    if (!originalImageSrc) return ''
+    if (!fullSizeReloadVersion) return originalImageSrc
+    const joiner = originalImageSrc.includes('?') ? '&' : '?'
+    return `${originalImageSrc}${joiner}viewerReload=${fullSizeReloadVersion}`
+  }, [fullSizeReloadVersion, originalImageSrc])
 
   useEffect(() => {
     if (!editorMounted) return
@@ -1457,6 +1464,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                 onError={() => setImgError(true)}
                 style={MEDIA_IMG_STYLE}
                 draggable={false}
+                loading="lazy"
+                decoding="async"
               />
             )}
             {generationProgressOverlay}
@@ -1768,12 +1777,14 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                       >
                         <img
                           className="image-generation-history-thumb"
-                          src={getAssetFileUrl(assetId)}
+                          src={getAssetThumbUrl(assetId, 320)}
                           alt=""
                           draggable={false}
+                          loading="lazy"
+                          decoding="async"
                         />
                         <span className="image-generation-history-preview" aria-hidden>
-                          <img src={getAssetFileUrl(assetId)} alt="" draggable={false} />
+                          <img src={getAssetThumbUrl(assetId, 640)} alt="" draggable={false} loading="lazy" decoding="async" />
                         </span>
                       </button>
                     )

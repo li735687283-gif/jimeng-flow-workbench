@@ -11,6 +11,7 @@ import { AssetLibraryModal } from './components/AssetLibraryModal'
 import { AgentPanel } from './components/AgentPanel'
 import { FlowsHistoryModal } from './components/FlowsHistoryModal'
 import { HomePage } from './components/HomePage'
+import { WindowControls } from './components/WindowControls'
 import { SettingsModal } from './components/SettingsModal'
 import { VideoAdminModal } from './components/VideoAdminModal'
 import { VideoPlayerModal } from './components/VideoPlayerModal'
@@ -345,6 +346,12 @@ function AppInner() {
 
   return (
     <div className="app-layout mature-layout">
+      {window.mokDesktop?.isDesktop ? (
+        <>
+          <div className="window-drag-strip" aria-hidden="true" />
+          <WindowControls />
+        </>
+      ) : null}
       {view === 'home' ? (
         <HomePage
           recentFlows={flowList}
@@ -375,10 +382,6 @@ function AppInner() {
       ) : (
         <main className="canvas-stage">
           <CanvasView ref={canvasViewRef} />
-
-          {window.mokDesktop?.isDesktop ? (
-            <div className="window-drag-strip" aria-hidden="true" />
-          ) : null}
 
           <div className="canvas-topbar canvas-topbar-left">
             <button type="button" className="ghost-pill" onClick={handleShowHome}>

@@ -9,6 +9,7 @@ export type FlowNodeType =
   | 'video'
   | 'agentPrompt'
   | 'note'
+  | 'groupFrame'
 
 export interface BaseNodeData {
   title: string
