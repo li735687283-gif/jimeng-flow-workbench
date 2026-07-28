@@ -32,6 +32,7 @@ import {
   type ImageGenerationRun,
   isJimengImageModel,
 } from '@jimeng-flow/shared/generateNode'
+import type { CropRegion } from '@jimeng-flow/shared/grid'
 import { NodeWrapper } from './NodeWrapper'
 import type { BaseNodeData } from '../types/nodeTypes'
 import {
@@ -41,9 +42,12 @@ import {
   upscaleImageAsset,
 } from '../api/assets'
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
+import { startGridGeneration } from '../utils/gridGenerationFlow'
+import { runGridCrop } from '../utils/gridCropFlow'
 import { getImageDimensionsByRatio } from '../utils/agentGenerationPlan'
 import { getCodexStatus, testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
+import { GridCropOverlay } from '../components/GridCropOverlay'
 import {
   getImageResultAssetIds,
   ImageResultGallery,
@@ -132,6 +136,7 @@ interface ImageNodeData extends BaseNodeData {
   inputImageAssetIds?: string[]
   generationRuns?: ImageGenerationRun[]
   sourceOnly?: boolean
+  gridSpec?: { rows: number; cols: number }
 }
 
 const CONTAINER_STYLE: CSSProperties = {
@@ -333,6 +338,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const [promptMenuOpen, setPromptMenuOpen] = useState(false)
   const [promptMenuStyle, setPromptMenuStyle] = useState<CSSProperties>({})
   const [actionBusy, setActionBusy] = useState(false)
+  const [gridCropOpen, setGridCropOpen] = useState(false)
+  const [gridCropBusy, setGridCropBusy] = useState(false)
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
@@ -893,6 +900,34 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       setActionBusy(false)
     }
   }, [id, nodeData.assetId, upscaleResolution])
+
+  const handleGridGenerate = useCallback(
+    (grid: '2x2' | '3x3' | '4x4') => {
+      if (!nodeData.assetId) return
+      const targetNodeId = useCanvasStore
+        .getState()
+        .createGridImageNode(id, grid)
+      if (!targetNodeId) return
+      void useFlowStore.getState().saveCurrent().catch(() => undefined)
+      void startGridGeneration(targetNodeId)
+    },
+    [id, nodeData.assetId],
+  )
+
+  const handleGridCropConfirm = useCallback(
+    async (regions: CropRegion[]) => {
+      setGridCropBusy(true)
+      try {
+        await runGridCrop(id, regions)
+        setGridCropOpen(false)
+      } catch {
+        // 错误已写回节点 error 状态，遮罩保持打开便于调整重试
+      } finally {
+        setGridCropBusy(false)
+      }
+    },
+    [id],
+  )
 
   const handleOpenFullSize = useCallback(() => {
     if (!hasImage || !imageSrc) {
@@ -1510,6 +1545,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             onValidate={() => void handleValidateImageProvider()}
             onDownload={handleDownloadImage}
             onOpenFullSize={handleOpenFullSize}
+            gridBusy={gridCropBusy}
+            gridDisabled={!hasImage}
+            onGridGenerate={handleGridGenerate}
+            onGridCrop={() => setGridCropOpen(true)}
           />
         )}
 
@@ -1602,6 +1641,20 @@ export function ImageNode({ id, data, selected }: NodeProps) {
               document.body,
             )
           : null}
+
+        {gridCropOpen && imageAssetId ? (
+          <GridCropOverlay
+            open={gridCropOpen}
+            imageUrl={getAssetFileUrl(imageAssetId)}
+            naturalWidth={nodeData.width ?? 0}
+            naturalHeight={nodeData.height ?? 0}
+            defaultRows={nodeData.gridSpec?.rows ?? 3}
+            defaultCols={nodeData.gridSpec?.cols ?? 3}
+            busy={gridCropBusy}
+            onCancel={() => setGridCropOpen(false)}
+            onConfirm={(regions) => void handleGridCropConfirm(regions)}
+          />
+        ) : null}
 
         {editorMounted && !sourceOnly && (
           <div

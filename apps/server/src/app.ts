@@ -11,6 +11,7 @@ import generationsRoutes from './routes/generations'
 import agentRoutes from './routes/agent'
 import codexRoutes from './routes/codex'
 import videosRoutes from './routes/videos'
+import sliceGridRoutes from './routes/sliceGrid'
 import {
   installLocalAccessGuard,
   isAllowedLocalRequest,
@@ -63,6 +64,7 @@ export function createApp(
   app.register(agentRoutes)
   app.register(codexRoutes)
   app.register(videosRoutes)
+  app.register(sliceGridRoutes)
 
   if (options.webRoot) {
     app.register(fastifyStatic, {

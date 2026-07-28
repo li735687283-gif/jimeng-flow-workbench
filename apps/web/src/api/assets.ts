@@ -4,6 +4,11 @@
 // 参考 PRD 10.4、9.3 上传资源数据流。
 
 import type { Asset } from '@jimeng-flow/shared/asset'
+import type {
+  CropRegion,
+  CropRegionsRequest,
+  CropRegionsResponse,
+} from '@jimeng-flow/shared/grid'
 
 /** 返回资产文件的访问 URL（供 <img src> / <video src> 使用） */
 export function getAssetFileUrl(id: string): string {
@@ -127,4 +132,25 @@ export async function upscaleImageAsset(
     throw new Error(payload?.message || `图片高清失败：${res.status} ${res.statusText}`)
   }
   return (await res.json()) as Asset
+}
+
+/** 按原图像素坐标区域裁剪资产，每个区域存为独立 PNG 素材，按传入顺序返回 */
+export async function cropAssetRegions(
+  assetId: string,
+  regions: CropRegion[],
+): Promise<Asset[]> {
+  const body: CropRegionsRequest = { regions }
+  const res = await fetch(
+    `/api/assets/${encodeURIComponent(assetId)}/crop-regions`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { message?: string } | null
+    throw new Error(payload?.message || `宫格裁剪失败：${res.status} ${res.statusText}`)
+  }
+  return ((await res.json()) as CropRegionsResponse).assets
 }
