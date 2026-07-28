@@ -147,9 +147,11 @@ export function installLocalAccessGuard(app: FastifyInstance): void
 - Server TypeScript 检查除仓库已有错误外不新增错误。
 - 不修改或覆盖用户现有前端工作树改动。
 
-## 后续批次
+## 后续批次（历史规划）
 
-完成本批后，安全重构按以下顺序继续：
+> 2026-07-28 收尾：设置密钥脱敏、Dreamina PATH-only 限制、受控临时目录和工作区输入路径校验已经在 v0.1.9 落地。下列顺序保留为当时规划；其余项目是否完成应以当前源码和测试为准。
+
+完成本批后，安全重构原计划按以下顺序继续：
 
 1. Settings API 密钥脱敏及 write-only 更新协议。
 2. CLI 可执行文件与输出目录从 HTTP 设置中剥离。

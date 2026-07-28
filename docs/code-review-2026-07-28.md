@@ -1,5 +1,36 @@
 # MO.K / 墨K画布 代码审查报告（2026-07-28）
 
+## 修复闭环（2026-07-28，v0.1.9）
+
+> 本节是当前闭环状态。下面从“审查方式”开始的正文保留为 commit `1bbcb28` 的历史审查快照，其中的路径、行号、开放问题和测试数量不能代表 v0.1.9 现状。
+
+### 发布与事实面
+
+| 事实面 | 状态 | 证据 |
+| --- | --- | --- |
+| 代码 | `changed-and-verified` | 修复提交 `b17a888`，版本提交 `3b8bf4f`，跨盘符测试修复 `8c496c0`；合并提交 `376f49f` 的代码树与已验证快照一致 |
+| 发布 | `changed-and-verified` | PR [#1](https://github.com/li735687283-gif/jimeng-flow-workbench/pull/1) 已合并；标签 `v0.1.9` 指向合并提交；[MO.K v0.1.9](https://github.com/li735687283-gif/jimeng-flow-workbench/releases/tag/v0.1.9) 已公开并设为 Latest，EXE、blockmap、`latest.yml` 三个资产已上传且摘要匹配 |
+| 文档 | `changed-and-verified` | 本报告补充闭环状态；用户指南同步刷新恢复、密钥脱敏和 Dreamina PATH-only 合同；历史 QA 与安全计划增加时间边界 |
+| 规则 | `verified-current` | 项目 `AGENTS.md` 的本地安全、生成任务隔离、持久化和测试规则与 v0.1.9 实现一致 |
+| 记忆 | `not-applicable` | 当前 Codex 生成记忆无本项目条目，且本次未获授权写入记忆 |
+| 实际安装与外部供应商 | `pending` | 未在干净 Windows 用户目录手动安装/启动，也未调用真实 Dreamina、Codex 或 OpenAI-compatible 供应商 |
+
+### Findings 处置
+
+- 原报告 3 项 P1 均已修复：视频任务 ID 持久化和中断恢复、恢复订阅终态清理、Agent 生成结果项目归属。
+- 原报告 10 项 P2 均已修复：Agent 会话归属与生成历史、订阅替换、重复提交锁、串行原子持久化、Codex 模型参数校验、SVG 响应安全、统一菜单以及 SSE 断线轮询兜底。
+- 原报告 P3 的密钥回显、用户错误提示、项目草稿隔离、临时目录清理、复制任务状态、图片编辑器回填、死代码、Dreamina 任意路径和截断上传均已修复并有回归覆盖。
+- `POST /api/generations` 的 4 MB body limit 保留为请求级防护；现役画布引用通过素材 ID 传递，不把该限制视为 v0.1.9 发布阻断项。
+
+### 未闭合风险
+
+- v0.1.9 安装包的 Authenticode 状态为 `NotSigned`。Release 已公开，但 Windows SmartScreen 可能显示“未知发布者”；补签需要稳定证书和新构建，不能在本次收尾中静默完成。
+- `apps/server/src/services/jimeng/index.ts` 的“找不到 CLI”错误仍错误提示填写 `dreamina.exe` 完整路径，与 PATH-only 合同矛盾；应在下一次代码发布中改为安装 CLI 并加入服务端 PATH。
+- 干净安装依赖时 `npm audit` 报告 1 个 moderate、22 个 high；未运行可能产生破坏性升级的 `npm audit fix --force`。
+- `npm run check` 已通过：Web 399/399、Desktop 21/21，根目录与 Server 全部测试通过；仍保留 13 条 lint warning 和 Vite 主 chunk 大于 500 kB 的提示。
+
+---
+
 > 审查方式：只读静态追踪 + 全量验证命令，未修改任何代码、未提交 Git。
 > 真相源：当前源码与测试（commit `1bbcb28`，工作区干净，无未提交改动）。
 
