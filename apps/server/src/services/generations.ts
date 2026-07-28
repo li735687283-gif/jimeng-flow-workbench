@@ -43,8 +43,9 @@ import { generateOpenAiCompatibleImage } from './openaiImage'
 import { generateOpenAiCompatibleVideo } from './openaiVideo'
 import { generateCodexCliImage, isCodexImageModel } from './codexImage'
 import { saveUploadFile } from './assets'
-import { getFlow, updateFlow } from './flows'
+import { updateFlowNodesAtomically } from './flows'
 import { getSettings } from './settings'
+import { cleanupOwnedResultBatch } from './ownedTempDirectories'
 import { resolveWorkspaceInputPath } from '../config'
 
 /** 生成任务 ID：gen_<timestamp>_<random> */
@@ -476,30 +477,44 @@ async function persistImageGenerationResultToFlow(
       .filter((assetId): assetId is string => !!assetId) ?? []
 
   try {
-    const flow = await getFlow(flowId)
-    const next = applyImageGenerationResultToFlow(flow, {
-      nodeId: req.nodeId,
-      generationId: record.id,
-      prompt: req.prompt,
-      model: req.model,
-      width: req.width,
-      height: req.height,
-      count: req.count,
-      seed: req.seed ?? null,
-      inputImageAssetIds: req.inputImages ?? [],
-      assetIds,
-      status: record.status,
-      error: record.error,
-      createdAt: record.createdAt,
-      updatedAt: record.finishedAt ?? new Date().toISOString(),
+    await updateFlowNodesAtomically(flowId, (flow) => {
+      const next = applyImageGenerationResultToFlow(flow, {
+        nodeId: req.nodeId,
+        generationId: record.id,
+        prompt: req.prompt,
+        model: req.model,
+        width: req.width,
+        height: req.height,
+        count: req.count,
+        seed: req.seed ?? null,
+        inputImageAssetIds: req.inputImages ?? [],
+        assetIds,
+        status: record.status,
+        error: record.error,
+        createdAt: record.createdAt,
+        updatedAt: record.finishedAt ?? new Date().toISOString(),
+      })
+      return next.nodes
     })
-
-    if (next !== flow) {
-      await updateFlow(flowId, { nodes: next.nodes })
-    }
   } catch (err) {
     console.warn('[generations] 写回图片生成结果到 flow 失败:', err)
   }
+}
+
+export async function persistImageGenerationResponseToFlow(
+  req: GenerationRequest,
+  response: GenerationResponse,
+): Promise<void> {
+  await persistImageGenerationResultToFlow(req, {
+    id: response.id,
+    nodeId: req.nodeId,
+    status: response.status,
+    error: response.error,
+    results: response.results,
+    request: req,
+    createdAt: response.createdAt,
+    finishedAt: response.finishedAt,
+  })
 }
 
 async function persistVideoGenerationResultToFlow(
@@ -515,33 +530,31 @@ async function persistVideoGenerationResultToFlow(
       .filter((assetId): assetId is string => !!assetId) ?? []
 
   try {
-    const flow = await getFlow(flowId)
-    const next = applyVideoGenerationResultToFlow(flow, {
-      nodeId: req.nodeId,
-      generationId: record.id,
-      prompt: req.prompt,
-      model: req.model,
-      mode: req.mode,
-      aspectRatio: req.aspectRatio,
-      resolution: req.resolution,
-      quality: req.quality,
-      durationSeconds: req.durationSeconds,
-      count: req.count,
-      generateAudio: req.generateAudio,
-      inputImageAssetIds: req.inputImages ?? [],
-      references: normalizeVideoReferences(req.references).length > 0
-        ? normalizeVideoReferences(req.references)
-        : buildVideoReferencesFromInputImages(req.mode, req.inputImages),
-      assetIds,
-      status: record.status,
-      error: record.error,
-      createdAt: record.createdAt,
-      updatedAt: record.finishedAt ?? new Date().toISOString(),
+    await updateFlowNodesAtomically(flowId, (flow) => {
+      const next = applyVideoGenerationResultToFlow(flow, {
+        nodeId: req.nodeId,
+        generationId: record.id,
+        prompt: req.prompt,
+        model: req.model,
+        mode: req.mode,
+        aspectRatio: req.aspectRatio,
+        resolution: req.resolution,
+        quality: req.quality,
+        durationSeconds: req.durationSeconds,
+        count: req.count,
+        generateAudio: req.generateAudio,
+        inputImageAssetIds: req.inputImages ?? [],
+        references: normalizeVideoReferences(req.references).length > 0
+          ? normalizeVideoReferences(req.references)
+          : buildVideoReferencesFromInputImages(req.mode, req.inputImages),
+        assetIds,
+        status: record.status,
+        error: record.error,
+        createdAt: record.createdAt,
+        updatedAt: record.finishedAt ?? new Date().toISOString(),
+      })
+      return next.nodes
     })
-
-    if (next !== flow) {
-      await updateFlow(flowId, { nodes: next.nodes })
-    }
   } catch (err) {
     console.warn('[generations] 写回视频生成结果到 flow 失败:', err)
   }
@@ -717,7 +730,7 @@ async function saveImageGenerationResult(
 }
 
 interface ImageGenerationResultsForRequestDeps {
-  settings?: Pick<Settings, 'modelConfigs'>
+  settings?: Pick<Settings, 'modelConfigs'> & Partial<Pick<Settings, 'outputDir'>>
   generateImageImpl?: typeof generateImage
   generateCodexCliImageImpl?: typeof generateCodexCliImage
   generateOpenAiCompatibleImageImpl?: typeof generateOpenAiCompatibleImage
@@ -764,27 +777,31 @@ export async function generateImageResultsForRequest(
   const errors: string[] = []
   const saveResult = deps.saveImageGenerationResultImpl ?? saveImageGenerationResult
 
-  for (const result of rawResults) {
-    try {
-      const savedResult = await saveResult(result, req, provider)
-      saved.push(savedResult)
-      successCount++
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      saved.push({
-        ...result,
-        assetId: undefined,
-      })
-      errors.push(message)
+  try {
+    for (const result of rawResults) {
+      try {
+        const savedResult = await saveResult(result, req, provider)
+        saved.push(savedResult)
+        successCount++
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        saved.push({
+          ...result,
+          assetId: undefined,
+        })
+        errors.push(message)
+      }
     }
-  }
 
-  return {
-    provider,
-    results: saved,
-    successCount,
-    errors,
-    error: summarizeImageSaveErrors(successCount, rawResults.length, errors),
+    return {
+      provider,
+      results: saved,
+      successCount,
+      errors,
+      error: summarizeImageSaveErrors(successCount, rawResults.length, errors),
+    }
+  } finally {
+    await cleanupOwnedResultBatch(rawResults)
   }
 }
 
@@ -967,6 +984,9 @@ async function createImageGeneration(
   }
   store.set(id, record)
 
+  // 先把任务 ID 与 queued 状态写回原 flow，确保刷新或切换项目后仍能恢复任务。
+  await persistImageGenerationResultToFlow(req, record)
+
   // 异步执行生成任务
   setImmediate(() => {
     runImageGeneration(id, req).catch(() => {
@@ -987,6 +1007,7 @@ async function runImageGeneration(
 
   try {
     record.status = 'running'
+    await persistImageGenerationResultToFlow(req, record)
     notifyListeners(record)
 
     const settings = await getSettings()
@@ -1023,6 +1044,9 @@ async function createVideoGeneration(
   }
   store.set(id, record)
 
+  // 先把任务 ID 与 queued 状态写回原 flow，确保刷新或切换项目后仍能恢复任务。
+  await persistVideoGenerationResultToFlow(req, record)
+
   // 异步执行生成任务
   setImmediate(() => {
     runVideoGeneration(id, req).catch(() => {
@@ -1043,6 +1067,7 @@ async function runVideoGeneration(
 
   try {
     record.status = 'running'
+    await persistVideoGenerationResultToFlow(req, record)
     notifyListeners(record)
 
     const settings = await getSettings()
@@ -1055,19 +1080,23 @@ async function runVideoGeneration(
     const saved: GenerationResult[] = []
     let successCount = 0
     const errors: string[] = []
-    for (const r of results) {
-      try {
-        const s = await saveVideoGenerationResult(r, req, provider)
-        saved.push(s)
-        successCount++
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        saved.push({
-          ...r,
-          assetId: undefined,
-        })
-        errors.push(msg)
+    try {
+      for (const r of results) {
+        try {
+          const s = await saveVideoGenerationResult(r, req, provider)
+          saved.push(s)
+          successCount++
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          saved.push({
+            ...r,
+            assetId: undefined,
+          })
+          errors.push(msg)
+        }
       }
+    } finally {
+      await cleanupOwnedResultBatch(results)
     }
 
     record.results = saved

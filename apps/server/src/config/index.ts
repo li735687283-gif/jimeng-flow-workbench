@@ -2,7 +2,7 @@
 // 负责读取、写入 workspace/config/settings.json，并自动创建目录、合并默认值。
 // 参考 PRD 8.5、8.6、11.3、12.1。
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Settings } from '@jimeng-flow/shared'
@@ -12,6 +12,7 @@ import {
   normalizeModelConfigs,
   normalizeThemeBackgroundMode,
 } from '@jimeng-flow/shared'
+import { runSerializedFileOperation, writeJsonAtomic } from '../services/jsonFilePersistence'
 
 const configuredProjectRoot = process.env.MOK_PROJECT_ROOT?.trim()
 // 项目根目录仅用于 CLI cwd；持久化数据使用独立的 workspace 根目录。
@@ -41,6 +42,11 @@ export function getProjectRoot(): string {
 /** 返回配置、工作流和生成素材共用的稳定数据目录。 */
 export function getWorkspaceDir(): string {
   return WORKSPACE_DIR
+}
+
+/** Serialize one complete settings read-modify-write transaction. */
+export function runSettingsFileOperation<T>(operation: () => Promise<T>): Promise<T> {
+  return runSerializedFileOperation(CONFIG_FILE, operation)
 }
 
 export function resolveWorkspaceDataPathFrom(
@@ -135,6 +141,10 @@ function mergeWithDefaults(raw: unknown): Settings {
       ;(result[key] as unknown) = normalizeThemeBackgroundMode(value)
       return
     }
+    if (key === 'dreaminaPath') {
+      ;(result[key] as unknown) = DEFAULT_SETTINGS.dreaminaPath
+      return
+    }
     if (key === 'modelConfigs') {
       ;(result[key] as unknown) = normalizeModelConfigs(value)
       return
@@ -191,7 +201,5 @@ export async function readSettings(): Promise<Settings> {
 
 /** 写入 settings；自动创建目录 */
 export async function writeSettings(settings: Settings): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true })
-  const content = JSON.stringify(settings, null, 2)
-  await writeFile(CONFIG_FILE, content, 'utf8')
+  await writeJsonAtomic(CONFIG_FILE, settings)
 }

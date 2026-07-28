@@ -37,6 +37,8 @@ import {
 import {
   createSettingsDraft,
   getSettingsModalGuards,
+  isSettingsSecretMasked,
+  omitMaskedSettingsSecrets,
 } from '../utils/settingsModalState'
 import {
   type CodexStatus,
@@ -54,6 +56,8 @@ export interface SettingsModalProps {
 
 // 表单状态：以完整 Settings 形式保存，避免字段缺失
 type FormState = Settings
+
+const MASKED_KEY_TEST_MESSAGE = '已保存密钥不会回显；如需测试连接，请重新输入密钥'
 
 const sectionStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--theme-border, #2a2a2a)',
@@ -533,7 +537,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   useEffect(() => {
     if (!open || !settings || autoFetchedModelsRef.current) return
-    if (!settings.llmBaseUrl.trim() || !settings.llmApiKey.trim()) return
+    if (
+      !settings.llmBaseUrl.trim() ||
+      !settings.llmApiKey.trim() ||
+      isSettingsSecretMasked(settings.llmApiKey)
+    ) return
     autoFetchedModelsRef.current = true
     void refreshLlmModels(settings, { silent: true })
   }, [open, settings])
@@ -589,7 +597,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         videoModels: cleanedVideoModels,
       }
       nextForm.modelConfigs = buildModelConfigsFromSettings(nextForm)
-      await saveSettings(nextForm)
+      await saveSettings(omitMaskedSettingsSecrets(nextForm))
       const confirmedTheme = normalizeCanvasTheme(nextForm.canvasTheme)
       const confirmedBackgroundMode = normalizeThemeBackgroundMode(nextForm.themeBackgroundMode)
       confirmedThemeRef.current = confirmedTheme
@@ -635,7 +643,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setTestingJimeng(true)
     setJimengTestResult(null)
     try {
-      const result = await testJimengConnection(form)
+      const result = await testJimengConnection(omitMaskedSettingsSecrets(form))
       setJimengTestResult({
         ok: result.ok,
         message: result.message ?? (result.ok ? '连接成功' : '连接失败'),
@@ -695,6 +703,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
 
   const handleTestLlm = async () => {
+    if (isSettingsSecretMasked(form.llmApiKey)) {
+      setLlmTestResult({ ok: false, message: MASKED_KEY_TEST_MESSAGE })
+      return
+    }
     setTestingLlm(true)
     setLlmTestResult(null)
     try {
@@ -715,6 +727,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   const handleTestApiProvider = async (providerId: ApiProviderId) => {
     const definition = API_PROVIDER_DEFINITIONS[providerId]
+    const apiKey = String(form[definition.apiKeyKey] ?? '')
+    if (isSettingsSecretMasked(apiKey)) {
+      setApiProviderTestResults((current) => ({
+        ...current,
+        [providerId]: { ok: false, message: MASKED_KEY_TEST_MESSAGE },
+      }))
+      return
+    }
     setTestingApiProvider(providerId)
     setApiProviderTestResults((current) => {
       const next = { ...current }
@@ -724,7 +744,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     try {
       const result = await testLlmConnection({
         llmBaseUrl: String(form[definition.baseUrlKey] ?? ''),
-        llmApiKey: String(form[definition.apiKeyKey] ?? ''),
+        llmApiKey: apiKey,
       })
       setApiProviderTestResults((current) => ({
         ...current,
@@ -750,6 +770,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     target: Partial<Settings> = form,
     opts?: { silent?: boolean },
   ) {
+    if (isSettingsSecretMasked(target.llmApiKey)) {
+      if (!opts?.silent) setLlmModelsMessage(MASKED_KEY_TEST_MESSAGE)
+      return
+    }
     setLoadingLlmModels(true)
     if (!opts?.silent) setLlmModelsMessage(null)
     try {
@@ -1270,16 +1294,18 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             {renderTestResult(jimengTestResult)}
             <div style={fieldStyle}>
               <label style={labelStyle} htmlFor="set-dreamina-path">
-                dreamina 命令路径
+                dreamina 命令
               </label>
               <input
                 id="set-dreamina-path"
                 style={inputStyle}
                 value={form.dreaminaPath}
-                onChange={(e) => update('dreaminaPath', e.target.value)}
+                readOnly
+                aria-readonly="true"
+                title="出于本地执行安全考虑，固定通过服务端 PATH 查找 dreamina"
               />
               <span style={{ color: 'var(--theme-muted, #777)', fontSize: 11 }}>
-                生成将使用本机即梦登录态，不需要火山引擎 API Key。首次使用请先在终端运行 dreamina login。
+                固定通过服务端 PATH 查找 dreamina。生成使用本机即梦登录态，首次使用请先在终端运行 dreamina login。
               </span>
             </div>
             <div style={{ ...fieldStyle, gap: '16px', marginTop: '8px' }}>

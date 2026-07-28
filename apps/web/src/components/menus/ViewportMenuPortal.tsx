@@ -11,7 +11,8 @@ import { createPortal } from 'react-dom'
 import { getFloatingMenuPlacement } from '../../utils/floatingMenuPlacement'
 
 interface ViewportMenuPortalProps {
-  anchorRef: RefObject<HTMLElement | null>
+  anchorRef?: RefObject<HTMLElement | null>
+  anchorPoint?: { x: number; y: number }
   children: ReactNode
   className: string
   open: boolean
@@ -35,6 +36,7 @@ const HIDDEN_STYLE: CSSProperties = {
 
 export function ViewportMenuPortal({
   anchorRef,
+  anchorPoint,
   children,
   className,
   open,
@@ -56,11 +58,19 @@ export function ViewportMenuPortal({
     if (!open) return
 
     const updatePlacement = () => {
-      const anchor = anchorRef.current
+      const anchor = anchorRef?.current
       const menu = menuRef.current
-      if (!anchor || !menu) return
+      if ((!anchor && !anchorPoint) || !menu) return
 
-      const anchorRect = anchor.getBoundingClientRect()
+      const anchorRect = anchor
+        ? anchor.getBoundingClientRect()
+        : {
+            left: anchorPoint?.x ?? 0,
+            right: anchorPoint?.x ?? 0,
+            top: anchorPoint?.y ?? 0,
+            bottom: anchorPoint?.y ?? 0,
+            width: 0,
+          }
       const next = getFloatingMenuPlacement({
         triggerLeft: anchorRect.left,
         triggerRight: anchorRect.right,
@@ -92,7 +102,7 @@ export function ViewportMenuPortal({
       typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver(updatePlacement)
-    if (anchorRef.current) observer?.observe(anchorRef.current)
+    if (anchorRef?.current) observer?.observe(anchorRef.current)
     if (menuRef.current) observer?.observe(menuRef.current)
     window.addEventListener('resize', updatePlacement)
     window.addEventListener('scroll', updatePlacement, true)
@@ -103,7 +113,7 @@ export function ViewportMenuPortal({
       window.removeEventListener('resize', updatePlacement)
       window.removeEventListener('scroll', updatePlacement, true)
     }
-  }, [align, anchorRef, gap, margin, minWidth, open])
+  }, [align, anchorPoint, anchorRef, gap, margin, minWidth, open])
 
   useEffect(() => {
     if (!open) return
@@ -111,7 +121,7 @@ export function ViewportMenuPortal({
     const closeOutside = (event: MouseEvent) => {
       const target = event.target as Node
       if (
-        !anchorRef.current?.contains(target) &&
+        !anchorRef?.current?.contains(target) &&
         !menuRef.current?.contains(target)
       ) {
         onClose()

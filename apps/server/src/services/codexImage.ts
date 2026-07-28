@@ -30,6 +30,12 @@ import {
 } from '../config'
 import { getAsset, getAssetFilePath } from './assets'
 import { getSettings } from './settings'
+import {
+  cleanupOwnedTempDirectory,
+  createOwnedTempDirectory,
+  handoffOwnedTempDirectory,
+  type OwnedTempDirectory,
+} from './ownedTempDirectories'
 
 const IMAGE_EXTENSIONS = new Set([
   '.png',
@@ -152,6 +158,18 @@ function getCodexPath(
   return process.platform === 'win32' ? 'codex.cmd' : 'codex'
 }
 
+const SAFE_CODEX_MODEL_ARGUMENT = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
+
+export function isSafeCodexModelArgument(value: string): boolean {
+  return SAFE_CODEX_MODEL_ARGUMENT.test(value)
+}
+
+function assertSafeCodexModelArgument(value: string): void {
+  if (!isSafeCodexModelArgument(value)) {
+    throw new Error('Codex 模型标识只允许字母、数字、点、下划线、冒号和连字符')
+  }
+}
+
 function getCodexExecModel(modelId: string): string {
   const raw = modelId.trim()
   const id = normalizeModelId(raw)
@@ -163,6 +181,7 @@ function getCodexExecModel(modelId: string): string {
   if (!value || normalized === '$imagegen' || normalized === 'gpt-image-2') {
     return ''
   }
+  assertSafeCodexModelArgument(value)
   return value
 }
 
@@ -170,8 +189,13 @@ function getCodexTextExecModel(modelId: string): string {
   const raw = modelId.trim()
   const id = normalizeModelId(raw)
   if (!id || id.startsWith('$imagegen') || id.startsWith('gpt-image')) return ''
-  if (!id.startsWith('codex:')) return raw
-  return raw.slice(raw.indexOf(':') + 1).trim()
+
+  const value = id.startsWith('codex:')
+    ? raw.slice(raw.indexOf(':') + 1).trim()
+    : raw
+  if (!value) return ''
+  assertSafeCodexModelArgument(value)
+  return value
 }
 
 function getCodexTimeoutMs(
@@ -556,9 +580,14 @@ async function createTempImageFile(
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'codex-flow-ref-'))
   const filePath = join(dir, `reference-${randomBytes(4).toString('hex')}${ext}`)
-  await writeFile(filePath, buffer)
-  tempPaths.push(filePath)
-  return filePath
+  try {
+    await writeFile(filePath, buffer)
+    tempPaths.push(filePath)
+    return filePath
+  } catch (err) {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined)
+    throw err
+  }
 }
 
 async function resolveInputImagePath(
@@ -835,7 +864,7 @@ function buildCodexImagePrompt(
 
 async function cleanupTempPaths(paths: string[]): Promise<void> {
   const dirs = new Set(paths.map((path) => resolve(path, '..')))
-  await Promise.all(Array.from(dirs).map((dir) => rm(dir, {
+  await Promise.allSettled(Array.from(dirs).map((dir) => rm(dir, {
     recursive: true,
     force: true,
   })))
@@ -950,13 +979,16 @@ export async function generateCodexCliImage(
   const fileExists = deps.fileExists ?? defaultFileExists
   const timeoutMs = getCodexTimeoutMs(deps)
   const tempPaths: string[] = []
+  let runOutputOwner: OwnedTempDirectory | undefined
+  let handedOff = false
 
   await mkdir(outputDir, { recursive: true })
 
   try {
     // 每个任务使用独立目录，避免多个排队任务扫描同一个输出目录时
     // 把前一项任务的图片误认成自己的结果。
-    const runOutputDir = await mkdtemp(join(outputDir, '.codex-image-'))
+    runOutputOwner = await createOwnedTempDirectory(outputDir, '.codex-image-')
+    const runOutputDir = runOutputOwner.path
     const referencePaths = await resolveInputImagePaths(
       req.inputImages,
       deps,
@@ -1018,7 +1050,9 @@ export async function generateCodexCliImage(
       { cwd, runOutputDir, fileExists },
     )
     if (reportedResults.length > 0) {
-      return reportedResults.slice(0, Math.max(1, req.count ?? 1))
+      const results = reportedResults.slice(0, Math.max(1, req.count ?? 1))
+      handedOff = handoffOwnedTempDirectory(results, runOutputOwner)
+      return results
     }
 
     const newFiles = getNewImageFiles(
@@ -1033,8 +1067,13 @@ export async function generateCodexCliImage(
       )
     }
 
-    return newFiles.map((file) => ({ localPath: file.path }))
+    const results = newFiles.map((file) => ({ localPath: file.path }))
+    handedOff = handoffOwnedTempDirectory(results, runOutputOwner)
+    return results
   } finally {
     await cleanupTempPaths(tempPaths)
+    if (runOutputOwner && !handedOff) {
+      await cleanupOwnedTempDirectory(runOutputOwner)
+    }
   }
 }

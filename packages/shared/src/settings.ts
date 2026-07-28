@@ -269,7 +269,7 @@ export interface Settings {
   authMode: AuthMode;
   /** 旧 HTTP 适配器 API key / cookie / token 明文（本地工具） */
   apiKey: string;
-  /** 即梦官方 CLI 可执行文件路径；默认通过 PATH 查找 dreamina */
+  /** 即梦官方 CLI 命令；固定通过服务端 PATH 查找 dreamina */
   dreaminaPath: string;
 
   /** 中转站或 OpenAI-compatible LLM 服务地址 */
@@ -336,6 +336,26 @@ export interface Settings {
 
   /** 结构化模型配置：逐步表达 provider + capability，兼容旧字符串数组。 */
   modelConfigs: ModelConfig[];
+}
+
+export const SETTINGS_SECRET_MASK = "********";
+export const SETTINGS_SECRET_KEYS = [
+  "apiKey",
+  "llmApiKey",
+  "kimiApiKey",
+  "kimiCodingApiKey",
+  "deepseekApiKey",
+] as const;
+
+export type SettingsSecretKey = (typeof SETTINGS_SECRET_KEYS)[number];
+
+/** HTTP settings responses never expose persisted credential values. */
+export interface SettingsResponse extends Settings {
+  hasApiKey: boolean;
+  hasLlmApiKey: boolean;
+  hasKimiApiKey: boolean;
+  hasKimiCodingApiKey: boolean;
+  hasDeepseekApiKey: boolean;
 }
 
 /** 默认 Settings 值（参考 PRD 11.3 与任务说明） */

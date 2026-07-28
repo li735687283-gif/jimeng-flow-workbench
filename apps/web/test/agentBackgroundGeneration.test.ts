@@ -54,6 +54,6 @@ test('auto and manual Agent flows stop after handing media work to the canvas', 
   )
   assert.match(
     panelSource,
-    /if \(!shouldFinishAgentTurnAfterToolResults\(results\)\) \{\s*await runAgentLoop\(true\)\s*\}/,
+    /if \(isOwnerActive\(\) && !shouldFinishAgentTurnAfterToolResults\(results\)\) \{\s*await runAgentLoop\(true\)\s*\}/,
   )
 })

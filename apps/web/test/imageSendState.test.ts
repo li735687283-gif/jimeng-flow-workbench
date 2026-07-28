@@ -1,6 +1,19 @@
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import {
+  releaseGenerationSubmission,
+  tryAcquireGenerationSubmission,
+} from '../src/utils/generationSubmissionLock'
+
+test('image generation submission lock rejects a second click until released', () => {
+  const lock = { current: false }
+
+  assert.equal(tryAcquireGenerationSubmission(lock), true)
+  assert.equal(tryAcquireGenerationSubmission(lock), false)
+  releaseGenerationSubmission(lock)
+  assert.equal(tryAcquireGenerationSubmission(lock), true)
+})
 
 test('image send button stays busy until generation reaches a terminal state', () => {
   const source = readFileSync('apps/web/src/nodes/ImageNode.tsx', 'utf8')

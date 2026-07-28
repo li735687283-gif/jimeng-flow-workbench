@@ -35,7 +35,9 @@ test('image node exposes the 3-image count and persists the selected result as p
     'utf8',
   )
 
-  assert.match(source, /const COUNT_OPTIONS = \[1, 2, 3, 4\] as const/)
+  const { COUNT_OPTIONS } = await import('../src/utils/imageEditorState')
+
+  assert.deepEqual(COUNT_OPTIONS, [1, 2, 3, 4])
   assert.match(source, /ImageResultGallery/)
   assert.match(source, /outputAssetIds: nextOutputAssetIds/)
   assert.match(source, /setSendError\(`主图已切换/) 

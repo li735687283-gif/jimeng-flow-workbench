@@ -117,6 +117,28 @@ test('Agent panel confirms pending tool calls in manual mode and reports results
   assert.match(styles, /\.agent-action-confirm/)
 })
 
+test('completed Agent tools settle on their owner before inactive runs stop', () => {
+  // 工具可能已经创建节点并产生计费；即使用户切了会话，也必须先把结果写回原会话，
+  // 再终止后续 LLM continuation，避免原卡片保持 pending 后被重复执行。
+  assert.match(
+    source,
+    /addActionResultsToConversation\(\s*owner\.projectId,\s*owner\.conversationId,/,
+  )
+  assert.match(
+    source,
+    /addActionResultsToConversation\([\s\S]*?if \(!isOwnerActive\(\)\) return/,
+  )
+  assert.match(
+    source,
+    /if \(!text \|\| loading \|\| executingMessageId \|\| !currentModel\) return/,
+  )
+  assert.match(
+    source,
+    /if \(pending\.length === 0 \|\| loading \|\| executingMessageId\) return/,
+  )
+  assert.match(source, /disabled=\{loading \|\| executingMessageId !== null\}/)
+})
+
 test('Agent panel dropped roles, skills, templates and storyboard', () => {
   assert.doesNotMatch(source, /AGENT_ROLES|AGENT_TEMPLATES|AGENT_SKILLS/)
   assert.doesNotMatch(source, /agentSkills|agentVideoGeneration/)

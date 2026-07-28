@@ -39,6 +39,89 @@ test('mergeNodesForFlowUpdate keeps generated image asset when a stale autosave 
   assert.equal(merged[0].data.status, 'success')
 })
 
+test('mergeNodesForFlowUpdate keeps no-asset generation states when a stale autosave omits their ids', () => {
+  for (const [index, status] of ['queued', 'running', 'error'].entries()) {
+    const id = `generation-${status}`
+    const currentNodes: FlowNode[] = [
+      {
+        id,
+        type: index === 2 ? 'video' : 'image',
+        position: { x: 0, y: 0 },
+        data: {
+          title: id,
+          status,
+          error: status === 'error' ? 'provider failed' : undefined,
+          generationId: `gen_${status}`,
+          generationRuns: [],
+          updatedAt: '2026-07-05T12:00:00.000Z',
+        },
+      },
+    ]
+    const incomingNodes: FlowNode[] = [
+      {
+        id,
+        type: index === 2 ? 'video' : 'image',
+        position: { x: 10, y: 20 },
+        data: {
+          title: id,
+          status: 'idle',
+          updatedAt: '2026-07-05T11:59:00.000Z',
+        },
+      },
+    ]
+
+    const merged = mergeNodesForFlowUpdate(currentNodes, incomingNodes)
+
+    assert.equal(merged[0].data.generationId, `gen_${status}`)
+    assert.equal(merged[0].data.status, status)
+    assert.equal(
+      merged[0].data.error,
+      status === 'error' ? 'provider failed' : undefined,
+    )
+    assert.deepEqual(merged[0].position, { x: 10, y: 20 })
+  }
+})
+
+test('mergeNodesForFlowUpdate does not regress the same generation from running or terminal to queued', () => {
+  for (const currentStatus of ['running', 'success', 'error']) {
+    const currentNodes: FlowNode[] = [
+      {
+        id: `generation-${currentStatus}`,
+        type: currentStatus === 'error' ? 'video' : 'image',
+        position: { x: 0, y: 0 },
+        data: {
+          status: currentStatus,
+          error: currentStatus === 'error' ? 'provider failed' : undefined,
+          generationId: 'gen_same',
+          updatedAt: '2026-07-05T12:00:00.000Z',
+        },
+      },
+    ]
+    const incomingNodes: FlowNode[] = [
+      {
+        id: `generation-${currentStatus}`,
+        type: currentStatus === 'error' ? 'video' : 'image',
+        position: { x: 20, y: 30 },
+        data: {
+          status: 'queued',
+          generationId: 'gen_same',
+          updatedAt: '2026-07-05T12:01:00.000Z',
+        },
+      },
+    ]
+
+    const merged = mergeNodesForFlowUpdate(currentNodes, incomingNodes)
+
+    assert.equal(merged[0].data.status, currentStatus)
+    assert.equal(merged[0].data.generationId, 'gen_same')
+    assert.equal(
+      merged[0].data.error,
+      currentStatus === 'error' ? 'provider failed' : undefined,
+    )
+    assert.deepEqual(merged[0].position, { x: 20, y: 30 })
+  }
+})
+
 test('mergeNodesForFlowUpdate keeps image generation history when a stale autosave omits it', () => {
   const currentNodes: FlowNode[] = [
     {
@@ -374,4 +457,37 @@ test('mergeNodesForFlowUpdate does not restore generated nodes that were explici
 
   assert.equal(merged.length, 1)
   assert.equal(merged[0].id, 'text-1')
+})
+
+test('mergeNodesForFlowUpdate keeps a successful asset over a later client-side error for the same generation', () => {
+  const currentNodes: FlowNode[] = [{
+    id: 'image-success',
+    type: 'image',
+    position: { x: 0, y: 0 },
+    data: {
+      status: 'success',
+      assetId: 'asset-success',
+      outputAssetIds: ['asset-success'],
+      generationId: 'gen-success',
+      updatedAt: '2026-07-05T12:00:00.000Z',
+    },
+  }]
+  const incomingNodes: FlowNode[] = [{
+    id: 'image-success',
+    type: 'image',
+    position: { x: 40, y: 50 },
+    data: {
+      status: 'error',
+      error: '客户端订阅超时',
+      generationId: 'gen-success',
+      updatedAt: '2026-07-05T12:01:00.000Z',
+    },
+  }]
+
+  const merged = mergeNodesForFlowUpdate(currentNodes, incomingNodes)
+
+  assert.equal(merged[0].data.status, 'success')
+  assert.equal(merged[0].data.assetId, 'asset-success')
+  assert.equal(merged[0].data.error, undefined)
+  assert.deepEqual(merged[0].position, { x: 40, y: 50 })
 })

@@ -63,3 +63,33 @@ test('project rules require the unified secondary-menu template', () => {
   assert.equal(source.includes('<select'), false)
   assert.equal((source.match(/<SecondaryMenuSelect/g) ?? []).length >= 2, true)
 })
+
+test('VideoComposer replaces all native parameter selects with unified menus', () => {
+  const source = readFileSync(
+    'apps/web/src/components/VideoComposer.tsx',
+    'utf8',
+  )
+
+  assert.equal(source.includes('<select'), false)
+  assert.equal((source.match(/<SecondaryMenuSelect/g) ?? []).length, 5)
+  for (const label of ['视频模型', '视频模式', '视频比例', '视频分辨率', '视频秒数']) {
+    assert.match(source, new RegExp('label="' + label + '"'))
+  }
+})
+
+test('point-anchored canvas menus reuse viewport collision and Escape handling', () => {
+  const portalSource = readFileSync(
+    'apps/web/src/components/menus/ViewportMenuPortal.tsx',
+    'utf8',
+  )
+  for (const file of ['ContextMenu.tsx', 'AddNodeMenu.tsx', 'ReferenceNodeMenu.tsx']) {
+    const source = readFileSync('apps/web/src/components/menus/' + file, 'utf8')
+    assert.match(source, /<ViewportMenuPortal/)
+    assert.match(source, /anchorPoint={{ x: state.x, y: state.y }}/)
+    assert.doesNotMatch(source, /menu-overlay/)
+  }
+  assert.equal(portalSource.includes('anchorPoint?: { x: number; y: number }'), true)
+  assert.match(portalSource, /getFloatingMenuPlacement/)
+  assert.match(portalSource, /event.key === 'Escape'/)
+  assert.match(portalSource, /maxHeight: next.maxHeight/)
+})

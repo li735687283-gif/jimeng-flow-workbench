@@ -16,6 +16,18 @@ function normalizeVideoCount(count: number): VideoNodeData['count'] {
   return count === 2 || count === 4 ? count : 1
 }
 
+export function isInterruptedVideoGeneration(
+  status: unknown,
+  generationId: unknown,
+  requestInFlight: boolean,
+): boolean {
+  return (
+    !requestInFlight &&
+    (status === 'queued' || status === 'running') &&
+    (typeof generationId !== 'string' || generationId.trim().length === 0)
+  )
+}
+
 export function resolveVideoInputImages(
   storedInputImages: string[] | undefined,
   upstreamInputImages: string[] | undefined,

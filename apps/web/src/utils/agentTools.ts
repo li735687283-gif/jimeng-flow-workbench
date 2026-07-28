@@ -9,8 +9,11 @@ import type {
 } from '@jimeng-flow/shared/agentMessage'
 import {
   IMAGE_COUNTS,
+  appendImageGenerationRun,
   type GenerationRequest,
+  type GenerationResponse,
   type GenerationResult,
+  type ImageGenerationRun,
 } from '@jimeng-flow/shared/generateNode'
 import {
   VIDEO_ASPECT_RATIOS,
@@ -29,8 +32,8 @@ import {
 import {
   createEditGeneration,
   createGeneration,
-  subscribeGeneration,
 } from '../api/generations'
+import type { GenerationSseCallback } from '../api/generations'
 import { useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore, getCurrentFlowId } from '../state/flowStore'
@@ -45,7 +48,9 @@ import {
   type AgentImageResolution,
 } from './agentGenerationPlan'
 import { prepareAgentImagePrompt } from './agentImagePrompt'
+import { buildImageGenerationRunFromResponse } from './imageGenerationHistory'
 import { shouldBlockAgentImageEditGeneration } from './agentImageNodes'
+import { subscribeGenerationWithFallback } from './generationStatusSubscription'
 import { resolveGenerationFlowId } from './generationFlow'
 import {
   getConfiguredDefaultImageModel,
@@ -68,6 +73,51 @@ export interface AgentToolExecutionContext {
   getDropPosition: () => { x: number; y: number }
 }
 
+export function isAgentFlowOwnerActive(
+  ownerFlowId: string,
+  currentFlowId: string | null | undefined,
+): boolean {
+  return resolveGenerationFlowId(currentFlowId) === ownerFlowId
+}
+
+export function createOwnedAgentGenerationCallbacks(
+  ownerFlowId: string,
+  callbacks: GenerationSseCallback,
+  getActiveFlowId: () => string | null = getCurrentFlowId,
+  settlementCallbacks: GenerationSseCallback = {},
+): GenerationSseCallback {
+  const isActive = () => isAgentFlowOwnerActive(ownerFlowId, getActiveFlowId())
+  return {
+    onUpdate: (response) => {
+      if (isActive()) callbacks.onUpdate?.(response)
+    },
+    onComplete: (response) => {
+      settlementCallbacks.onComplete?.(response)
+      if (isActive()) callbacks.onComplete?.(response)
+    },
+    onError: (error) => {
+      settlementCallbacks.onError?.(error)
+      if (isActive()) callbacks.onError?.(error)
+    },
+  }
+}
+
+function persistActiveAgentGenerationIdentity(
+  ownerFlowId: string,
+  nodeId: string,
+  response: GenerationResponse,
+): void {
+  if (!isAgentFlowOwnerActive(ownerFlowId, getCurrentFlowId())) return
+  useGenerateStore.getState().setGenerationId(nodeId, response.id)
+  useCanvasStore.getState().updateNodeData(nodeId, {
+    generationId: response.id,
+    status: response.status,
+    error: response.error,
+    updatedAt: new Date().toISOString(),
+  } as unknown as Partial<BaseNodeData>)
+  void useFlowStore.getState().saveCurrent().catch(() => undefined)
+}
+
 interface CanvasNodeLike {
   id: string
   type?: string | null
@@ -83,27 +133,40 @@ function fail(call: AgentToolCall, summary: string): AgentToolResult {
   return { callId: call.id, tool: call.tool, ok: false, summary }
 }
 
+interface AgentConversationOwner {
+  projectId: string | null
+  conversationId: string
+}
+
+function getActiveAgentConversationOwner(): AgentConversationOwner {
+  const state = useAgentStore.getState()
+  return {
+    projectId: state.activeProjectId,
+    conversationId: state.activeConversationId,
+  }
+}
+
 /**
  * Agent 提交的生成任务如果在后台失败(提交成功、但生成过程挂了),
- * 画布节点上只有一个不显眼的红点,用户会以为"已提交=迟早出图"。
- * 这里往 Agent 当前会话追加一条失败说明,让失败可见、可追问。
- * 只在用户仍停留在该项目的会话里时追加,避免串到别的项目的对话。
+ * 把失败说明定向写回发起任务的会话；用户切换项目或会话也不会串写。
  */
 function notifyAgentGenerationFailure(
-  flowId: string,
+  owner: AgentConversationOwner,
   mediaLabel: string,
   error: string,
 ): void {
-  const agentState = useAgentStore.getState()
-  if (resolveGenerationFlowId(agentState.activeProjectId) !== flowId) return
   const trimmed = error.trim()
-  agentState.addMessage({
-    id: `agent-gen-fail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    role: 'assistant',
-    content: `刚才提交的${mediaLabel}生成失败了：${trimmed || '未知错误'}\n你可以让我重试一次，或者换一个模型再试（在设置里可以调整默认模型）。`,
-    contextNodeIds: [],
-    createdAt: new Date().toISOString(),
-  })
+  useAgentStore.getState().addMessageToConversation(
+    owner.projectId,
+    owner.conversationId,
+    {
+      id: `agent-gen-fail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role: 'assistant',
+      content: `刚才提交的${mediaLabel}生成失败了：${trimmed || '未知错误'}\n你可以让我重试一次，或者换一个模型再试（在设置里可以调整默认模型）。`,
+      contextNodeIds: [],
+      createdAt: new Date().toISOString(),
+    },
+  )
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string {
@@ -358,6 +421,50 @@ export function resolveAgentImageParams(call: AgentToolCall, model: string): {
   return { aspectRatio, resolution, count }
 }
 
+interface AgentImageCompletionOptions {
+  quality?: string
+  ratio?: string
+  resolution?: string
+  inputImageAssetIds?: string[]
+  updatedAt?: string
+}
+
+export interface AgentImageCompletionPatch {
+  status: GenerationResponse['status']
+  error: GenerationResponse['error']
+  assetId?: string
+  outputAssetIds: string[]
+  generationId: string
+  generationRuns: ImageGenerationRun[]
+  updatedAt: string
+}
+
+export function buildAgentImageCompletionPatch(
+  response: GenerationResponse,
+  request: GenerationRequest,
+  currentGenerationRuns: unknown,
+  options: AgentImageCompletionOptions = {},
+): AgentImageCompletionPatch {
+  const outputAssetIds = response.results
+    ?.map((result) => result.assetId)
+    .filter((assetId): assetId is string => !!assetId) ?? []
+  const generationRun = buildImageGenerationRunFromResponse(response, request, {
+    quality: options.quality,
+    ratio: options.ratio,
+    resolution: options.resolution,
+    inputImageAssetIds: options.inputImageAssetIds,
+  })
+  return {
+    status: response.status,
+    error: response.error,
+    assetId: outputAssetIds[0],
+    outputAssetIds,
+    generationId: response.id,
+    generationRuns: appendImageGenerationRun(currentGenerationRuns, generationRun),
+    updatedAt: options.updatedAt ?? new Date().toISOString(),
+  }
+}
+
 async function runGenerateImage(
   call: AgentToolCall,
   context: AgentToolExecutionContext,
@@ -372,6 +479,7 @@ async function runGenerateImage(
   const size = getAgentImageDimensions(aspectRatio, resolution)
   const prompt = prepareAgentImagePrompt(promptArg)
 
+  const agentConversationOwner = getActiveAgentConversationOwner()
   const canvas = useCanvasStore.getState()
   const { nodes: inputImageNodes, assetIds: inputImageAssetIds } =
     getAgentToolInputImageNodes({
@@ -416,58 +524,84 @@ async function runGenerateImage(
   try {
     await useFlowStore.getState().saveCurrent()
     const response = await createGeneration(request)
-    generateStore.setGenerationId(imageNodeId, response.id)
+    persistActiveAgentGenerationIdentity(
+      request.flowId ?? 'local',
+      imageNodeId,
+      response,
+    )
 
-    subscribeGeneration(response.id, {
-      onUpdate: (data) => {
-        generateStore.setStatus(imageNodeId, data.status)
-        if (data.error) generateStore.setError(imageNodeId, data.error)
-        useCanvasStore.getState().updateNodeData(imageNodeId, {
-          status: data.status,
-          error: data.error,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-      },
-      onComplete: (data) => {
-        const results = data.results ?? []
-        const outputAssetIds = results
-          .map((result) => result.assetId)
-          .filter((assetId): assetId is string => !!assetId)
-        createAdditionalImageNodes(imageNodeId, results)
-        generateStore.setStatus(imageNodeId, data.status)
-        if (data.error) generateStore.setError(imageNodeId, data.error)
-        useCanvasStore.getState().updateNodeData(imageNodeId, {
-          status: data.status,
-          error: data.error,
-          assetId: results[0]?.assetId,
-          outputAssetIds,
-          generationId: data.id,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-        if (outputAssetIds.length > 0) {
-          useAgentStore.getState().setConversationContext({
-            lastPrompt: promptArg,
-            lastGeneratedAssetIds: outputAssetIds,
-          })
-        }
-        if (data.status === 'error') {
-          notifyAgentGenerationFailure(
-            request.flowId ?? 'local',
-            '图片',
-            data.error ?? '生成任务返回了错误状态',
+    subscribeGenerationWithFallback(
+      response.id,
+      createOwnedAgentGenerationCallbacks(request.flowId ?? 'local', {
+        onUpdate: (data) => {
+          generateStore.setStatus(imageNodeId, data.status)
+          if (data.error) generateStore.setError(imageNodeId, data.error)
+          useCanvasStore.getState().updateNodeData(imageNodeId, {
+            status: data.status,
+            error: data.error,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+        },
+        onComplete: (data) => {
+          const results = data.results ?? []
+          const latestData = useCanvasStore
+            .getState()
+            .nodes.find((node) => node.id === imageNodeId)
+            ?.data as { generationRuns?: unknown } | undefined
+          const completionPatch = buildAgentImageCompletionPatch(
+            data,
+            request,
+            latestData?.generationRuns,
+            {
+              ratio: aspectRatio,
+              resolution,
+              inputImageAssetIds,
+            },
           )
-        }
-      },
-      onError: (sseError) => {
-        generateStore.setError(imageNodeId, sseError)
-        useCanvasStore.getState().updateNodeData(imageNodeId, {
-          status: 'error',
-          error: sseError,
-          updatedAt: new Date().toISOString(),
-        } as unknown as Partial<BaseNodeData>)
-        notifyAgentGenerationFailure(request.flowId ?? 'local', '图片', sseError)
-      },
-    })
+          createAdditionalImageNodes(imageNodeId, results)
+          generateStore.setStatus(imageNodeId, data.status)
+          if (data.error) generateStore.setError(imageNodeId, data.error)
+          useCanvasStore.getState().updateNodeData(
+            imageNodeId,
+            completionPatch as unknown as Partial<BaseNodeData>,
+          )
+        },
+        onError: (sseError) => {
+          generateStore.setError(imageNodeId, sseError)
+          useCanvasStore.getState().updateNodeData(imageNodeId, {
+            status: 'error',
+            error: sseError,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+        },
+      }, getCurrentFlowId, {
+        onComplete: (data) => {
+          const outputAssetIds = data.results
+            ?.map((result) => result.assetId)
+            .filter((assetId): assetId is string => !!assetId) ?? []
+          if (outputAssetIds.length > 0) {
+            useAgentStore.getState().setConversationContextFor(
+              agentConversationOwner.projectId,
+              agentConversationOwner.conversationId,
+              {
+                lastPrompt: promptArg,
+                lastGeneratedAssetIds: outputAssetIds,
+              },
+            )
+          }
+          if (data.status === 'error') {
+            notifyAgentGenerationFailure(
+              agentConversationOwner,
+              '图片',
+              data.error ?? '生成任务返回了错误状态',
+            )
+          }
+        },
+        onError: (sseError) => {
+          notifyAgentGenerationFailure(agentConversationOwner, '图片', sseError)
+        },
+      }),
+    )
 
     return ok(
       call,
@@ -476,12 +610,14 @@ async function runGenerateImage(
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    generateStore.setError(imageNodeId, message)
-    useCanvasStore.getState().updateNodeData(imageNodeId, {
-      status: 'error',
-      error: message,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
+    if (isAgentFlowOwnerActive(request.flowId ?? 'local', getCurrentFlowId())) {
+      generateStore.setError(imageNodeId, message)
+      useCanvasStore.getState().updateNodeData(imageNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+    }
     return fail(call, `图片生成提交失败：${message}`)
   }
 }
@@ -513,6 +649,7 @@ async function runGenerateVideo(
     return fail(call, '未配置 dreamina CLI，请先在设置中配置后再生成。')
   }
 
+  const agentConversationOwner = getActiveAgentConversationOwner()
   const canvas = useCanvasStore.getState()
   const referenceNodeIds = stringArrayArg(call.args, 'referenceNodeIds')
   const resolvedInputs = getAgentToolInputImageNodes({ referenceNodeIds, nodes: canvas.nodes })
@@ -598,10 +735,16 @@ async function runGenerateVideo(
   try {
     await useFlowStore.getState().saveCurrent()
     const response = await createGeneration(request)
-    generateStore.setGenerationId(videoNodeId, response.id)
+    persistActiveAgentGenerationIdentity(
+      request.flowId ?? 'local',
+      videoNodeId,
+      response,
+    )
 
-    subscribeGeneration(response.id, {
-      onUpdate: (data) => {
+    subscribeGenerationWithFallback(
+      response.id,
+      createOwnedAgentGenerationCallbacks(request.flowId ?? 'local', {
+        onUpdate: (data) => {
         generateStore.setStatus(videoNodeId, data.status)
         if (data.error) generateStore.setError(videoNodeId, data.error)
         useCanvasStore.getState().updateNodeData(videoNodeId, {
@@ -635,22 +778,6 @@ async function runGenerateVideo(
           videoNodeId,
           completionPatch as unknown as Partial<BaseNodeData>,
         )
-        const generatedAssetIds = data.results
-          ?.map((result) => result.assetId)
-          .filter((assetId): assetId is string => !!assetId) ?? []
-        if (generatedAssetIds.length > 0) {
-          useAgentStore.getState().setConversationContext({
-            lastPrompt: prompt,
-            lastGeneratedAssetIds: generatedAssetIds,
-          })
-        }
-        if (data.status === 'error') {
-          notifyAgentGenerationFailure(
-            request.flowId ?? 'local',
-            '视频',
-            data.error ?? '生成任务返回了错误状态',
-          )
-        }
       },
       onError: (sseError) => {
         generateStore.setError(videoNodeId, sseError)
@@ -659,9 +786,35 @@ async function runGenerateVideo(
           error: sseError,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
-        notifyAgentGenerationFailure(request.flowId ?? 'local', '视频', sseError)
       },
-    })
+      }, getCurrentFlowId, {
+        onComplete: (data) => {
+          const generatedAssetIds = data.results
+            ?.map((result) => result.assetId)
+            .filter((assetId): assetId is string => !!assetId) ?? []
+          if (generatedAssetIds.length > 0) {
+            useAgentStore.getState().setConversationContextFor(
+              agentConversationOwner.projectId,
+              agentConversationOwner.conversationId,
+              {
+                lastPrompt: prompt,
+                lastGeneratedAssetIds: generatedAssetIds,
+              },
+            )
+          }
+          if (data.status === 'error') {
+            notifyAgentGenerationFailure(
+              agentConversationOwner,
+              '视频',
+              data.error ?? '生成任务返回了错误状态',
+            )
+          }
+        },
+        onError: (sseError) => {
+          notifyAgentGenerationFailure(agentConversationOwner, '视频', sseError)
+        },
+      }),
+    )
 
     return ok(
       call,
@@ -674,12 +827,14 @@ async function runGenerateVideo(
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    generateStore.setError(videoNodeId, message)
-    useCanvasStore.getState().updateNodeData(videoNodeId, {
-      status: 'error',
-      error: message,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
+    if (isAgentFlowOwnerActive(request.flowId ?? 'local', getCurrentFlowId())) {
+      generateStore.setError(videoNodeId, message)
+      useCanvasStore.getState().updateNodeData(videoNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+    }
     return fail(call, `视频生成提交失败：${message}`)
   }
 }
@@ -688,6 +843,7 @@ async function runEditImage(
   call: AgentToolCall,
   context: AgentToolExecutionContext,
 ): Promise<AgentToolResult> {
+  const ownerFlowId = resolveGenerationFlowId(getCurrentFlowId())
   const canvas = useCanvasStore.getState()
   const { nodes: inputImageNodes, assetIds: inputImageAssetIds } =
     getAgentToolInputImageNodes({
@@ -755,9 +911,12 @@ async function runEditImage(
       model,
       width: size.width,
       height: size.height,
-      flowId: resolveGenerationFlowId(getCurrentFlowId()),
+      flowId: ownerFlowId,
       nodeId: imageNodeId,
     })
+    if (!isAgentFlowOwnerActive(ownerFlowId, getCurrentFlowId())) {
+      return fail(call, '项目已切换，图片编辑结果未写入当前画布。')
+    }
     generateStore.setGenerationId(imageNodeId, response.id)
     const results = response.results ?? []
     const outputAssetIds = results
@@ -791,12 +950,14 @@ async function runEditImage(
         )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    generateStore.setError(imageNodeId, message)
-    useCanvasStore.getState().updateNodeData(imageNodeId, {
-      status: 'error',
-      error: message,
-      updatedAt: new Date().toISOString(),
-    } as unknown as Partial<BaseNodeData>)
+    if (isAgentFlowOwnerActive(ownerFlowId, getCurrentFlowId())) {
+      generateStore.setError(imageNodeId, message)
+      useCanvasStore.getState().updateNodeData(imageNodeId, {
+        status: 'error',
+        error: message,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
+    }
     return fail(call, `图片编辑失败：${message}`)
   }
 }

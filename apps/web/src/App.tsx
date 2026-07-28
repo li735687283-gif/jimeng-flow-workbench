@@ -25,6 +25,7 @@ import { listAssets } from './api/assets'
 import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
+import { getUserFacingErrorMessage } from './utils/userFacingError'
 import {
   applyCanvasTheme,
   applyThemeBackgroundMode,
@@ -102,6 +103,7 @@ function AppInner() {
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false)
   const [generationHistoryOpen, setGenerationHistoryOpen] = useState(false)
   const [videoAdminOpen, setVideoAdminOpen] = useState(false)
+  const [operationError, setOperationError] = useState<string | null>(null)
   const videoPlayer = useVideoPlayerStore((s) => s.player)
   const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
@@ -291,21 +293,29 @@ function AppInner() {
   }, [fitView])
 
   const handleCreateFlow = useCallback(async () => {
+    setOperationError(null)
     try {
       await createFlow()
       setView('canvas')
     } catch (err: unknown) {
       console.error('[App] 新建画布失败:', err)
+      setOperationError(
+        '新建画布失败：' + getUserFacingErrorMessage(err, '请稍后重试'),
+      )
     }
   }, [createFlow])
 
   const handleOpenFlow = useCallback(
     async (id: string) => {
+      setOperationError(null)
       try {
         await loadFlow(id)
         setView('canvas')
       } catch (err: unknown) {
         console.error('[App] 打开项目失败:', err)
+        setOperationError(
+          '打开项目失败：' + getUserFacingErrorMessage(err, '请稍后重试'),
+        )
       }
     },
     [loadFlow],
@@ -346,6 +356,18 @@ function AppInner() {
 
   return (
     <div className="app-layout mature-layout">
+      {operationError ? (
+        <div className="app-operation-error" role="alert">
+          <span>{operationError}</span>
+          <button
+            type="button"
+            aria-label="关闭错误提示"
+            onClick={() => setOperationError(null)}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {window.mokDesktop?.isDesktop ? (
         <>
           <div className="window-drag-strip" aria-hidden="true" />

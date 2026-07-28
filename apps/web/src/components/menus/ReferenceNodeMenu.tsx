@@ -1,5 +1,6 @@
 import type { FlowNodeType } from '../../types/nodeTypes'
-import { NODE_MENU_ITEMS } from './nodeMenuItems'
+import { AddNodeMenuContent } from './AddNodeMenu'
+import { ViewportMenuPortal } from './ViewportMenuPortal'
 
 export interface ReferenceNodeMenuState {
   x: number
@@ -24,47 +25,20 @@ export function ReferenceNodeMenu({
   onClose,
 }: ReferenceNodeMenuProps) {
   return (
-    <>
-      <div
-        className="menu-overlay"
-        onClick={onClose}
-        onContextMenu={(event) => {
-          event.preventDefault()
-          onClose()
-        }}
+    <ViewportMenuPortal
+      anchorPoint={{ x: state.x, y: state.y }}
+      open
+      onClose={onClose}
+      className="add-node-menu"
+      gap={0}
+      minWidth={180}
+      ariaLabel="连接并添加节点"
+    >
+      <AddNodeMenuContent
+        onSelect={onSelect}
+        onUpload={onUpload}
+        onClose={onClose}
       />
-      <div
-        className="add-node-menu"
-        style={{ left: state.x, top: state.y }}
-      >
-        <div className="add-node-menu-title">添加节点</div>
-        <div className="add-node-menu-list">
-          {NODE_MENU_ITEMS.map((item) => {
-            const Icon = item.icon
-            return (
-              <button
-                key={item.key}
-                type="button"
-                className="add-node-menu-item"
-                disabled={item.disabled}
-                onClick={() => {
-                  if (item.action === 'upload') {
-                    onUpload()
-                    onClose()
-                    return
-                  }
-                  if (!item.nodeType) return
-                  onSelect(item.nodeType)
-                  onClose()
-                }}
-              >
-                <Icon size={21} strokeWidth={1.9} />
-                <span className="add-node-menu-label">{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-    </>
+    </ViewportMenuPortal>
   )
 }

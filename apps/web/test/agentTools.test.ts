@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
   AGENT_DEFAULT_IMAGE_ASPECT_RATIO,
+  buildAgentImageCompletionPatch,
   buildAgentVideoReferences,
   closestAgentImageAspectRatio,
+  createOwnedAgentGenerationCallbacks,
   getAgentToolInputImageNodes,
   getAgentVideoUpstreamImageNodeIds,
   pickAgentConfiguredModel,
@@ -164,14 +166,125 @@ test('summarizeCanvasNodes truncates prompts and caps the list', () => {
   assert.equal(summarizeCanvasNodes(many).length, 40)
 })
 
-test('agent-created generations notify the chat when they fail in the background', () => {
+test('agent image completion preserves and appends generation history', () => {
+  const patch = buildAgentImageCompletionPatch(
+    {
+      id: 'gen-new',
+      nodeId: 'image-1',
+      status: 'success',
+      results: [{ assetId: 'asset-new' }],
+      createdAt: '2026-07-28T10:00:00.000Z',
+      finishedAt: '2026-07-28T10:01:00.000Z',
+    },
+    {
+      flowId: 'flow-a',
+      nodeId: 'image-1',
+      mediaType: 'image',
+      prompt: 'new prompt',
+      inputImages: [],
+      model: 'jimeng-5.0',
+      width: 2048,
+      height: 1152,
+      count: 1,
+      seed: null,
+    },
+    [{
+      id: 'gen-old',
+      generationId: 'gen-old',
+      status: 'success',
+      assetIds: ['asset-old'],
+      prompt: 'old prompt',
+      model: 'jimeng-5.0',
+      width: 2048,
+      height: 1152,
+      count: 1,
+      seed: null,
+      inputImageAssetIds: [],
+      createdAt: '2026-07-27T10:00:00.000Z',
+    }],
+    {
+      ratio: '16:9',
+      resolution: '2K',
+      inputImageAssetIds: [],
+      updatedAt: '2026-07-28T10:01:01.000Z',
+    },
+  )
+
+  assert.deepEqual(patch.generationRuns.map((run) => run.generationId), [
+    'gen-old',
+    'gen-new',
+  ])
+  assert.deepEqual(patch.outputAssetIds, ['asset-new'])
+  assert.equal(patch.assetId, 'asset-new')
+})
+
+test('agent generation callbacks stop mutating state after project switch', () => {
+  let activeFlowId: string | null = 'flow-a'
+  const events: string[] = []
+  const callbacks = createOwnedAgentGenerationCallbacks(
+    'flow-a',
+    {
+      onUpdate: (data) => events.push(`update:${data.status}`),
+      onComplete: (data) => events.push(`complete:${data.status}`),
+      onError: (error) => events.push(`error:${error}`),
+    },
+    () => activeFlowId,
+  )
+  const response = {
+    id: 'gen-agent-1',
+    nodeId: 'image-1',
+    status: 'running' as const,
+    createdAt: '2026-07-28T10:00:00.000Z',
+  }
+
+  callbacks.onUpdate?.(response)
+  activeFlowId = 'flow-b'
+  callbacks.onUpdate?.({ ...response, status: 'success' })
+  callbacks.onComplete?.({ ...response, status: 'success' })
+  callbacks.onError?.('SSE 连接错误')
+
+  assert.deepEqual(events, ['update:running'])
+})
+
+test('agent generation settlement callbacks survive a project switch', () => {
+  let activeFlowId: string | null = 'flow-a'
+  const canvasEvents: string[] = []
+  const settlementEvents: string[] = []
+  const callbacks = createOwnedAgentGenerationCallbacks(
+    'flow-a',
+    {
+      onComplete: () => canvasEvents.push('complete'),
+      onError: () => canvasEvents.push('error'),
+    },
+    () => activeFlowId,
+    {
+      onComplete: () => settlementEvents.push('complete'),
+      onError: () => settlementEvents.push('error'),
+    },
+  )
+  const response = {
+    id: 'gen-agent-settlement',
+    nodeId: 'image-1',
+    status: 'success' as const,
+    createdAt: '2026-07-28T10:00:00.000Z',
+  }
+
+  activeFlowId = 'flow-b'
+  callbacks.onComplete?.(response)
+  callbacks.onError?.('连接失败')
+
+  assert.deepEqual(canvasEvents, [])
+  assert.deepEqual(settlementEvents, ['complete', 'error'])
+})
+
+test('agent-created generations notify their originating chat when they fail', () => {
   // 提交成功但后台跑挂时,不能只在画布节点上留个红点——用户会以为迟早出图。
-  // 图片和视频两条路径都要在失败时往当前会话追加一条失败说明。
+  // 图片和视频两条路径都定向写回发起时的项目与会话，不能串到当前会话。
   const source = readFileSync('apps/web/src/utils/agentTools.ts', 'utf8')
   assert.match(source, /function notifyAgentGenerationFailure\(/)
   assert.match(source, /刚才提交的\$\{mediaLabel\}生成失败了/)
-  // 用户切到别的项目时不追加,避免消息串会话
-  assert.match(source, /resolveGenerationFlowId\(agentState\.activeProjectId\) !== flowId/)
+  assert.match(source, /addMessageToConversation\(\s*owner\.projectId,\s*owner\.conversationId,/)
+  assert.match(source, /setConversationContextFor\(/)
   // 完成回调里的 error 状态和 SSE onError 都要覆盖(图片 + 视频)
   assert.equal((source.match(/data\.status === 'error'/g) ?? []).length >= 2, true)
   assert.equal((source.match(/notifyAgentGenerationFailure\(/g) ?? []).length >= 5, true)
@@ -189,4 +302,15 @@ test('tool results carry a user-facing displaySummary free of internal ids', () 
   assert.match(source, /已读取画布内容。/)
   // 面板渲染优先 displaySummary
   assert.match(panel, /result\.displaySummary \?\? result\.summary/)
+})
+
+test('Agent generation creation persists the task identity on the active canvas node', () => {
+  const source = readFileSync('apps/web/src/utils/agentTools.ts', 'utf8')
+  assert.match(source, /function persistActiveAgentGenerationIdentity\(/)
+  assert.match(source, /generationId: response\.id/)
+  assert.match(source, /void useFlowStore\.getState\(\)\.saveCurrent\(\)\.catch/)
+  assert.equal(
+    (source.match(/persistActiveAgentGenerationIdentity\(/g) ?? []).length,
+    3,
+  )
 })

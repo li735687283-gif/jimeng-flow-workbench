@@ -19,9 +19,11 @@ import {
   addGenerationListener,
   removeGenerationListener,
   generateImageResultsForRequest,
+  persistImageGenerationResponseToFlow,
   type GenerationRecord,
 } from '../services/generations'
 import { JimengError, removeBackground } from '../services/jimeng'
+import { cleanupOwnedResultBatch } from '../services/ownedTempDirectories'
 import type { GenerationStatus } from '@jimeng-flow/shared/generateNode'
 
 /** 构造统一错误响应 */
@@ -102,49 +104,83 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // POST /api/generations/edit
   // body: { inputImage: string, editType: 'style_transfer'|'modify'|'remove_bg', prompt?: string, ... }
   app.post('/api/generations/edit', async (req, reply) => {
-    const body = req.body as { inputImage: string; editType: string; prompt?: string; model?: string; width?: number; height?: number; flowId?: string; nodeId?: string }
-    if (!body.inputImage) {
-      return reply.code(400).send({ statusCode: 400, error: 'Bad Request', message: 'inputImage 不能为空' })
+    const body = req.body as {
+      inputImage: string
+      editType: string
+      prompt?: string
+      model?: string
+      width?: number
+      height?: number
+      flowId?: string
+      nodeId?: string
     }
+    if (!body.inputImage) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'inputImage 不能为空',
+      })
+    }
+
+    const createdAt = new Date().toISOString()
+    const editId = `edit_${Date.now()}`
+    const genReq: GenerationRequest = {
+      flowId: body.flowId?.trim() || 'local',
+      nodeId: body.nodeId?.trim() || editId,
+      mediaType: 'image',
+      prompt:
+        body.prompt ||
+        (body.editType === 'remove_bg' ? 'remove background' : 'modify image'),
+      inputImages: [body.inputImage],
+      model: body.model || 'jimeng-3.0',
+      width: body.width || 1024,
+      height: body.height || 1024,
+      count: 1,
+      seed: null,
+    }
+
     try {
       if (body.editType === 'remove_bg') {
         const res = await removeBackground({ inputImage: body.inputImage })
-        // 将结果保存为资产，返回 assetId
-        const editResult = res[0]
-        if (editResult?.localPath) {
-          const { readFile } = await import('node:fs/promises')
-          const { saveUploadFile } = await import('../services/assets')
-          const buffer = await readFile(editResult.localPath)
-          const asset = await saveUploadFile({
-            fileBuffer: buffer,
-            originalName: 'remove_bg_output.png',
-            mimeType: 'image/png',
-            prompt: body.prompt || 'remove background',
-            sourceNodeId: body.nodeId,
-            inputAssetIds: [body.inputImage],
-            provider: 'jimeng',
-            params: {
-              flowId: body.flowId?.trim() || 'local',
-              editType: 'remove_bg',
-            },
-          })
-          editResult.assetId = asset.id
+        try {
+          // 将结果保存为资产，返回 assetId
+          const editResult = res[0]
+          if (editResult?.localPath) {
+            const { readFile } = await import('node:fs/promises')
+            const { saveUploadFile } = await import('../services/assets')
+            const buffer = await readFile(editResult.localPath)
+            const asset = await saveUploadFile({
+              fileBuffer: buffer,
+              originalName: 'remove_bg_output.png',
+              mimeType: 'image/png',
+              prompt: genReq.prompt,
+              sourceNodeId: genReq.nodeId,
+              inputAssetIds: [body.inputImage],
+              provider: 'jimeng',
+              params: {
+                flowId: genReq.flowId,
+                editType: 'remove_bg',
+              },
+            })
+            editResult.assetId = asset.id
+          }
+          const finishedAt = new Date().toISOString()
+          const editResponse: GenerationResponse = {
+            id: editId,
+            nodeId: genReq.nodeId,
+            status: 'success',
+            results: res,
+            createdAt,
+            finishedAt,
+          }
+          await persistImageGenerationResponseToFlow(genReq, editResponse)
+          return reply.code(201).send(editResponse)
+        } finally {
+          await cleanupOwnedResultBatch(res)
         }
-        return reply.code(201).send({ id: `edit_${Date.now()}`, status: 'success', results: res })
       }
+
       // style_transfer / modify 使用 image2image
-      const genReq: GenerationRequest = {
-        flowId: body.flowId?.trim() || 'local',
-        nodeId: body.nodeId?.trim() || `edit_${Date.now()}`,
-        mediaType: 'image',
-        prompt: body.prompt || 'modify image',
-        inputImages: [body.inputImage],
-        model: body.model || 'jimeng-3.0',
-        width: body.width || 1024,
-        height: body.height || 1024,
-        count: 1,
-        seed: null,
-      }
       const result = await generateImageResultsForRequest(genReq)
       if (result.successCount === 0) {
         throw new JimengError(
@@ -153,15 +189,29 @@ const generationsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           502,
         )
       }
-      return reply.code(201).send({
-        id: `edit_${Date.now()}`,
+      const finishedAt = new Date().toISOString()
+      const editResponse: GenerationResponse = {
+        id: editId,
+        nodeId: genReq.nodeId,
         status: 'success',
         results: result.results,
         error: result.error,
-      })
+        createdAt,
+        finishedAt,
+      }
+      await persistImageGenerationResponseToFlow(genReq, editResponse)
+      return reply.code(201).send(editResponse)
     } catch (err) {
       app.log.error({ err }, '[generations/edit] 调用失败')
       const payload = errorPayload(err)
+      await persistImageGenerationResponseToFlow(genReq, {
+        id: editId,
+        nodeId: genReq.nodeId,
+        status: 'error',
+        error: payload.message,
+        createdAt,
+        finishedAt: new Date().toISOString(),
+      })
       return reply.code(payload.statusCode).send(payload)
     }
   })

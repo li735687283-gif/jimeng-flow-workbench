@@ -13,8 +13,11 @@ import {
 import { useCanvasStore } from '../state/canvasStore'
 import { useGenerateStore, IDLE_CALL_STATE } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
-import { createGeneration, retryGeneration, subscribeGeneration } from '../api/generations'
+import { createGeneration, retryGeneration } from '../api/generations'
 import type { GenerationResponse } from '@jimeng-flow/shared/generateNode'
+import { subscribeGenerationWithFallback } from '../utils/generationStatusSubscription'
+import { SecondaryMenuSelect } from './menus/SecondaryMenuSelect'
+import { getUserFacingErrorMessage } from '../utils/userFacingError'
 import type { TextNodeData } from '@jimeng-flow/shared/textNode'
 import {
   VIDEO_MODES,
@@ -49,18 +52,6 @@ import { resolveGenerationFlowId } from '../utils/generationFlow'
 
 interface VideoComposerProps {
   nodeId: string
-}
-
-const selectStyle: CSSProperties = {
-  background: 'var(--bg-base)',
-  color: 'var(--text-h)',
-  border: '1px solid var(--border)',
-  borderRadius: 4,
-  padding: '4px 6px',
-  fontSize: 11,
-  fontFamily: 'inherit',
-  cursor: 'pointer',
-  minWidth: 72,
 }
 
 const fieldLabelStyle: CSSProperties = {
@@ -131,6 +122,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const edges = useCanvasStore((s) => s.edges)
   const updateNodeData = useCanvasStore((s) => s.updateNodeData)
   const [notice, setNotice] = useState<string | null>(null)
+  const [openParameterMenu, setOpenParameterMenu] = useState<string | null>(null)
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
 
@@ -147,6 +139,10 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   )
   const settings = useSettingsStore((s) => s.settings)
   const isJimengConfigured = useSettingsStore((s) => s.isJimengConfigured)
+
+  useEffect(() => {
+    setOpenParameterMenu(null)
+  }, [nodeId, callState.status])
 
   if (!node) {
     return (
@@ -176,6 +172,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
   const modeLabel =
     VIDEO_MODES.find((m) => m.id === d.mode)?.label ?? d.mode
   const running = callState.status === 'queued' || callState.status === 'running'
+
   const submitLabel = getVideoSubmitLabel(running, d.assetIds.length > 0)
   const upstreamPrompt = findUpstreamPrompt(nodeId, nodes, edges)
   const upstreamImageAssetIds = getImageGenerationInputImages({
@@ -303,7 +300,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
     }
 
     applyProgress(res)
-    const unsubscribe = subscribeGeneration(res.id, {
+    const unsubscribe = subscribeGenerationWithFallback(res.id, {
       onUpdate: (data) => {
         if (data.status !== 'success' && data.status !== 'error') {
           applyProgress(data)
@@ -346,7 +343,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
       const res = await createGeneration(req)
       handleGenerationResponse(res, req)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = getUserFacingErrorMessage(err, '视频生成失败')
       updateNodeData(nodeId, { status: 'error', error: msg })
       useGenerateStore.getState().patch(nodeId, {
         status: 'error',
@@ -379,7 +376,7 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         : await createGeneration(req)
       handleGenerationResponse(res, req)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg = getUserFacingErrorMessage(err, '视频生成失败')
       updateNodeData(nodeId, {
         status: 'error',
         error: msg,
@@ -448,91 +445,91 @@ export function VideoComposer({ nodeId }: VideoComposerProps) {
         }}
       >
         <Field label="模型">
-          <select
-            style={selectStyle}
+          <SecondaryMenuSelect
+            label="视频模型"
             value={activeVideoModelId}
-            onChange={(e) => set({ model: e.target.value })}
+            options={videoModelOptions.map((model) => ({
+              value: model.id,
+              label: model.label,
+            }))}
+            open={openParameterMenu === 'model'}
+            onOpenChange={(open) => setOpenParameterMenu(open ? 'model' : null)}
+            onChange={(value) => set({ model: value })}
+            className="video-composer-menu-select"
             disabled={running}
-          >
-            {videoModelOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field label="模式">
-          <select
-            style={selectStyle}
+          <SecondaryMenuSelect
+            label="视频模式"
             value={d.mode}
-            onChange={(e) => set({ mode: e.target.value as VideoMode })}
+            options={VIDEO_MODES.map((mode) => ({
+              value: mode.id,
+              label: mode.label,
+            }))}
+            open={openParameterMenu === 'mode'}
+            onOpenChange={(open) => setOpenParameterMenu(open ? 'mode' : null)}
+            onChange={(value) => set({ mode: value as VideoMode })}
+            className="video-composer-menu-select"
             disabled={running}
-          >
-            {VIDEO_MODES.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field label="比例">
-          <select
-            style={selectStyle}
+          <SecondaryMenuSelect
+            label="视频比例"
             value={d.aspectRatio}
-            onChange={(e) =>
-              set({ aspectRatio: e.target.value as VideoAspectRatio })
+            options={VIDEO_ASPECT_RATIOS.map((ratio) => ({
+              value: ratio,
+              label: ratio,
+            }))}
+            open={openParameterMenu === 'aspectRatio'}
+            onOpenChange={(open) =>
+              setOpenParameterMenu(open ? 'aspectRatio' : null)
             }
+            onChange={(value) => set({ aspectRatio: value as VideoAspectRatio })}
+            className="video-composer-menu-select"
             disabled={running}
-          >
-            {VIDEO_ASPECT_RATIOS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field label="分辨率">
-          <select
-            style={selectStyle}
+          <SecondaryMenuSelect
+            label="视频分辨率"
             value={d.resolution}
-            onChange={(e) =>
-              set({ resolution: e.target.value as VideoResolution })
+            options={VIDEO_RESOLUTIONS.map((resolution) => {
+              const vipOnly = resolution === '1080P' || resolution === '4K'
+              return {
+                value: resolution,
+                label: vipOnly && !isVipModel ? resolution + '（仅 VIP）' : resolution,
+                disabled: vipOnly && !isVipModel,
+              }
+            })}
+            open={openParameterMenu === 'resolution'}
+            onOpenChange={(open) =>
+              setOpenParameterMenu(open ? 'resolution' : null)
             }
+            onChange={(value) => set({ resolution: value as VideoResolution })}
+            className="video-composer-menu-select"
             disabled={running}
-          >
-            {VIDEO_RESOLUTIONS.map((r) => (
-              <option
-                key={r}
-                value={r}
-                disabled={(r === '1080P' || r === '4K') && !isVipModel}
-              >
-                {r}
-                {(r === '1080P' || r === '4K') && !isVipModel
-                  ? '（仅 VIP）'
-                  : ''}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field label="秒数">
-          <select
-            style={selectStyle}
-            value={d.durationSeconds}
-            onChange={(e) =>
-              set({ durationSeconds: Number(e.target.value) })
-            }
+          <SecondaryMenuSelect
+            label="视频秒数"
+            value={String(d.durationSeconds)}
+            options={VIDEO_DURATIONS.map((seconds) => ({
+              value: String(seconds),
+              label: String(seconds) + 's',
+            }))}
+            open={openParameterMenu === 'duration'}
+            onOpenChange={(open) => setOpenParameterMenu(open ? 'duration' : null)}
+            onChange={(value) => set({ durationSeconds: Number(value) })}
+            className="video-composer-menu-select"
             disabled={running}
-          >
-            {VIDEO_DURATIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}s
-              </option>
-            ))}
-          </select>
+          />
         </Field>
 
         <Field label="数量">

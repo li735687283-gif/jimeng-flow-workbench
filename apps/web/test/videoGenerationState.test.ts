@@ -8,6 +8,7 @@ import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
   getVideoSubmitLabel,
+  isInterruptedVideoGeneration,
   persistInitialVideoGenerationResponse,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
@@ -106,6 +107,14 @@ test('initial video generation response persists the new id after applying it', 
 
   assert.deepEqual(events, ['apply:gen_video_new', 'save:gen_video_new'])
 })
+test('video generation without a persisted task id is only interrupted after the local request stops', () => {
+  assert.equal(isInterruptedVideoGeneration('running', undefined, false), true)
+  assert.equal(isInterruptedVideoGeneration('queued', '   ', false), true)
+  assert.equal(isInterruptedVideoGeneration('running', 'gen_video_1', false), false)
+  assert.equal(isInterruptedVideoGeneration('running', undefined, true), false)
+  assert.equal(isInterruptedVideoGeneration('success', undefined, false), false)
+})
+
 
 test('buildVideoCompletionNodePatch keeps current video when the redraw returns no assets', () => {
   const existingRun: VideoGenerationRun = {
