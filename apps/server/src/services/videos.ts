@@ -1,7 +1,7 @@
 // 首页精选作品管理服务（支持图片和视频）。
 // 媒体文件保存在 Asset 系统，这里持久化业务元数据。
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type {
@@ -14,6 +14,7 @@ import type {
 } from '@jimeng-flow/shared/video'
 import { getWorkspaceDir } from '../config'
 import { getAsset } from './assets'
+import { runSerializedFileOperation, writeJsonAtomic } from './jsonFilePersistence'
 
 const WORKS_DIR = resolve(getWorkspaceDir(), 'config')
 const WORKS_FILE = resolve(WORKS_DIR, 'videos.json')
@@ -107,8 +108,7 @@ async function readWorks(): Promise<ManagedWork[]> {
 }
 
 async function writeWorks(works: ManagedWork[]): Promise<void> {
-  await mkdir(WORKS_DIR, { recursive: true })
-  await writeFile(WORKS_FILE, JSON.stringify(works.map(withUrls), null, 2), 'utf8')
+  await writeJsonAtomic(WORKS_FILE, works.map(withUrls))
 }
 
 function compareForAdminList(a: ManagedWork, b: ManagedWork): number {
@@ -235,10 +235,12 @@ export async function createWork(input: CreateWorkRequest): Promise<ManagedWork>
     updatedAt: now,
   })
 
-  const works = await readWorks()
-  works.unshift(work)
-  await writeWorks(works)
-  return work
+  return runSerializedFileOperation(WORKS_FILE, async () => {
+    const works = await readWorks()
+    works.unshift(work)
+    await writeWorks(works)
+    return work
+  })
 }
 
 export async function updateWork(
@@ -251,60 +253,63 @@ export async function updateWork(
     throw error
   }
 
-  if (patch.mediaAssetId) {
+  return runSerializedFileOperation(WORKS_FILE, async () => {
     const works = await readWorks()
-    const current = works.find((w) => w.id === id)
-    const mediaType = current?.mediaType ?? 'video'
-    await assertAssetType(patch.mediaAssetId, mediaType)
-  }
-  if (patch.coverAssetId) {
-    await assertAssetType(patch.coverAssetId, 'image')
-  }
+    const index = works.findIndex((work) => work.id === id)
+    if (index < 0) {
+      const error = new Error('作品不存在')
+      ;(error as Error & { code: string }).code = 'WORK_NOT_FOUND'
+      throw error
+    }
 
-  const works = await readWorks()
-  const index = works.findIndex((work) => work.id === id)
-  if (index < 0) {
-    const error = new Error('作品不存在')
-    ;(error as Error & { code: string }).code = 'WORK_NOT_FOUND'
-    throw error
-  }
+    const current = works[index]
+    if (patch.mediaAssetId) {
+      await assertAssetType(patch.mediaAssetId, current.mediaType)
+    }
+    if (patch.coverAssetId) {
+      await assertAssetType(patch.coverAssetId, 'image')
+    }
 
-  const current = works[index]
-  const nextMediaAssetId = patch.mediaAssetId ?? current.mediaAssetId
-  let nextCoverAssetId = patch.coverAssetId ?? current.coverAssetId
+    const nextMediaAssetId = patch.mediaAssetId ?? current.mediaAssetId
+    let nextCoverAssetId = patch.coverAssetId ?? current.coverAssetId
 
-  if (patch.mediaAssetId && current.mediaType === 'video' && !patch.coverAssetId) {
-    const error = new Error('视频作品需要上传封面图')
-    ;(error as Error & { code: string }).code = 'WORK_BAD_ASSET'
-    throw error
-  }
+    if (patch.mediaAssetId && current.mediaType === 'video' && !patch.coverAssetId) {
+      const error = new Error('视频作品需要上传封面图')
+      ;(error as Error & { code: string }).code = 'WORK_BAD_ASSET'
+      throw error
+    }
 
-  if (current.mediaType === 'image' && nextCoverAssetId === nextMediaAssetId && !patch.coverAssetId) {
-    nextCoverAssetId = nextMediaAssetId
-  }
+    if (
+      current.mediaType === 'image' &&
+      nextCoverAssetId === nextMediaAssetId &&
+      !patch.coverAssetId
+    ) {
+      nextCoverAssetId = nextMediaAssetId
+    }
 
-  const next: ManagedWork = withUrls({
-    ...current,
-    title: patch.title === undefined ? current.title : normalizeText(patch.title, current.title),
-    description:
-      patch.description === undefined
-        ? current.description
-        : normalizeText(patch.description),
-    mediaAssetId: nextMediaAssetId,
-    coverAssetId: nextCoverAssetId,
-    isFeatured: patch.isFeatured ?? current.isFeatured,
-    isPinned: patch.isPinned ?? current.isPinned,
-    isPublished: patch.isPublished ?? current.isPublished,
-    sortOrder:
-      patch.sortOrder === undefined ? current.sortOrder : normalizeSortOrder(patch.sortOrder),
-    updatedAt: nowIso(),
+    const next: ManagedWork = withUrls({
+      ...current,
+      title:
+        patch.title === undefined ? current.title : normalizeText(patch.title, current.title),
+      description:
+        patch.description === undefined
+          ? current.description
+          : normalizeText(patch.description),
+      mediaAssetId: nextMediaAssetId,
+      coverAssetId: nextCoverAssetId,
+      isFeatured: patch.isFeatured ?? current.isFeatured,
+      isPinned: patch.isPinned ?? current.isPinned,
+      isPublished: patch.isPublished ?? current.isPublished,
+      sortOrder:
+        patch.sortOrder === undefined ? current.sortOrder : normalizeSortOrder(patch.sortOrder),
+      updatedAt: nowIso(),
+    })
+
+    works[index] = next
+    await writeWorks(works)
+    return next
   })
-
-  works[index] = next
-  await writeWorks(works)
-  return next
 }
-
 // Backwards compatibility aliases
 /** @deprecated Use createWork instead */
 export const createVideo = createWork

@@ -28,10 +28,12 @@ export interface AgentConversation {
 interface ProjectConversationState {
   activeConversationId: string
   conversations: AgentConversation[]
+  draft: string
 }
 
 interface AgentStore {
   activeProjectId: string | null
+  contextVersion: number
   setActiveProject: (projectId: string | null) => void
 
   activeConversationId: string
@@ -40,6 +42,8 @@ interface AgentStore {
   loading: boolean
   error?: string
   conversationContext: AgentConversationContext
+  draft: string
+  setDraft: (draft: string) => void
 
   executionMode: AgentExecutionMode
   setExecutionMode: (mode: AgentExecutionMode) => void
@@ -50,11 +54,27 @@ interface AgentStore {
   reset: () => void
 
   addMessage: (message: AgentMessage) => void
+  addMessageToConversation: (
+    projectId: string | null,
+    conversationId: string,
+    message: AgentMessage,
+  ) => void
   addActionResults: (messageId: string, results: AgentToolResult[]) => void
+  addActionResultsToConversation: (
+    projectId: string | null,
+    conversationId: string,
+    messageId: string,
+    results: AgentToolResult[],
+  ) => void
   setLoading: (loading: boolean) => void
   setError: (error?: string) => void
   touchConversationTitle: (title: string) => void
   setConversationContext: (ctx: Partial<AgentConversationContext>) => void
+  setConversationContextFor: (
+    projectId: string | null,
+    conversationId: string,
+    ctx: Partial<AgentConversationContext>,
+  ) => void
 }
 
 const CONVERSATION_STORAGE_KEY = 'jimeng-flow-agent-conversations-v2'
@@ -133,7 +153,11 @@ function normalizeProjectState(candidate: unknown): ProjectConversationState | n
     .map((item) => normalizeConversation(item))
     .filter((item): item is AgentConversation => !!item)
   if (!conversations.length) return null
-  return { activeConversationId: value.activeConversationId, conversations }
+  return {
+    activeConversationId: value.activeConversationId,
+    conversations,
+    draft: typeof value.draft === 'string' ? value.draft : '',
+  }
 }
 
 function loadProjectConversations(projectId: string): ProjectConversationState | null {
@@ -156,8 +180,9 @@ function persistProjectConversations(
   projectId: string,
   activeConversationId: string,
   conversations: AgentConversation[],
+  draft: string,
 ): void {
-  const projectState = { activeConversationId, conversations }
+  const projectState = { activeConversationId, conversations, draft }
   projectConversationCache.set(projectId, projectState)
   if (typeof window === 'undefined') return
   try {
@@ -188,6 +213,7 @@ const fallbackConversation = createConversation()
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
   activeProjectId: null,
+  contextVersion: 0,
   setActiveProject: (projectId) => {
     const normalizedProjectId = projectId?.trim() || null
     if (normalizedProjectId === get().activeProjectId) return
@@ -203,12 +229,14 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
     set({
       activeProjectId: normalizedProjectId,
+      contextVersion: get().contextVersion + 1,
       activeConversationId,
       conversations,
       messages: activeConversation.messages,
       loading: false,
       error: undefined,
       conversationContext: activeConversation.conversationContext,
+      draft: projectState?.draft ?? '',
     })
   },
 
@@ -218,6 +246,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   loading: false,
   error: undefined,
   conversationContext: {},
+  draft: '',
+  setDraft: (draft) => set({ draft }),
 
   executionMode: loadExecutionMode(),
   setExecutionMode: (mode) => {
@@ -235,6 +265,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const conversation = createConversation()
     set((state) => ({
       activeConversationId: conversation.id,
+      contextVersion: state.contextVersion + 1,
       conversations: [...state.conversations, conversation],
       messages: [],
       loading: false,
@@ -249,6 +280,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     if (!conversation) return
     set({
       activeConversationId: conversation.id,
+      contextVersion: get().contextVersion + 1,
       messages: conversation.messages,
       loading: false,
       error: undefined,
@@ -268,6 +300,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const conversations = remaining.length ? remaining : [replacement]
     set({
       activeConversationId: replacement.id,
+      contextVersion: state.contextVersion + 1,
       conversations,
       messages: replacement.messages,
       loading: false,
@@ -280,6 +313,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     const conversation = createConversation()
     set({
       activeConversationId: conversation.id,
+      contextVersion: get().contextVersion + 1,
       conversations: [conversation],
       messages: [],
       loading: false,
@@ -291,6 +325,22 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
 
+  addMessageToConversation: (projectId, conversationId, message) => {
+    updateConversationForOwner(projectId, conversationId, (conversation) => {
+      if (conversation.messages.some((item) => item.id === message.id)) return conversation
+      const messages = [...conversation.messages, message]
+      return {
+        ...conversation,
+        title:
+          conversation.title === '新对话'
+            ? conversationTitleFromFirstMessage(messages)
+            : conversation.title,
+        updatedAt: new Date().toISOString(),
+        messages,
+      }
+    })
+  },
+
   addActionResults: (messageId, results) =>
     set((state) => ({
       messages: state.messages.map((message) =>
@@ -299,6 +349,33 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
           : message,
       ),
     })),
+
+  addActionResultsToConversation: (
+    projectId,
+    conversationId,
+    messageId,
+    results,
+  ) => {
+    updateConversationForOwner(projectId, conversationId, (conversation) => {
+      let changed = false
+      const messages = conversation.messages.map((message) => {
+        if (message.id !== messageId) return message
+        const existingCallIds = new Set(
+          (message.actionResults ?? []).map((result) => result.callId),
+        )
+        const newResults = results.filter((result) => !existingCallIds.has(result.callId))
+        if (newResults.length === 0) return message
+        changed = true
+        return {
+          ...message,
+          actionResults: [...(message.actionResults ?? []), ...newResults],
+        }
+      })
+      return changed
+        ? { ...conversation, messages, updatedAt: new Date().toISOString() }
+        : conversation
+    })
+  },
 
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
@@ -319,37 +396,109 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     set((state) => ({
       conversationContext: { ...state.conversationContext, ...ctx },
     })),
+
+  setConversationContextFor: (projectId, conversationId, ctx) => {
+    updateConversationForOwner(projectId, conversationId, (conversation) => ({
+      ...conversation,
+      conversationContext: { ...conversation.conversationContext, ...ctx },
+      updatedAt: new Date().toISOString(),
+    }))
+  },
 }))
+
+type ConversationUpdater = (conversation: AgentConversation) => AgentConversation
+
+/**
+ * 把异步结果写回它发起时的项目和会话。
+ * 目标会话不在前台时只更新缓存/持久化，不触碰当前 messages/context。
+ */
+function updateConversationForOwner(
+  projectId: string | null,
+  conversationId: string,
+  update: ConversationUpdater,
+): void {
+  const state = useAgentStore.getState()
+  const projectIsActive = state.activeProjectId === projectId
+  const projectState: ProjectConversationState | null = projectIsActive
+    ? {
+        activeConversationId: state.activeConversationId,
+        conversations: state.conversations,
+        draft: state.draft,
+      }
+    : projectId
+      ? loadProjectConversations(projectId)
+      : null
+  if (!projectState) return
+
+  let changed = false
+  const conversations = projectState.conversations.map((conversation) => {
+    if (conversation.id !== conversationId) return conversation
+    const next = update(conversation)
+    if (next !== conversation) changed = true
+    return next
+  })
+  if (!changed) return
+
+  if (projectId) {
+    persistProjectConversations(
+      projectId,
+      projectState.activeConversationId,
+      conversations,
+      projectState.draft,
+    )
+  }
+  if (!projectIsActive) return
+
+  const activeConversation = conversations.find(
+    (conversation) => conversation.id === state.activeConversationId,
+  )
+  useAgentStore.setState({
+    conversations,
+    ...(activeConversation
+      ? {
+          messages: activeConversation.messages,
+          conversationContext: activeConversation.conversationContext,
+        }
+      : {}),
+  })
+}
 
 // 消息或上下文变化时同步回当前会话，并按项目持久化。
 useAgentStore.subscribe((state, previousState) => {
   if (
     state.messages === previousState.messages &&
-    state.conversationContext === previousState.conversationContext
+    state.conversationContext === previousState.conversationContext &&
+    state.draft === previousState.draft
   ) {
     return
   }
+  const conversationChanged =
+    state.messages !== previousState.messages ||
+    state.conversationContext !== previousState.conversationContext
   const now = new Date().toISOString()
-  const conversations = state.conversations.map((item) =>
-    item.id === state.activeConversationId
-      ? {
-          ...item,
-          title:
-            item.title === '新对话'
-              ? conversationTitleFromFirstMessage(state.messages)
-              : item.title,
-          updatedAt: now,
-          messages: state.messages,
-          conversationContext: state.conversationContext,
-        }
-      : item,
-  )
-  useAgentStore.setState({ conversations })
+  const conversations = conversationChanged
+    ? state.conversations.map((item) =>
+        item.id === state.activeConversationId
+          ? {
+              ...item,
+              title:
+                item.title === '新对话'
+                  ? conversationTitleFromFirstMessage(state.messages)
+                  : item.title,
+              updatedAt: now,
+              messages: state.messages,
+              conversationContext: state.conversationContext,
+            }
+          : item,
+      )
+    : state.conversations
+  if (conversationChanged) useAgentStore.setState({ conversations })
   if (state.activeProjectId) {
     persistProjectConversations(
       state.activeProjectId,
       state.activeConversationId,
       conversations,
+      state.draft,
     )
   }
 })

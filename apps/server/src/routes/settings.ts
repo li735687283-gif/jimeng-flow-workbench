@@ -4,17 +4,33 @@
 // 参考 PRD 10.1、7.1、8.6、12.1。
 
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
-import type { Settings } from '@jimeng-flow/shared'
-import { getSettings, updateSettings } from '../services/settings'
-import { testJimengConnection } from '../services/jimeng'
+import { DEFAULT_SETTINGS, type Settings } from '@jimeng-flow/shared'
+import {
+  SettingsSecretBindingError,
+  getSettings,
+  toSettingsResponse,
+  updateSettings,
+} from '../services/settings'
+import {
+  isAllowedDreaminaExecutablePath,
+  testJimengConnection,
+} from '../services/jimeng'
 import { listModels, testLlmConnection } from '../services/llm'
 
+function isValidSettingsPatchValue(key: keyof Settings, value: unknown): boolean {
+  const defaultValue = DEFAULT_SETTINGS[key]
+  if (Array.isArray(defaultValue)) return Array.isArray(value)
+  if (typeof defaultValue === 'number') {
+    return typeof value === 'number' && Number.isFinite(value)
+  }
+  return typeof value === typeof defaultValue
+}
+
 const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
-  // GET /api/settings
-  // 返回当前 settings（含完整字段，本地工具，PRD 8.6 注明 MVP 可先存本地配置文件）。
+  // GET /api/settings — return credential presence without exposing secret values.
   app.get('/api/settings', async () => {
     const settings = await getSettings()
-    return settings
+    return toSettingsResponse(settings)
   })
 
   // PUT /api/settings
@@ -73,22 +89,56 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         // 类型粗校验：数值、布尔、字符串由 config 层在合并时再兜底
         const v = patch[key]
         if (v === undefined || v === null) continue
+        if (!isValidSettingsPatchValue(key, v)) {
+          return reply.code(400).send({
+            statusCode: 400,
+            error: 'Bad Request',
+            message: `设置字段 ${key} 的类型无效`,
+          })
+        }
+        if (key === 'dreaminaPath' && !isAllowedDreaminaExecutablePath(v)) {
+          return reply.code(400).send({
+            statusCode: 400,
+            error: 'Bad Request',
+            message: '即梦 CLI 只能使用由服务端 PATH 解析的 dreamina 命令',
+          })
+        }
         ;(safePatch[key] as unknown) = v
       }
     }
 
-    const updated = await updateSettings(safePatch)
-    return updated
+    try {
+      const updated = await updateSettings(safePatch)
+      return toSettingsResponse(updated)
+    } catch (err) {
+      if (err instanceof SettingsSecretBindingError) {
+        return reply.code(400).send({
+          statusCode: 400,
+          error: 'Bad Request',
+          message: err.message,
+        })
+      }
+      throw err
+    }
   })
 
   // POST /api/settings/test-jimeng
   // 使用当前表单中的 dreaminaPath 检测即梦官方 CLI，不保存配置。
-  app.post<{ Body: Partial<Settings> }>('/api/settings/test-jimeng', async (req) => {
+  app.post<{ Body: Partial<Settings> }>('/api/settings/test-jimeng', async (req, reply) => {
+    const body = req.body ?? {}
+    if (body.dreaminaPath !== undefined
+      && !isAllowedDreaminaExecutablePath(body.dreaminaPath)) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '即梦 CLI 只能使用由服务端 PATH 解析的 dreamina 命令',
+      })
+    }
     const result = await testJimengConnection({
-      jimengBaseUrl: req.body.jimengBaseUrl,
-      authMode: req.body.authMode,
-      apiKey: req.body.apiKey,
-      dreaminaPath: req.body.dreaminaPath,
+      jimengBaseUrl: body.jimengBaseUrl,
+      authMode: body.authMode,
+      apiKey: body.apiKey,
+      dreaminaPath: body.dreaminaPath,
     })
     return result
   })

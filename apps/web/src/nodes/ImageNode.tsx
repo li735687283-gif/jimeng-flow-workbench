@@ -89,7 +89,21 @@ import {
 import { validateImageProvider } from '../utils/imageProviderValidation'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
+import {
+  COUNT_OPTIONS,
+  QUALITY_OPTIONS,
+  RATIO_OPTIONS,
+  RESOLUTION_OPTIONS,
+  getChangedPersistedImageEditorFields,
+  getPersistedImageEditorPatch,
+  type PersistedImageEditorPatch,
+} from '../utils/imageEditorState'
 import { resumeGenerationSubscription } from '../utils/generationResume'
+import { replaceGenerationSubscription } from '../utils/generationSubscription'
+import {
+  releaseGenerationSubmission,
+  tryAcquireGenerationSubmission,
+} from '../utils/generationSubmissionLock'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   getImageDimensionsToPersist,
@@ -162,25 +176,6 @@ const PLACEHOLDER_STYLE: CSSProperties = {
   color: 'var(--text-dim)',
 }
 
-const QUALITY_OPTIONS = ['低画质', '标准画质', '高画质'] as const
-const RESOLUTION_OPTIONS = ['1K', '2K', '4K'] as const
-const RATIO_OPTIONS = [
-  '自适应',
-  '1:1',
-  '1:2',
-  '2:1',
-  '9:16',
-  '16:9',
-  '3:4',
-  '4:3',
-  '3:2',
-  '2:3',
-  '5:4',
-  '4:5',
-  '21:9',
-  '9:21',
-] as const
-const COUNT_OPTIONS = [1, 2, 3, 4] as const
 const EDITOR_CLOSE_ANIMATION_MS = 260
 const IMAGE_MENU_GAP = 8
 const MODEL_MENU_ROW_HEIGHT = 56
@@ -254,7 +249,12 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const countMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const promptMenuButtonRef = useRef<HTMLButtonElement | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
+  const generationSubmitLockRef = useRef(false)
   const rememberedDefaultsRef = useRef(useGenerationDefaultsStore.getState().image)
+  const previousEditorSnapshotRef = useRef<{
+    nodeId: string
+    persisted: PersistedImageEditorPatch
+  } | null>(null)
 
   useEffect(() => {
     return () => {
@@ -267,14 +267,11 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     if (!nodeData.generationId) return
     if (nodeData.status !== 'running' && nodeData.status !== 'queued') return
     if (generationUnsubscribeRef.current) return
-    generationUnsubscribeRef.current = resumeGenerationSubscription({
+    const unsubscribe = resumeGenerationSubscription({
       nodeId: id,
       generationId: nodeData.generationId,
     })
-    return () => {
-      generationUnsubscribeRef.current?.()
-      generationUnsubscribeRef.current = null
-    }
+    return replaceGenerationSubscription(generationUnsubscribeRef, unsubscribe)
   }, [nodeData.generationId, nodeData.status, id])
 
   // 兼容旧画布：根据 Asset metadata 自动补齐上传图片的只读源标记。
@@ -322,10 +319,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     initialImageDefaults.count as (typeof COUNT_OPTIONS)[number],
   )
   const [isGenerating, setIsGenerating] = useState(false)
-  const generationRequestInFlight = isImageGenerationRequestInFlight(
-    isGenerating,
-    generationStoreStatus,
-  )
+  const persistedGenerationInFlight =
+    (nodeData.status === 'queued' || nodeData.status === 'running') &&
+    typeof nodeData.generationId === 'string' &&
+    nodeData.generationId.trim().length > 0
+  const generationRequestInFlight =
+    isImageGenerationRequestInFlight(isGenerating, generationStoreStatus) ||
+    persistedGenerationInFlight
   const [sendError, setSendError] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
@@ -633,19 +633,86 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   }
 
   useEffect(() => {
+    const previousSnapshot = previousEditorSnapshotRef.current
+    const nodeChanged = previousSnapshot?.nodeId !== id
+    const editorNodeData = {
+      prompt: nodeData.prompt,
+      model: nodeData.model,
+      quality: nodeData.quality,
+      resolution: nodeData.resolution,
+      ratio: nodeData.ratio,
+      count: nodeData.count,
+    }
+    const persisted = getPersistedImageEditorPatch(editorNodeData as ImageNodeData)
+    const changedFields =
+      previousSnapshot && !nodeChanged
+        ? getChangedPersistedImageEditorFields(previousSnapshot.persisted, persisted)
+        : []
+    previousEditorSnapshotRef.current = { nodeId: id, persisted }
     const defaults = resolveImageGenerationDefaults({
-      nodeData,
+      nodeData: editorNodeData,
       remembered: rememberedDefaultsRef.current,
       modelOptions,
     })
+    const shouldSyncField = (field: keyof PersistedImageEditorPatch) =>
+      nodeChanged || changedFields.includes(field)
 
+    if (shouldSyncField('prompt')) setPrompt(persisted.prompt ?? '')
+    if (shouldSyncField('quality')) {
+      setQuality(
+        persisted.quality ?? (defaults.quality as (typeof QUALITY_OPTIONS)[number]),
+      )
+    }
+    if (shouldSyncField('resolution')) {
+      setResolution(
+        persisted.resolution ??
+          (defaults.resolution as (typeof RESOLUTION_OPTIONS)[number]),
+      )
+    }
+    if (shouldSyncField('ratio')) {
+      setRatio(persisted.ratio ?? (defaults.ratio as (typeof RATIO_OPTIONS)[number]))
+    }
+    if (shouldSyncField('count')) {
+      setCount(persisted.count ?? (defaults.count as (typeof COUNT_OPTIONS)[number]))
+    }
+    if (nodeChanged) setModelTouched(false)
+
+    const modelChanged = shouldSyncField('modelId')
     setSelectedModelId((current) => {
-      if (modelTouched && current && modelOptions.some((model) => model.id === current)) {
+      if (
+        modelChanged &&
+        persisted.modelId &&
+        modelOptions.some((model) => model.id === persisted.modelId)
+      ) {
+        return persisted.modelId
+      }
+      if (
+        !modelChanged &&
+        modelTouched &&
+        current &&
+        modelOptions.some((model) => model.id === current)
+      ) {
         return current
+      }
+      if (
+        persisted.modelId &&
+        modelOptions.some((model) => model.id === persisted.modelId)
+      ) {
+        return persisted.modelId
       }
       return defaults.modelId
     })
-  }, [modelOptions, modelTouched, nodeData])
+  }, [
+    id,
+    modelOptions,
+    modelTouched,
+    nodeData.count,
+    nodeData.model,
+    nodeData.prompt,
+    nodeData.quality,
+    nodeData.ratio,
+    nodeData.resolution,
+  ])
 
   const handleCloseEditor = useCallback(() => {
     if (!editorMounted || editorClosing) return
@@ -1041,7 +1108,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   ])
 
   const handleSend = async (options: ImageGenerationSubmitOptions = {}) => {
-    if (isGenerating) return
+    if (generationSubmitLockRef.current || generationRequestInFlight) return
     if (sourceOnly) {
       setSendError('上传图片只能作为参考源，请拉线创建新的图片节点后再生成')
       return
@@ -1080,15 +1147,18 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       return
     }
 
+    if (!tryAcquireGenerationSubmission(generationSubmitLockRef)) return
+    setIsGenerating(true)
     let startedFlowId = ''
     try {
       startedFlowId = await useFlowStore.getState().ensureCurrentFlow()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      releaseGenerationSubmission(generationSubmitLockRef)
+      setIsGenerating(false)
       setSendError(`工作流准备失败：${message}`)
       return
     }
-    setIsGenerating(true)
     const store = canvasSnapshot
     const size = getSizeFromRatio(effectiveRatio, effectiveResolution)
     const upstreamInputImages = getImageGenerationInputImages({
@@ -1150,6 +1220,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           error: message,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
+        releaseGenerationSubmission(generationSubmitLockRef)
         setIsGenerating(false)
         setSendError(`生成前保存节点失败：${message}`)
         return
@@ -1272,6 +1343,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         error: message,
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
+      releaseGenerationSubmission(generationSubmitLockRef)
       setIsGenerating(false)
       setSendError(message)
     }
@@ -1314,13 +1386,14 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           )
           return
         }
+        releaseGenerationSubmission(generationSubmitLockRef)
         setIsGenerating(false)
       },
       onError: (error) => {
         handleGenerationError(error)
       },
     })
-    generationUnsubscribeRef.current = flow.cancel
+    replaceGenerationSubscription(generationUnsubscribeRef, flow.cancel)
   }
 
   const applyEditorStateFromRun = (run: ImageGenerationRun) => {

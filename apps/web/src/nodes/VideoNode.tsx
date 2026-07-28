@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Film, Video, Volume2, VolumeX } from 'lucide-react'
-import { createGeneration, subscribeGeneration } from '../api/generations'
+import { createGeneration } from '../api/generations'
 import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
@@ -20,6 +20,7 @@ import {
   shouldCloseFloatingMenuOnPointerDown,
 } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
+import { subscribeGenerationWithFallback } from '../utils/generationStatusSubscription'
 import {
   getImageGenerationInputImages,
   getUpstreamTextReferences,
@@ -28,10 +29,13 @@ import {
 } from '../utils/imageGenerationInputs'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
 import { resumeGenerationSubscription } from '../utils/generationResume'
+import { replaceGenerationSubscription } from '../utils/generationSubscription'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
 import {
   buildVideoCompletionNodePatch,
   buildVideoRunningNodePatch,
+  isInterruptedVideoGeneration,
+  persistInitialVideoGenerationResponse,
   resolveVideoInputImages,
   resolveVideoModeForInputImages,
 } from '../utils/videoGenerationState'
@@ -91,6 +95,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     (state) => state.removeIncomingImageReference,
   )
   const callState = useGenerateStore((state) => state.states[id] ?? IDLE_CALL_STATE)
+  const generationRequestInFlight =
+    callState.status === 'queued' || callState.status === 'running'
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -393,19 +399,45 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     </div>
   ) : null
 
+  useEffect(() => {
+    if (
+      !isInterruptedVideoGeneration(
+        nodeData.status,
+        nodeData.generationId,
+        generationRequestInFlight,
+      )
+    ) {
+      return
+    }
+    const message = '上次生成在任务创建完成前中断，请重新发送'
+    updateNodeData(id, {
+      status: 'error',
+      error: message,
+      updatedAt: new Date().toISOString(),
+    } as unknown as Partial<BaseNodeData>)
+    useGenerateStore.getState().patch(id, {
+      status: 'error',
+      error: message,
+    })
+    void useFlowStore.getState().saveCurrent().catch(() => undefined)
+  }, [
+    generationRequestInFlight,
+    id,
+    nodeData.generationId,
+    nodeData.status,
+    updateNodeData,
+  ])
+
   // 刷新页面后恢复正在进行的生成任务订阅
   useEffect(() => {
     if (!nodeData.generationId) return
     if (displayStatus !== 'running' && displayStatus !== 'queued') return
     if (generationUnsubscribeRef.current) return
-    generationUnsubscribeRef.current = resumeGenerationSubscription({
+    const unsubscribe = resumeGenerationSubscription({
       nodeId: id,
       generationId: nodeData.generationId,
     })
-    return () => {
-      generationUnsubscribeRef.current?.()
-      generationUnsubscribeRef.current = null
-    }
+    return replaceGenerationSubscription(generationUnsubscribeRef, unsubscribe)
   }, [nodeData.generationId, displayStatus, id])
 
   const upstreamImageAssetIds = useMemo(
@@ -543,17 +575,20 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     setSendError(response.error ?? '视频生成失败')
   }
 
-  const handleGenerationResponse = (
+  const handleGenerationResponse = async (
     response: GenerationResponse,
     request: VideoGenerationRequest,
   ) => {
     clearGenerationSubscription()
     if (response.status === 'success' || response.status === 'error') {
-      void applyResponse(response, request)
+      await applyResponse(response, request)
       return
     }
-    applyProgress(response)
-    generationUnsubscribeRef.current = subscribeGeneration(response.id, {
+    await persistInitialVideoGenerationResponse(response, {
+      applyResponse: applyProgress,
+      saveCurrent: () => useFlowStore.getState().saveCurrent(),
+    })
+    const unsubscribe = subscribeGenerationWithFallback(response.id, {
       onUpdate: (data) => {
         if (data.status !== 'success' && data.status !== 'error') {
           applyProgress(data)
@@ -574,6 +609,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         clearGenerationSubscription()
       },
     })
+    replaceGenerationSubscription(generationUnsubscribeRef, unsubscribe)
   }
 
   const handleSend = async () => {
@@ -650,7 +686,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     try {
       await useFlowStore.getState().saveCurrent()
       const response = await createGeneration(request)
-      handleGenerationResponse(response, request)
+      await handleGenerationResponse(response, request)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       updateNodeData(id, {

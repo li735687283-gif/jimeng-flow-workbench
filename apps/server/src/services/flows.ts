@@ -2,10 +2,11 @@
 // 封装工作流 CRUD 业务逻辑：读写 workspace/flows/<id>.json。
 // 参考 PRD 8.5（本地文件管理）、10.2（工作流 API）、11.1（Flow 数据模型）。
 
-import { mkdir, readFile, readdir, writeFile, unlink } from 'node:fs/promises'
+import { mkdir, readFile, readdir, unlink } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { getWorkspaceDir } from '../config'
+import { runSerializedFileOperation, writeJsonAtomic } from './jsonFilePersistence'
 import type {
   Flow,
   FlowNode,
@@ -69,7 +70,17 @@ function hasStringArrayValue(value: unknown): boolean {
 
 function hasGeneratedAsset(node: FlowNode | undefined): boolean {
   return (
-    hasStringValue(node?.data.assetId) || hasStringArrayValue(node?.data.assetIds)
+    hasStringValue(node?.data.assetId) ||
+    hasStringArrayValue(node?.data.assetIds) ||
+    hasStringArrayValue(node?.data.outputAssetIds)
+  )
+}
+
+function hasPersistedGenerationState(node: FlowNode | undefined): boolean {
+  return (
+    hasGeneratedAsset(node) ||
+    hasStringValue(node?.data.generationId) ||
+    (Array.isArray(node?.data.generationRuns) && node.data.generationRuns.length > 0)
   )
 }
 
@@ -116,7 +127,7 @@ function shouldKeepOmittedCurrentNode(
   deletedNodeIds: ReadonlySet<string>,
 ): boolean {
   if (deletedNodeIds.has(node.id)) return false
-  return hasGeneratedAsset(node)
+  return hasPersistedGenerationState(node)
 }
 
 function getUpdatedAtMs(node: FlowNode | undefined): number | null {
@@ -126,12 +137,37 @@ function getUpdatedAtMs(node: FlowNode | undefined): number | null {
   return Number.isFinite(ms) ? ms : null
 }
 
+function getGenerationStatusRank(node: FlowNode | undefined): number {
+  switch (node?.data.status) {
+    case 'queued':
+      return 1
+    case 'running':
+      return 2
+    case 'success':
+    case 'error':
+      return 3
+    default:
+      return 0
+  }
+}
+
 function shouldKeepCurrentGeneratedData(
   current: FlowNode | undefined,
   incoming: FlowNode,
 ): current is FlowNode {
-  if (!current || !hasGeneratedAsset(current)) return false
-  if (!hasGeneratedAsset(incoming)) return true
+  if (!current || !hasPersistedGenerationState(current)) return false
+  if (hasGeneratedAsset(current) && !hasGeneratedAsset(incoming)) return true
+  if (!hasPersistedGenerationState(incoming)) return true
+
+  const currentGenerationId = current.data.generationId
+  const incomingGenerationId = incoming.data.generationId
+  if (
+    hasStringValue(currentGenerationId) &&
+    currentGenerationId === incomingGenerationId &&
+    getGenerationStatusRank(current) > getGenerationStatusRank(incoming)
+  ) {
+    return true
+  }
 
   const currentUpdatedAt = getUpdatedAtMs(current)
   const incomingUpdatedAt = getUpdatedAtMs(incoming)
@@ -345,8 +381,31 @@ export async function createFlow(name?: string): Promise<Flow> {
     createdAt: now,
     updatedAt: now,
   }
-  await writeFile(flowFile(flow.id), JSON.stringify(flow, null, 2), 'utf8')
+  await writeJsonAtomic(flowFile(flow.id), flow)
   return flow
+}
+
+/**
+ * 在单个 flow 文件队列内读取最新快照并更新 nodes。
+ * 用于生成任务等必须避免旧节点数组覆盖并发状态的定向写回。
+ */
+export async function updateFlowNodesAtomically(
+  id: string,
+  transform: (flow: Flow) => FlowNode[] | Promise<FlowNode[]>,
+): Promise<Flow> {
+  validateFlowId(id)
+  const filePath = flowFile(id)
+  return runSerializedFileOperation(filePath, async () => {
+    const current = await getFlow(id)
+    const nodes = await transform(current)
+    const next: Flow = {
+      ...current,
+      nodes,
+      updatedAt: nowIso(),
+    }
+    await writeJsonAtomic(filePath, next)
+    return next
+  })
 }
 
 /**
@@ -360,26 +419,29 @@ export async function updateFlow(
   patch: UpdateFlowRequest,
 ): Promise<Flow> {
   validateFlowId(id)
-  const current = await getFlow(id)
-  const deletedNodeIds = new Set(
-    Array.isArray(patch.deletedNodeIds) ? patch.deletedNodeIds : [],
-  )
-  const patchWithMergedNodes: UpdateFlowRequest = {
-    ...patch,
-    nodes: Array.isArray(patch.nodes)
-      ? mergeNodesForFlowUpdate(current.nodes, patch.nodes, deletedNodeIds)
-      : patch.nodes,
-    deletedNodeIds: undefined,
-  }
-  const next: Flow = {
-    ...current,
-    ...patchWithMergedNodes,
-    id: current.id,
-    createdAt: current.createdAt,
-    updatedAt: nowIso(),
-  }
-  await writeFile(flowFile(id), JSON.stringify(next, null, 2), 'utf8')
-  return next
+  const filePath = flowFile(id)
+  return runSerializedFileOperation(filePath, async () => {
+    const current = await getFlow(id)
+    const deletedNodeIds = new Set(
+      Array.isArray(patch.deletedNodeIds) ? patch.deletedNodeIds : [],
+    )
+    const patchWithMergedNodes: UpdateFlowRequest = {
+      ...patch,
+      nodes: Array.isArray(patch.nodes)
+        ? mergeNodesForFlowUpdate(current.nodes, patch.nodes, deletedNodeIds)
+        : patch.nodes,
+      deletedNodeIds: undefined,
+    }
+    const next: Flow = {
+      ...current,
+      ...patchWithMergedNodes,
+      id: current.id,
+      createdAt: current.createdAt,
+      updatedAt: nowIso(),
+    }
+    await writeJsonAtomic(filePath, next)
+    return next
+  })
 }
 
 /**
@@ -388,13 +450,16 @@ export async function updateFlow(
  */
 export async function deleteFlow(id: string): Promise<void> {
   validateFlowId(id)
-  try {
-    await unlink(flowFile(id))
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code
-    if (code === 'ENOENT') return
-    throw err
-  }
+  const filePath = flowFile(id)
+  await runSerializedFileOperation(filePath, async () => {
+    try {
+      await unlink(filePath)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') return
+      throw err
+    }
+  })
 }
 
 /**
@@ -442,6 +507,6 @@ export async function duplicateFlow(id: string, nameOverride?: string): Promise<
   }
 
   await mkdir(FLOWS_DIR, { recursive: true })
-  await writeFile(flowFile(newId), JSON.stringify(copy, null, 2), 'utf8')
+  await writeJsonAtomic(flowFile(newId), copy)
   return copy
 }

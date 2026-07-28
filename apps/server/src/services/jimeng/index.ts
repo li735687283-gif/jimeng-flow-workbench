@@ -3,7 +3,7 @@
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type {
@@ -24,6 +24,11 @@ import type { AuthMode, Settings } from '@jimeng-flow/shared'
 import { getProjectRoot, resolveWorkspaceInputPath } from '../../config'
 import { getSettings } from '../settings'
 import { getAsset, getAssetFilePath } from '../assets'
+import {
+  cleanupOwnedTempDirectory,
+  createOwnedTempDirectory,
+  handoffOwnedTempDirectory,
+} from '../ownedTempDirectories'
 
 const execFileAsync = promisify(execFile)
 const CLI_MAX_BUFFER = 10 * 1024 * 1024
@@ -114,8 +119,20 @@ const VIDEO_EXTENSIONS = new Set([
   '.m4v',
 ])
 
+export function isAllowedDreaminaExecutablePath(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() === 'dreamina'
+}
+
 function getDreaminaPath(settings: Partial<Settings>): string {
-  return settings.dreaminaPath?.trim() || 'dreamina'
+  const dreaminaPath = settings.dreaminaPath?.trim() || 'dreamina'
+  if (!isAllowedDreaminaExecutablePath(dreaminaPath)) {
+    throw new JimengError(
+      'INVALID_INPUT',
+      '即梦 CLI 只能使用由服务端 PATH 解析的 dreamina 命令',
+      400,
+    )
+  }
+  return dreaminaPath
 }
 
 function summarizeOutput(stdout: string, stderr: string): string {
@@ -483,7 +500,6 @@ async function submitAndCollect(
 ): Promise<GenerationResult[]> {
   const settings = await getSettings()
   const startedAt = Date.now()
-  const downloadDir = await mkdtemp(join(tmpdir(), 'dreamina-flow-'))
   const submit = await runDreamina([...args, '--poll=0'], 60_000, settings)
   const output = `${submit.stdout}\n${submit.stderr}`
 
@@ -500,14 +516,22 @@ async function submitAndCollect(
     )
   }
 
-  return waitForResults(
-    submitId,
-    mediaType,
-    downloadDir,
-    getRemainingGenerationTimeoutMs(timeoutMs, Date.now() - startedAt),
-    settings,
-    expectedCount,
-  )
+  const downloadOwner = await createOwnedTempDirectory(tmpdir(), 'dreamina-flow-')
+  let handedOff = false
+  try {
+    const results = await waitForResults(
+      submitId,
+      mediaType,
+      downloadOwner.path,
+      getRemainingGenerationTimeoutMs(timeoutMs, Date.now() - startedAt),
+      settings,
+      expectedCount,
+    )
+    handedOff = handoffOwnedTempDirectory(results, downloadOwner)
+    return results
+  } finally {
+    if (!handedOff) await cleanupOwnedTempDirectory(downloadOwner)
+  }
 }
 
 export async function generateImage(
@@ -682,13 +706,18 @@ export async function removeBackground(
   if (inputPaths.length === 0) {
     throw new JimengError('INVALID_INPUT', '缺少输入图片', 400)
   }
-  const outputDir = await mkdtemp(join(tmpdir(), 'dreamina-rembg-'))
-  const outputPath = join(outputDir, 'output.png')
+  const outputOwner = await createOwnedTempDirectory(tmpdir(), 'dreamina-rembg-')
+  const outputPath = join(outputOwner.path, 'output.png')
+  let handedOff = false
   try {
     await execFileAsync('rembg', ['i', inputPaths[0], outputPath], { timeout: params.timeoutMs ?? 60_000 })
-    return [{ localPath: outputPath }]
+    const results = [{ localPath: outputPath }]
+    handedOff = handoffOwnedTempDirectory(results, outputOwner)
+    return results
   } catch (err) {
     throw new JimengError('JIMENG_BAD_RESPONSE', `rembg 执行失败：${err instanceof Error ? err.message : String(err)}`, 502)
+  } finally {
+    if (!handedOff) await cleanupOwnedTempDirectory(outputOwner)
   }
 }
 

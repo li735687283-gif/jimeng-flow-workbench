@@ -92,6 +92,23 @@ function getNodeSize(node: Node): { width: number; height: number } {
   return { width, height }
 }
 
+function normalizePastedGenerationData(source: Node): Record<string, unknown> {
+  const data = { ...(source.data as Record<string, unknown>) }
+  if (source.type !== 'image' && source.type !== 'video') return data
+
+  delete data.generationId
+  if (data.status !== 'queued' && data.status !== 'running') return data
+
+  const hasGeneratedAsset = source.type === 'video'
+    ? Array.isArray(data.assetIds) && data.assetIds.some((id) => typeof id === 'string' && id)
+    : (typeof data.assetId === 'string' && data.assetId.length > 0) ||
+      (Array.isArray(data.outputAssetIds) &&
+        data.outputAssetIds.some((id) => typeof id === 'string' && id))
+  data.status = hasGeneratedAsset ? 'success' : 'idle'
+  delete data.error
+  return data
+}
+
 function cloneNodeForPaste(
   source: Node,
   position: { x: number; y: number },
@@ -104,7 +121,7 @@ function cloneNodeForPaste(
     selected: false,
     dragging: false,
     data: {
-      ...source.data,
+      ...normalizePastedGenerationData(source),
       title: `${data.title || '节点'} 副本`,
     },
   }

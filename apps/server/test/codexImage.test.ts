@@ -9,6 +9,7 @@ import {
   generateCodexCliText,
   getCodexImageProviderStatus,
   isCodexImageModel,
+  isSafeCodexModelArgument,
   normalizeCodexImageSize,
   startCodexLogin,
 } from '../src/services/codexImage'
@@ -57,6 +58,56 @@ test('isCodexImageModel only claims explicit Codex image models', () => {
   assert.equal(isCodexImageModel('gpt-image-2-official'), false)
   assert.equal(isCodexImageModel('gemini-3-pro-image-preview'), false)
   assert.equal(isCodexImageModel('jimeng-5.0'), false)
+})
+
+test('Codex CLI model arguments reject command-shell metacharacters', () => {
+  assert.equal(isSafeCodexModelArgument('gpt-5.5'), true)
+  assert.equal(isSafeCodexModelArgument('o3-mini_2026.07'), true)
+  assert.equal(isSafeCodexModelArgument('gpt-5.5:fast'), true)
+  assert.equal(isSafeCodexModelArgument('gpt-5.5"&calc&"'), false)
+  assert.equal(isSafeCodexModelArgument('gpt-5.5 | whoami'), false)
+  assert.equal(isSafeCodexModelArgument('../gpt-5.5'), false)
+})
+
+test('unsafe Codex model arguments are rejected before either CLI path starts', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'mok-codex-model-'))
+  let commandCalls = 0
+  const runCommand = async () => {
+    commandCalls += 1
+    return { stdout: '', stderr: '' }
+  }
+
+  try {
+    await assert.rejects(
+      generateCodexCliText(
+        {
+          model: 'codex:gpt-5.5 | whoami',
+          messages: [{ role: 'user', content: 'hello' }],
+        },
+        { cwd: outputDir, outputDir, runCommand },
+      ),
+      /只允许字母、数字/,
+    )
+    await assert.rejects(
+      generateCodexCliImage(
+        {
+          flowId: 'flow_safe',
+          nodeId: 'image-safe',
+          mediaType: 'image',
+          prompt: 'test',
+          model: 'codex:gpt-5.5 | whoami',
+          width: 1024,
+          height: 1024,
+          count: 1,
+        },
+        { cwd: outputDir, outputDir, runCommand, listImageFiles: async () => [] },
+      ),
+      /只允许字母、数字/,
+    )
+    assert.equal(commandCalls, 0)
+  } finally {
+    await rm(outputDir, { recursive: true, force: true })
+  }
 })
 
 test('getCodexImageProviderStatus reports available when CLI and auth file exist', async () => {

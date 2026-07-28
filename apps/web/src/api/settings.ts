@@ -2,13 +2,28 @@
 // 封装 GET/PUT /api/settings 的 fetch 调用。
 // Vite proxy 已把 /api 转发到后端 8787，前端直接用相对路径即可。
 
-import type { Settings } from '@jimeng-flow/shared'
+import type { Settings, SettingsResponse } from '@jimeng-flow/shared'
 import type { LlmModelInfo } from '@jimeng-flow/shared/textNode'
 
 /** 测试连接结果 */
 export interface TestConnectionResult {
   ok: boolean
   message?: string
+}
+
+async function getSettingsApiErrorMessage(
+  response: Response,
+  action: string,
+): Promise<string> {
+  try {
+    const payload = (await response.json()) as { message?: unknown }
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message.trim()
+    }
+  } catch {
+    // 非 JSON 错误响应沿用状态码兜底。
+  }
+  return `${action}：${response.status} ${response.statusText}`
 }
 
 export interface CodexStatus {
@@ -28,7 +43,7 @@ export interface CodexStatus {
 }
 
 /** 获取当前 settings（合并默认值后的完整内容） */
-export async function getSettings(): Promise<Settings> {
+export async function getSettings(): Promise<SettingsResponse> {
   const res = await fetch('/api/settings', {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
@@ -36,23 +51,23 @@ export async function getSettings(): Promise<Settings> {
   if (!res.ok) {
     throw new Error(`获取设置失败：${res.status} ${res.statusText}`)
   }
-  return (await res.json()) as Settings
+  return (await res.json()) as SettingsResponse
 }
 
 /**
  * 部分更新 settings（浅合并）。
  * @param settings 仅需要更新的字段
  */
-export async function saveSettings(settings: Partial<Settings>): Promise<Settings> {
+export async function saveSettings(settings: Partial<Settings>): Promise<SettingsResponse> {
   const res = await fetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
   })
   if (!res.ok) {
-    throw new Error(`保存设置失败：${res.status} ${res.statusText}`)
+    throw new Error(await getSettingsApiErrorMessage(res, '保存设置失败'))
   }
-  return (await res.json()) as Settings
+  return (await res.json()) as SettingsResponse
 }
 
 /**

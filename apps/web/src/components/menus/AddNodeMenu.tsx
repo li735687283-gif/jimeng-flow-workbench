@@ -1,5 +1,6 @@
 import type { FlowNodeType } from '../../types/nodeTypes'
 import { NODE_MENU_ITEMS, type NodeMenuItem } from './nodeMenuItems'
+import { ViewportMenuPortal } from './ViewportMenuPortal'
 
 export interface AddNodeMenuState {
   x: number
@@ -21,21 +22,21 @@ export function AddNodeMenu({
   onClose,
 }: AddNodeMenuProps) {
   return (
-    <>
-      <div className="menu-overlay" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
-      <div
-        className="add-node-menu"
-        style={{ left: state.x, top: state.y }}
-        role="menu"
-        aria-label="添加节点"
-      >
-        <AddNodeMenuContent
-          onSelect={onSelect}
-          onUpload={onUpload}
-          onClose={onClose}
-        />
-      </div>
-    </>
+    <ViewportMenuPortal
+      anchorPoint={{ x: state.x, y: state.y }}
+      open
+      onClose={onClose}
+      className="add-node-menu"
+      gap={0}
+      minWidth={180}
+      ariaLabel="添加节点"
+    >
+      <AddNodeMenuContent
+        onSelect={onSelect}
+        onUpload={onUpload}
+        onClose={onClose}
+      />
+    </ViewportMenuPortal>
   )
 }
 

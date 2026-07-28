@@ -5,11 +5,11 @@
 // 这里只提供 isJimengConfigured / isLlmConfigured 派生值供其读取。
 
 import { create } from 'zustand'
-import type { Settings } from '@jimeng-flow/shared'
+import { SETTINGS_SECRET_MASK, type Settings, type SettingsResponse } from '@jimeng-flow/shared'
 import { getSettings, saveSettings as apiSaveSettings } from '../api/settings'
 
 interface SettingsState {
-  settings: Settings | null
+  settings: SettingsResponse | null
   loading: boolean
   error: string | null
   /** 派生：dreamina CLI 路径非空（生成相关链路可用） */
@@ -22,7 +22,7 @@ interface SettingsState {
   saveSettings: (partial: Partial<Settings>) => Promise<void>
 }
 
-function deriveJimengConfigured(s: Settings | null): boolean {
+function deriveJimengConfigured(s: SettingsResponse | null): boolean {
   return (
     !!s &&
     typeof s.dreaminaPath === 'string' &&
@@ -30,15 +30,16 @@ function deriveJimengConfigured(s: Settings | null): boolean {
   )
 }
 
-function deriveLlmConfigured(s: Settings | null): boolean {
+export function deriveLlmConfigured(s: SettingsResponse | null): boolean {
   if (!s) return false
-  const configured = (baseUrl: string, apiKey: string) =>
-    baseUrl.trim().length > 0 && apiKey.trim().length > 0
+  const configured = (baseUrl: string, hasApiKey: boolean, apiKey: string) =>
+    baseUrl.trim().length > 0 &&
+    (hasApiKey || (apiKey.trim().length > 0 && apiKey !== SETTINGS_SECRET_MASK))
   return (
-    configured(s.llmBaseUrl, s.llmApiKey) ||
-    configured(s.kimiBaseUrl, s.kimiApiKey) ||
-    configured(s.kimiCodingBaseUrl, s.kimiCodingApiKey) ||
-    configured(s.deepseekBaseUrl, s.deepseekApiKey)
+    configured(s.llmBaseUrl, s.hasLlmApiKey, s.llmApiKey) ||
+    configured(s.kimiBaseUrl, s.hasKimiApiKey, s.kimiApiKey) ||
+    configured(s.kimiCodingBaseUrl, s.hasKimiCodingApiKey, s.kimiCodingApiKey) ||
+    configured(s.deepseekBaseUrl, s.hasDeepseekApiKey, s.deepseekApiKey)
   )
 }
 
@@ -88,6 +89,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
 }))
 
 /** 便于非组件代码读取当前 settings */
-export function getCurrentSettings(): Settings | null {
+export function getCurrentSettings(): SettingsResponse | null {
   return useSettingsStore.getState().settings
 }

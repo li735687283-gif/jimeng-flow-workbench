@@ -26,7 +26,7 @@ import { AgentConversationHistory } from './AgentConversationHistory'
 import { SecondaryMenuSelect } from './menus/SecondaryMenuSelect'
 import { buildAgentChatHistory, useAgentStore } from '../state/agentStore'
 import { useCanvasStore } from '../state/canvasStore'
-import { useFlowStore } from '../state/flowStore'
+import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { useSettingsStore } from '../state/settingsStore'
 import {
   AGENT_DEFAULT_IMAGE_ASPECT_RATIO,
@@ -34,6 +34,12 @@ import {
   summarizeCanvasNodes,
 } from '../utils/agentTools'
 import { shouldFinishAgentTurnAfterToolResults } from '../utils/agentExecution'
+import {
+  awaitAgentRunResult,
+  isAgentRunOwnerActive,
+  type AgentRunOwner,
+  type AgentRunSnapshot,
+} from '../utils/agentRunOwnership'
 import {
   AGENT_IMAGE_ASPECT_RATIOS,
   getAgentImageResolutionOptions,
@@ -106,12 +112,13 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const openConversation = useAgentStore((s) => s.openConversation)
   const deleteConversation = useAgentStore((s) => s.deleteConversation)
   const setActiveProject = useAgentStore((s) => s.setActiveProject)
+  const draft = useAgentStore((s) => s.draft)
+  const setDraft = useAgentStore((s) => s.setDraft)
   const currentFlowId = useFlowStore((s) => s.currentFlowId)
   const settings = useSettingsStore((s) => s.settings)
   const saveSettings = useSettingsStore((s) => s.saveSettings)
   const { screenToFlowPosition } = useReactFlow()
 
-  const [draft, setDraft] = useState('')
   const [panelWidth, setPanelWidth] = useState(420)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
@@ -131,6 +138,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   const [openParamSelect, setOpenParamSelect] = useState<string | null>(null)
   const [codexLoginState, setCodexLoginState] = useState<'idle' | 'starting' | 'opened'>('idle')
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const agentRunIdRef = useRef(0)
 
   const configuredCurrentModel = settings?.llmModel || ''
   const models = useMemo(() => {
@@ -216,11 +224,16 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
   }, [maxPanelWidth])
 
   useEffect(() => {
+    agentRunIdRef.current += 1
     setActiveProject(currentFlowId)
     setMentionedNodeIds([])
     setPickingCanvasNode(false)
     setHistoryOpen(false)
   }, [currentFlowId, setActiveProject])
+
+  useEffect(() => {
+    agentRunIdRef.current += 1
+  }, [activeConversationId])
 
   // 新消息或加载状态变化时滚动到底部
   useEffect(() => {
@@ -290,7 +303,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     if (!node) return
     const title = nodeTitle(node)
     setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
-    setDraft((value) => value.replace(/(?:^|\s)@[一-龥\w-]*$/, (match) => {
+    setDraft(draft.replace(/(?:^|\s)@[一-龥\w-]*$/, (match) => {
       const prefix = match.startsWith(' ') ? ' ' : ''
       return `${prefix}@${title} `
     }))
@@ -304,8 +317,8 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     const node = useCanvasStore.getState().nodes.find((item) => item.id === nodeId)
     if (!node) return
     setMentionedNodeIds((ids) => (ids.includes(nodeId) ? ids : [...ids, nodeId]))
-    setDraft((value) => (value.trim() ? value : '请结合引用的画布节点继续创作：'))
-  }, [])
+    setDraft(draft.trim() ? draft : '请结合引用的画布节点继续创作：')
+  }, [draft, setDraft])
 
   // 画布点选模式：点击任意节点即加入引用，Esc 退出
   useEffect(() => {
@@ -354,6 +367,26 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
    * 有结果后带回去继续下一轮，直到模型不再请求工具或达到轮数上限。
    */
   const runAgentLoop = useCallback(async (actionsAlreadyExecuted = false) => {
+    const initialState = useAgentStore.getState()
+    const runId = agentRunIdRef.current + 1
+    agentRunIdRef.current = runId
+    const owner: AgentRunOwner = {
+      projectId: getCurrentFlowId(),
+      conversationId: initialState.activeConversationId,
+      contextVersion: initialState.contextVersion,
+      runId,
+    }
+    const getRunSnapshot = (): AgentRunSnapshot => {
+      const state = useAgentStore.getState()
+      return {
+        activeProjectId: getCurrentFlowId(),
+        activeConversationId: state.activeConversationId,
+        contextVersion: state.contextVersion,
+      }
+    }
+    const isOwnerActive = () =>
+      isAgentRunOwnerActive(owner, getRunSnapshot(), agentRunIdRef.current)
+
     setLoading(true)
     setError(undefined)
     // 本轮循环里是否已经有工具真的执行过——若是,后续 LLM 调用失败
@@ -361,13 +394,21 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
     let executedAnyAction = actionsAlreadyExecuted
     try {
       for (let round = 0; round < MAX_AGENT_ROUNDS; round += 1) {
+        if (!isOwnerActive()) return
         const state = useAgentStore.getState()
         const mode = state.executionMode
-        const response = await sendAgentChat({
-          history: buildAgentChatHistory(state.messages),
-          canvas: summarizeCanvasNodes(useCanvasStore.getState().nodes),
-          model: currentModel || undefined,
-        })
+        const responseResult = await awaitAgentRunResult(
+          sendAgentChat({
+            history: buildAgentChatHistory(state.messages),
+            canvas: summarizeCanvasNodes(useCanvasStore.getState().nodes),
+            model: currentModel || undefined,
+          }),
+          owner,
+          getRunSnapshot,
+          () => agentRunIdRef.current,
+        )
+        if (!responseResult.active) return
+        const response = responseResult.value
 
         const assistantMessage: AgentMessage = {
           id: createMessageId(),
@@ -388,10 +429,18 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
         const results = []
         for (const action of immediateActions) {
-          results.push(await executeAgentToolCall(action, { getDropPosition }))
+          if (!isOwnerActive()) return
+          const result = await executeAgentToolCall(action, { getDropPosition })
+          useAgentStore.getState().addActionResultsToConversation(
+            owner.projectId,
+            owner.conversationId,
+            assistantMessage.id,
+            [result],
+          )
+          results.push(result)
+          executedAnyAction = true
+          if (!isOwnerActive()) return
         }
-        executedAnyAction = true
-        useAgentStore.getState().addActionResults(assistantMessage.id, results)
         if (shouldFinishAgentTurnAfterToolResults(results)) break
 
         // 手动模式下还有未确认的写操作：停下来等用户确认
@@ -401,16 +450,17 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
         if (mode !== 'auto' && hasPendingWrites) break
       }
     } catch (err) {
+      if (!isOwnerActive()) return
       const message = err instanceof Error ? err.message : String(err)
       setError(executedAnyAction ? `画布操作已执行，但后续回复失败：${message}` : message)
     } finally {
-      setLoading(false)
+      if (isOwnerActive()) setLoading(false)
     }
   }, [currentModel, getDropPosition, setError, setLoading])
 
   const submit = async () => {
     const text = draft.trim()
-    if (!text || loading || !currentModel) return
+    if (!text || loading || executingMessageId || !currentModel) return
     const contextNodeIds = mentionedNodeIds.length > 0
       ? mentionedNodeIds
       : selectedNodeId
@@ -432,18 +482,46 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const handleConfirmActions = async (message: AgentMessage) => {
     const pending = pendingActionsOf(message)
-    if (pending.length === 0 || loading) return
+    if (pending.length === 0 || loading || executingMessageId) return
+    const initialState = useAgentStore.getState()
+    const runId = agentRunIdRef.current + 1
+    agentRunIdRef.current = runId
+    const owner: AgentRunOwner = {
+      projectId: getCurrentFlowId(),
+      conversationId: initialState.activeConversationId,
+      contextVersion: initialState.contextVersion,
+      runId,
+    }
+    const getRunSnapshot = (): AgentRunSnapshot => {
+      const state = useAgentStore.getState()
+      return {
+        activeProjectId: getCurrentFlowId(),
+        activeConversationId: state.activeConversationId,
+        contextVersion: state.contextVersion,
+      }
+    }
+    const isOwnerActive = () =>
+      isAgentRunOwnerActive(owner, getRunSnapshot(), agentRunIdRef.current)
+
     setExecutingMessageId(message.id)
     const results = []
     try {
       for (const action of pending) {
-        results.push(await executeAgentToolCall(applyParamOverrides(action), { getDropPosition }))
+        if (!isOwnerActive()) return
+        const result = await executeAgentToolCall(applyParamOverrides(action), { getDropPosition })
+        useAgentStore.getState().addActionResultsToConversation(
+          owner.projectId,
+          owner.conversationId,
+          message.id,
+          [result],
+        )
+        results.push(result)
+        if (!isOwnerActive()) return
       }
-      useAgentStore.getState().addActionResults(message.id, results)
     } finally {
-      setExecutingMessageId(null)
+      setExecutingMessageId((current) => current === message.id ? null : current)
     }
-    if (!shouldFinishAgentTurnAfterToolResults(results)) {
+    if (isOwnerActive() && !shouldFinishAgentTurnAfterToolResults(results)) {
       await runAgentLoop(true)
     }
   }
@@ -544,7 +622,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
 
   const handleCancelActions = (message: AgentMessage) => {
     const pending = pendingActionsOf(message)
-    if (pending.length === 0) return
+    if (pending.length === 0 || executingMessageId) return
     useAgentStore.getState().addActionResults(
       message.id,
       pending.map((action) => ({
@@ -813,7 +891,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                         <button
                           type="button"
                           className="agent-card-secondary"
-                          disabled={loading || executingMessageId === message.id}
+                          disabled={loading || executingMessageId !== null}
                           onClick={() => handleCancelActions(message)}
                         >
                           取消
@@ -821,7 +899,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
                         <button
                           type="button"
                           className="agent-card-primary"
-                          disabled={loading || executingMessageId === message.id}
+                          disabled={loading || executingMessageId !== null}
                           onClick={() => void handleConfirmActions(message)}
                         >
                           {executingMessageId === message.id ? '执行中...' : '执行'}
@@ -909,7 +987,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
               void submit()
             }
           }}
-          disabled={loading}
+          disabled={loading || executingMessageId !== null}
         />
 
         <div className="agent-composer-actions">
@@ -978,7 +1056,7 @@ export function AgentPanel({ onClose = () => undefined }: AgentPanelProps) {
             type="button"
             className="agent-send-btn"
             onClick={() => void submit()}
-            disabled={!draft.trim() || loading || !currentModel}
+            disabled={!draft.trim() || loading || executingMessageId !== null || !currentModel}
             title={currentModel ? '发送' : '请先在设置中添加大语言模型'}
           >
             <ArrowUp size={15} />

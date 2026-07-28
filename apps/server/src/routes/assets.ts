@@ -34,6 +34,7 @@ import {
   findDuplicateImportedImage,
 } from '../services/assetDedup'
 import { JimengError, upscaleImage } from '../services/jimeng'
+import { cleanupOwnedResultBatch } from '../services/ownedTempDirectories'
 
 interface UploadBody {
   fileName: string
@@ -159,6 +160,15 @@ async function saveUpscaleResult(
 }
 
 const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff')
+    const contentType = String(reply.getHeader('Content-Type') ?? '')
+    if (/^image\/svg\+xml(?:;|$)/i.test(contentType)) {
+      reply.header('Content-Security-Policy', "sandbox; script-src 'none'")
+    }
+    return payload
+  })
+
   // POST /api/assets/upload/file — multipart 流式上传（适合大文件如视频）
   app.post('/api/assets/upload/file', async (req, reply) => {
     const data = await req.file()
@@ -173,6 +183,14 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     const chunks: Buffer[] = []
     for await (const chunk of data.file) {
       chunks.push(chunk)
+    }
+    if (data.file.truncated) {
+      return reply.code(413).send({
+        statusCode: 413,
+        error: 'Payload Too Large',
+        message: '上传文件超过大小限制，未保存截断内容',
+        code: 'FILE_TOO_LARGE',
+      })
     }
     const fileBuffer = Buffer.concat(chunks)
 
@@ -483,23 +501,27 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         inputImage: req.params.assetId,
         resolutionType,
       })
-      const first = results[0]
-      if (!first) {
-        return reply.code(502).send({
-          statusCode: 502,
-          error: 'Bad Gateway',
-          message: 'dreamina 未返回高清结果',
-        })
+      try {
+        const first = results[0]
+        if (!first) {
+          return reply.code(502).send({
+            statusCode: 502,
+            error: 'Bad Gateway',
+            message: 'dreamina 未返回高清结果',
+          })
+        }
+        const sourceFlowId =
+          typeof sourceAsset.params?.flowId === 'string' ? sourceAsset.params.flowId : undefined
+        const asset = await saveUpscaleResult(
+          first,
+          req.params.assetId,
+          resolutionType,
+          sourceFlowId,
+        )
+        return reply.code(201).send(asset)
+      } finally {
+        await cleanupOwnedResultBatch(results)
       }
-      const sourceFlowId =
-        typeof sourceAsset.params?.flowId === 'string' ? sourceAsset.params.flowId : undefined
-      const asset = await saveUpscaleResult(
-        first,
-        req.params.assetId,
-        resolutionType,
-        sourceFlowId,
-      )
-      return reply.code(201).send(asset)
     } catch (err) {
       app.log.error({ err }, '[assets/upscale] 调用失败')
       const payload = errorPayload(err)

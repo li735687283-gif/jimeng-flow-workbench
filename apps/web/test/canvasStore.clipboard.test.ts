@@ -35,3 +35,58 @@ test('canvas clipboard copies, pastes and removes any node', () => {
   useCanvasStore.setState({ clipboardNode: null })
   assert.equal(useCanvasStore.getState().pasteNode(), '')
 })
+
+test('pasted running generation nodes detach from the source task', () => {
+  useCanvasStore.setState({
+    nodes: [],
+    edges: [],
+    clipboardNode: null,
+    selectedNodeId: null,
+    deletedNodeIds: [],
+  })
+  const sourceId = useCanvasStore.getState().addNode('image', { x: 0, y: 0 })
+  useCanvasStore.getState().updateNodeData(sourceId, {
+    title: '生成中',
+    status: 'running',
+    generationId: 'gen-source',
+    error: '旧错误',
+  })
+  useCanvasStore.getState().copyNode(sourceId)
+  const pastedId = useCanvasStore.getState().pasteNode({ x: 30, y: 30 })
+  const pastedData = useCanvasStore.getState().nodes.find((node) => node.id === pastedId)?.data as Record<string, unknown>
+  const sourceData = useCanvasStore.getState().nodes.find((node) => node.id === sourceId)?.data as Record<string, unknown>
+
+  assert.equal(pastedData.generationId, undefined)
+  assert.equal(pastedData.status, 'idle')
+  assert.equal(pastedData.error, undefined)
+  assert.equal(sourceData.generationId, 'gen-source')
+  assert.equal(sourceData.status, 'running')
+})
+
+test('pasted running nodes with an old result become successful and keep the asset', () => {
+  useCanvasStore.setState({
+    nodes: [],
+    edges: [],
+    clipboardNode: null,
+    selectedNodeId: null,
+    deletedNodeIds: [],
+  })
+  const sourceId = useCanvasStore.getState().addNode('image', { x: 0, y: 0 })
+  useCanvasStore.getState().updateNodeData(sourceId, {
+    title: '再次生成中',
+    status: 'running',
+    generationId: 'gen-redraw',
+    assetId: 'asset-existing',
+    generationRuns: [{ generationId: 'gen-old', assetIds: ['asset-existing'] }],
+  })
+  useCanvasStore.getState().copyNode(sourceId)
+  const pastedId = useCanvasStore.getState().pasteNode({ x: 60, y: 60 })
+  const pastedData = useCanvasStore.getState().nodes.find((node) => node.id === pastedId)?.data as Record<string, unknown>
+
+  assert.equal(pastedData.generationId, undefined)
+  assert.equal(pastedData.status, 'success')
+  assert.equal(pastedData.assetId, 'asset-existing')
+  assert.deepEqual(pastedData.generationRuns, [
+    { generationId: 'gen-old', assetIds: ['asset-existing'] },
+  ])
+})
