@@ -28,12 +28,13 @@ export function isInterruptedImageGeneration(
 export function getImageGenerationProgressState(
   status: unknown,
   isGenerating: boolean,
+  activity: 'generate' | 'upscale' = 'generate',
 ): ImageGenerationProgressState {
   const visible = isGenerating || status === 'queued' || status === 'running'
   return {
     visible,
-    label: '图片生成中',
-    valueText: '生成中',
+    label: activity === 'upscale' ? '高清处理中' : '图片生成中',
+    valueText: activity === 'upscale' ? '处理中' : '生成中',
   }
 }
 

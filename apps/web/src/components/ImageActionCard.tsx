@@ -19,6 +19,7 @@ interface ImageActionCardProps {
   validationStatus?: ValidationStatus
   validationLabel?: string
   validationAriaLabel?: string
+  validationTitle?: string
   upscaleResolution: UpscaleResolution
   busy?: boolean
   gridBusy?: boolean
@@ -37,6 +38,7 @@ export function ImageActionCard({
   validationStatus = 'idle',
   validationLabel = '校验',
   validationAriaLabel = '校验当前图片模型',
+  validationTitle,
   upscaleResolution,
   busy = false,
   gridBusy = false,
@@ -214,6 +216,7 @@ export function ImageActionCard({
         onClick={onValidate}
         disabled={busy}
         aria-label={validationAriaLabel}
+        title={validationTitle}
       >
         <ShieldCheck size={17} strokeWidth={1.7} />
         <span>{validationLabel}</span>

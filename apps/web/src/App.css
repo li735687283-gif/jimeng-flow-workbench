@@ -1673,7 +1673,7 @@
 }
 
 .image-action-button.validation-error {
-  color: #b8b8b8;
+  color: var(--menu-danger-text);
 }
 
 .image-action-button.validation-checking {

@@ -349,6 +349,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
+  const [validationMessage, setValidationMessage] = useState('')
   const [upscaleResolution, setUpscaleResolution] = useState<'2k' | '4k' | '8k'>('2k')
   const [fullSizeOpen, setFullSizeOpen] = useState(false)
   const [fullSizeScale, setFullSizeScale] = useState(1)
@@ -515,6 +516,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const generationProgress = getImageGenerationProgressState(
     nodeData.status,
     generationRequestInFlight,
+    nodeData.upscaleSourceNodeId ? 'upscale' : 'generate',
   )
   const showPlaceholderIcon = shouldShowImagePlaceholderIcon(
     generationProgress.visible,
@@ -793,22 +795,42 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const handleValidateImageProvider = useCallback(async () => {
     if (!selectedModel) {
       setValidationStatus('error')
+      setValidationMessage('未选择图片模型，请先在编辑面板中选择模型')
       return
     }
     setActionBusy(true)
     setValidationStatus('checking')
+    setValidationMessage('')
     try {
-      const valid = await validateImageProvider(selectedModel.id, {
-        probeJimeng: async () => (await testJimengConnection(settings ?? {})).ok,
-        probeCodex: async () => (await getCodexStatus()).available,
+      const result = await validateImageProvider(selectedModel.id, {
+        probeJimeng: async () => await testJimengConnection(settings ?? {}),
+        probeCodex: async () => {
+          const status = await getCodexStatus()
+          return { ok: status.available, message: status.message }
+        },
       })
-      setValidationStatus(valid ? 'success' : 'error')
-    } catch {
+      setValidationStatus(result.ok ? 'success' : 'error')
+      setValidationMessage(
+        result.message ?? (result.ok ? '校验通过' : '校验失败，请检查模型配置'),
+      )
+      if (result.ok) {
+        // 校验通过后清掉上一次校验留下的错误提示，不影响生成类错误
+        if (sendError.startsWith('校验失败')) setSendError('')
+      } else {
+        // 失败原因要可见且可操作：同步到编辑面板的错误提示区
+        setSendError(
+          `校验失败：${result.message ?? '当前图片模型不可用，请检查设置中的模型与密钥配置'}`,
+        )
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       setValidationStatus('error')
+      setValidationMessage(message)
+      setSendError(`校验失败：${message}`)
     } finally {
       setActionBusy(false)
     }
-  }, [selectedModel?.id, settings])
+  }, [selectedModel, sendError, settings])
 
   const handleDownloadImage = useCallback(async () => {
     if (!nodeData.assetId) {
@@ -880,6 +902,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       if (!targetNodeId) {
         return
       }
+      // 高清是一次性 HTTP 调用、没有 generationId；把派生节点登记为 running，
+      // 否则中断检测会把 status:'running' 误判为已中断并直接改写为 error，
+      // 进度遮罩（不确定态进度条 + 扫光）也因此完全不显示。
+      useGenerateStore.getState().setStatus(targetNodeId, 'running')
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
       const asset = await upscaleImageAsset(nodeData.assetId, resolution)
       useCanvasStore.getState().updateNodeData(targetNodeId, {
@@ -903,6 +929,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         void useFlowStore.getState().saveCurrent().catch(() => undefined)
       }
     } finally {
+      if (targetNodeId) {
+        useGenerateStore.getState().reset(targetNodeId)
+      }
       setActionBusy(false)
     }
   }, [id, nodeData.assetId, upscaleResolution])
@@ -1539,7 +1568,16 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             busy={actionBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
-            validationLabel={'校验'}
+            validationLabel={
+              validationStatus === 'checking'
+                ? '校验中'
+                : validationStatus === 'success'
+                  ? '校验通过'
+                  : validationStatus === 'error'
+                    ? '校验失败'
+                    : '校验'
+            }
+            validationTitle={validationMessage || undefined}
             validationAriaLabel={
               shouldRequireJimengCliForImageModel(selectedModel?.id ?? '')
                 ? '校验即梦 CLI'
