@@ -1,6 +1,6 @@
 {
   "name": "jimeng-flow-workbench",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "MO.K local-first AI canvas desktop application",
   "private": true,
   "type": "module",
