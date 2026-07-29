@@ -1512,6 +1512,13 @@
   z-index: 0;
 }
 
+/* 打开编辑面板的节点整体置顶：React Flow 按 DOM 顺序堆叠节点，
+   不提升的话后渲染的节点会盖住先点开的面板（elevateNodesOnSelect 已关闭）。 */
+.react-flow__node:has(.image-editor-panel),
+.react-flow__node:has(.text-editor-panel) {
+  z-index: 1000 !important;
+}
+
 .node-wrapper.media-display .node-card,
 .node-wrapper.media-display:hover .node-card,
 .react-flow__node.dragging .node-wrapper.media-display .node-card,

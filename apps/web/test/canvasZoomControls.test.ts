@@ -27,3 +27,17 @@ test('canvas zoom controls include snap toggle next to zoom actions', async () =
   assert.match(css, /\.canvas-zoom-controls/)
   assert.match(css, /\.canvas-snap-btn/)
 })
+
+test('snap toggle active state stays visible in the light theme via tokens', async () => {
+  const theme = await readFile(new URL('../src/theme.css', import.meta.url), 'utf8')
+
+  // 深色模板的白色激活图标在浅色主题白底面板上看不见，浅色主题必须用主题令牌覆盖。
+  assert.match(
+    theme,
+    /\[data-canvas-theme='light'\]\s+\.canvas-zoom-btn\.canvas-snap-btn\.is-active\s*\{[^}]*color:\s*var\(--theme-accent\);[^}]*background:\s*var\(--theme-accent-soft\);/s,
+  )
+  assert.match(
+    theme,
+    /\[data-canvas-theme='light'\]\s+\.canvas-zoom-btn\.canvas-snap-btn\.is-active:hover\s*\{[^}]*background:\s*var\(--theme-accent-glow\);/s,
+  )
+})

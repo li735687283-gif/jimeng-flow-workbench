@@ -30,7 +30,7 @@
   --theme-accent-glow: rgba(255, 255, 255, 0.16);
   --theme-edge: #737373;
   --theme-edge-active: #e3e3e3;
-  --theme-grid: #2a2a2a;
+  --theme-grid: #383838;
   --theme-overlay: rgba(0, 0, 0, 0.58);
   --theme-menu: rgba(30, 30, 30, 0.96);
   --theme-node-shadow: 0 14px 38px rgba(0, 0, 0, 0.34);
@@ -136,7 +136,7 @@
   --theme-accent-glow: rgba(52, 49, 45, 0.18);
   --theme-edge: #8b847a;
   --theme-edge-active: #312f2b;
-  --theme-grid: #d2ccc1;
+  --theme-grid: #bdb4a6;
   --theme-overlay: rgba(48, 44, 38, 0.28);
   --theme-menu: rgba(255, 253, 248, 0.97);
   --theme-node-shadow: 0 14px 34px rgba(67, 58, 44, 0.14);
@@ -459,6 +459,16 @@ body,
 .canvas-zoom-btn,
 .ghost-pill {
   color: var(--theme-text);
+}
+
+/* 浅色主题：吸附开关激活态沿用深色模板的白色图标，在白底面板上看不见，改用主题令牌。 */
+[data-canvas-theme='light'] .canvas-zoom-btn.canvas-snap-btn.is-active {
+  color: var(--theme-accent);
+  background: var(--theme-accent-soft);
+}
+
+[data-canvas-theme='light'] .canvas-zoom-btn.canvas-snap-btn.is-active:hover {
+  background: var(--theme-accent-glow);
 }
 
 .dock-icon-btn:hover,
