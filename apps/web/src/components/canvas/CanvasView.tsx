@@ -60,6 +60,7 @@ import {
   reconcileGroupMembership,
 } from '../../utils/nodeGroup'
 import { NODE_HANDLE_OFFSET_FLOW } from '../../utils/nodeHandleGeometry'
+import { isBlankCanvasTarget } from '../../utils/canvasTargets'
 
 const edgeTypes = { cut: CutEdge }
 const REFERENCE_MENU_WIDTH = 330
@@ -182,13 +183,6 @@ function getPointerClientPosition(event: MouseEvent | TouchEvent): {
   }
   const mouseEvent = event as MouseEvent
   return { x: mouseEvent.clientX, y: mouseEvent.clientY }
-}
-
-function isBlankCanvasTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.closest('.react-flow__handle')) return false
-  if (target.closest('.react-flow__node')) return false
-  return !!target.closest('.react-flow')
 }
 
 function getFileExtension(file: File): string {

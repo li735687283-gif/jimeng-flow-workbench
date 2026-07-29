@@ -128,13 +128,53 @@ test('upscale overlay respects default engine/resolution and busy/error states',
   assert.equal(closed, '')
 })
 
-test('upscale overlay closes on Escape only when not busy', async () => {
+test('upscale overlay can always be dismissed, even while busy', async () => {
+  const { UpscaleOverlay } = await import('../src/components/UpscaleOverlay')
+
+  // busy 状态下关闭按钮不被禁用
+  const html = renderToStaticMarkup(
+    <UpscaleOverlay
+      open={true}
+      imageUrl="/x.png"
+      naturalWidth={100}
+      naturalHeight={100}
+      busy={true}
+      onCancel={() => undefined}
+      onConfirm={() => undefined}
+    />,
+  )
+  assert.doesNotMatch(html, /disabled=""[^>]*aria-label="关闭高清配置"/)
+  assert.equal(html.includes('aria-label="关闭高清配置"'), true)
+
+  // Escape 任何时候都可关闭：任务派发后画布节点自带进度，退出不影响后台任务
   const source = await readFile(
     new URL('../src/components/UpscaleOverlay.tsx', import.meta.url),
     'utf8',
   )
-  assert.match(source, /event\.key === 'Escape' && !busy/)
+  assert.match(source, /event\.key === 'Escape'\)/)
+  assert.doesNotMatch(source, /Escape' && !busy/)
   assert.match(source, /createPortal/)
+})
+
+test('upscale dispatch closes the overlay immediately and guards late callbacks', async () => {
+  const source = await readFile(
+    new URL('../src/nodes/ImageNode.tsx', import.meta.url),
+    'utf8',
+  )
+  const handlerStart = source.indexOf('const handleUpscaleImage')
+  const handlerEnd = source.indexOf('const handleGridGenerate', handlerStart)
+  assert.ok(handlerStart > -1 && handlerEnd > handlerStart)
+  const handler = source.slice(handlerStart, handlerEnd)
+
+  // 任务一发出（派生节点已建、已登记 running）即关闭 overlay，不等 HTTP 返回
+  const registerIndex = handler.indexOf("setStatus(targetNodeId, 'running')")
+  const closeIndex = handler.indexOf('setUpscaleOpen(false)')
+  const awaitIndex = handler.indexOf('await upscaleImageAsset')
+  assert.ok(registerIndex > -1 && closeIndex > registerIndex)
+  assert.ok(closeIndex < awaitIndex)
+  // 异步回调写本地 state 前检查组件仍挂载，失败只落到派生节点 error
+  assert.match(handler, /if \(mountedRef\.current\) setUpscaleError\(message\)/)
+  assert.match(handler, /if \(mountedRef\.current\) setActionBusy\(false\)/)
 })
 
 test('upscale flow passes engine through and writes measured size back to the node', async () => {

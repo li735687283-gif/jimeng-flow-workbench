@@ -358,6 +358,14 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const [validationMessage, setValidationMessage] = useState('')
   const [upscaleOpen, setUpscaleOpen] = useState(false)
   const [upscaleError, setUpscaleError] = useState<string | null>(null)
+  // 节点可能在高清请求途中被删除/项目切换：异步回调写本地 state 前必须检查
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const [fullSizeOpen, setFullSizeOpen] = useState(false)
   const [fullSizeScale, setFullSizeScale] = useState(1)
   const [fullSizeRotation, setFullSizeRotation] = useState(0)
@@ -917,6 +925,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       // 否则中断检测会把 status:'running' 误判为已中断并直接改写为 error，
       // 进度遮罩（不确定态进度条 + 扫光）也因此完全不显示。
       useGenerateStore.getState().setStatus(targetNodeId, 'running')
+      // 任务已落到画布（派生节点自带进度动画），立即关闭配置界面，
+      // 后台任务继续；失败时错误写派生节点，不再依赖 overlay 展示。
+      setUpscaleOpen(false)
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
       const asset = await upscaleImageAsset(nodeData.assetId, resolution, engine)
       // 实测新图真实尺寸写回节点：高清后宽高/比例已变，节点框与全屏查看器都读它
@@ -934,7 +945,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
           : {}),
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
-      setUpscaleOpen(false)
       try {
         await useFlowStore.getState().saveCurrent()
       } catch {
@@ -950,13 +960,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         } as unknown as Partial<BaseNodeData>)
         void useFlowStore.getState().saveCurrent().catch(() => undefined)
       }
-      // 错误显示在高清配置面板内，不静默
-      setUpscaleError(message)
+      // overlay 可能已关闭或组件已卸载：只在本组件仍挂载且界面仍开着时写本地错误
+      if (mountedRef.current) setUpscaleError(message)
     } finally {
       if (targetNodeId) {
         useGenerateStore.getState().reset(targetNodeId)
       }
-      setActionBusy(false)
+      if (mountedRef.current) setActionBusy(false)
     }
   }, [id, nodeData.assetId])
 

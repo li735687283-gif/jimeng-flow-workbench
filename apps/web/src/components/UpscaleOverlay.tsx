@@ -61,15 +61,15 @@ export function UpscaleOverlay({
     setSourceSize({ width: naturalWidth, height: naturalHeight })
   }, [defaultEngine, defaultResolution, naturalHeight, naturalWidth, open])
 
-  // Escape 关闭（发送中不关闭）；点遮罩空白不关闭（防误触）
+  // Escape 任何时候都可关闭：任务派发后画布节点自带进度，退出不影响后台任务
   useEffect(() => {
     if (!open) return
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && !busy) onCancel()
+      if (event.key === 'Escape') onCancel()
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [busy, onCancel, open])
+  }, [onCancel, open])
 
   if (!open) return null
 
@@ -110,7 +110,6 @@ export function UpscaleOverlay({
             type="button"
             className="upscale-icon-button"
             onClick={onCancel}
-            disabled={busy}
             aria-label="关闭高清配置"
           >
             <X size={17} strokeWidth={1.8} />
