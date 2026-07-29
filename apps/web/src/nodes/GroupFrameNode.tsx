@@ -1,9 +1,9 @@
 import { memo } from 'react'
-import { NodeResizer } from '@xyflow/react'
+import { NodeResizer, useStore } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { Group } from 'lucide-react'
 import { useCanvasStore } from '../state/canvasStore'
-import { DEFAULT_GROUP_COLOR } from '../utils/nodeGroup'
+import { DEFAULT_GROUP_COLOR, getGroupTitleZoomFactor } from '../utils/nodeGroup'
 import { EditableNodeTitle } from './EditableNodeTitle'
 
 /**
@@ -22,11 +22,17 @@ export const GroupFrameNode = memo(function GroupFrameNode({
   const active = Boolean(selected) || memberSelected
   const color = typeof data?.color === 'string' && data.color ? data.color : DEFAULT_GROUP_COLOR
   const title = typeof data?.title === 'string' && data.title ? data.title : '组'
+  // 画布缩小时组名反向放大，缩略视图下仍可分辨各组
+  const zoom = useStore((state) => state.transform[2])
+  const titleZoom = getGroupTitleZoomFactor(zoom)
 
   return (
     <div
       className={`group-frame${active ? ' active' : ''}`}
-      style={{ ['--group-frame-color' as string]: color }}
+      style={{
+        ['--group-frame-color' as string]: color,
+        ['--group-title-zoom' as string]: titleZoom,
+      }}
     >
       <NodeResizer
         isVisible={Boolean(selected)}

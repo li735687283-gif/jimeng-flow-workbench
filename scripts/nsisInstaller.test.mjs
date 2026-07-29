@@ -20,6 +20,12 @@ test('nsis installer is wired to a foreground include script', () => {
   assert.match(script, /MUI_CUSTOMFUNCTION_GUIINIT/)
   assert.match(script, /BringToFront/)
   assert.match(script, /SetForegroundWindow/)
+  // 前台锁下的加强手段：Alt+Tab 级激活 + TOPMOST 改 Z 序
+  assert.match(script, /SwitchToThisWindow/)
+  assert.match(script, /SetWindowPos\(i \$HWNDPARENT, i -1,/)
+  // 进入安装段后取消 TOPMOST，不永久压在其他窗口上
+  assert.match(script, /!macro customInstall/)
+  assert.match(script, /SetWindowPos\(i \$HWNDPARENT, i -2,/)
   // .onInit 兜底宏
   assert.match(script, /!macro customInit/)
 })

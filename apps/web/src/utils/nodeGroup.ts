@@ -10,6 +10,22 @@ export const GROUP_FRAME_TYPE = 'groupFrame'
 export const GROUP_FRAME_PADDING = 40
 export const DEFAULT_GROUP_COLOR = '#757575'
 
+/** 组名标题反向缩放的上下限：最小 1 倍（不缩小）、最大 4 倍（防止极端缩放失控） */
+export const GROUP_TITLE_MIN_ZOOM_FACTOR = 1
+export const GROUP_TITLE_MAX_ZOOM_FACTOR = 4
+
+/**
+ * 组名随画布缩放的反向放大因子：zoom 变小时按 1/zoom 放大字号，
+ * 保证画布缩得很小时仍能看清组名；上下限见 GROUP_TITLE_*_ZOOM_FACTOR。
+ */
+export function getGroupTitleZoomFactor(zoom: number): number {
+  if (!Number.isFinite(zoom) || zoom <= 0) return GROUP_TITLE_MIN_ZOOM_FACTOR
+  return Math.min(
+    Math.max(1 / zoom, GROUP_TITLE_MIN_ZOOM_FACTOR),
+    GROUP_TITLE_MAX_ZOOM_FACTOR,
+  )
+}
+
 // 组框颜色预设：遵循前端配色约定（中性色或已批准的语义强调色）
 export const GROUP_COLOR_PRESETS = [
   { id: 'gray', color: '#757575', label: '雾灰' },

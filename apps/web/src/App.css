@@ -10560,6 +10560,21 @@
 .group-frame.active::before {
   opacity: 0.3;
 }
+
+/* 组名随画布缩小反向放大：因子由 GroupFrameNode 按 zoom 计算（1~4），
+   标题锚定方式不变（画框左上角外侧），只放大字号、图标与重命名输入框 */
+.group-frame .node-title {
+  font-size: calc(16px * var(--group-title-zoom, 1));
+}
+
+.group-frame .node-title svg {
+  width: calc(16px * var(--group-title-zoom, 1));
+  height: calc(16px * var(--group-title-zoom, 1));
+}
+
+.group-frame .node-title-input {
+  font-size: calc(14px * var(--group-title-zoom, 1));
+}
 .group-frame-resize-handle {
   width: 10px;
   height: 10px;
