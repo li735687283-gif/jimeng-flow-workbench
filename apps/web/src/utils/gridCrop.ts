@@ -81,6 +81,24 @@ export function selectAllCellKeys(rows: number, cols: number): Set<string> {
 }
 
 /**
+ * 应用新的行列/间距后保留仍在新宫格范围内的选中 key：
+ * 行列不变（比如只调间距）时选中数量完全不变；
+ * 行列缩小时，超出新范围的格子被丢弃，其余保留。
+ */
+export function retainSelection(
+  selected: Set<string>,
+  rows: number,
+  cols: number,
+): Set<string> {
+  const valid = selectAllCellKeys(rows, cols)
+  const next = new Set<string>()
+  for (const key of selected) {
+    if (valid.has(key)) next.add(key)
+  }
+  return next
+}
+
+/**
  * 把选中的 key 映射回宫格单元的裁剪区域，
  * 结果按从左到右、从上到下排序（computeGridCells 本身即行优先）。
  */

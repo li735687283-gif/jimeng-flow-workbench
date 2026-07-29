@@ -4,6 +4,7 @@ import {
   buildGridSelectionSummary,
   cellKey,
   computeGridCells,
+  retainSelection,
   selectAllCellKeys,
   selectedCellsToRegions,
   toggleSelection,
@@ -97,4 +98,21 @@ test('selectedCellsToRegions keeps reading order and strips row/col', () => {
 test('buildGridSelectionSummary renders the pill counter text', () => {
   assert.equal(buildGridSelectionSummary(9, 0), '共 9 个宫格，已选中 0 个')
   assert.equal(buildGridSelectionSummary(9, 4), '共 9 个宫格，已选中 4 个')
+})
+
+test('retainSelection 行列不变时保留全部选中（只调间距不清空）', () => {
+  const selected = new Set([cellKey(1, 1), cellKey(2, 3), cellKey(3, 2)])
+  const retained = retainSelection(selected, 3, 3)
+
+  assert.equal(retained.size, 3)
+  assert.deepEqual([...retained].sort(), ['1_1', '2_3', '3_2'])
+  // 不改原 Set
+  assert.equal(selected.size, 3)
+})
+
+test('retainSelection 行列缩小时丢弃越界选中、保留界内', () => {
+  const selected = new Set([cellKey(1, 1), cellKey(2, 2), cellKey(3, 3), cellKey(4, 1)])
+  const retained = retainSelection(selected, 2, 2)
+
+  assert.deepEqual([...retained].sort(), ['1_1', '2_2'])
 })

@@ -13,6 +13,7 @@ import {
   buildGridSelectionSummary,
   cellKey,
   computeGridCells,
+  retainSelection,
   selectAllCellKeys,
   selectedCellsToRegions,
   toggleSelection,
@@ -147,7 +148,8 @@ export function GridCropOverlay({
     setDraftRows(String(nextRows))
     setDraftCols(String(nextCols))
     setDraftGutter(String(nextGutter))
-    setSelected(new Set())
+    // 保留仍在新宫格范围内的选中（只调间距时选中数量不变）
+    setSelected((prev) => retainSelection(prev, nextRows, nextCols))
   }
 
   const handleSelectAll = () => {
