@@ -32,3 +32,6 @@ yarn-error.log*
 .cache/
 .tmp/
 .worktrees/
+
+# 第三方二进制（由 npm run fetch:realesrgan 下载，不进 git）
+vendor/

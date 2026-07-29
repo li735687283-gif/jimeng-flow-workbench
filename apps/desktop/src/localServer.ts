@@ -83,6 +83,7 @@ export async function probeCanvasPage(
 export function createServerEnvironment(options: {
   baseEnv?: NodeJS.ProcessEnv
   projectRoot: string
+  resourcesDir?: string
   webRoot?: string
   workspaceDir: string
 }): NodeJS.ProcessEnv {
@@ -96,6 +97,9 @@ export function createServerEnvironment(options: {
   }
   if (options.webRoot) {
     environment.MOK_WEB_ROOT = resolve(options.webRoot)
+  }
+  if (options.resourcesDir) {
+    environment.MOK_RESOURCES_DIR = resolve(options.resourcesDir)
   }
   return environment
 }
@@ -133,6 +137,7 @@ export async function startOrReuseLocalServer(options: {
   fetchImpl?: typeof fetch
   killImpl?: KillProcess
   projectRoot: string
+  resourcesDir?: string
   spawnImpl?: SpawnServer
   startupTimeoutMs?: number
   webRoot?: string
@@ -173,6 +178,7 @@ export async function startOrReuseLocalServer(options: {
     env: createServerEnvironment({
       baseEnv: process.env,
       projectRoot: options.projectRoot,
+      resourcesDir: options.resourcesDir,
       webRoot: options.webRoot,
       workspaceDir: options.workspaceDir,
     }),

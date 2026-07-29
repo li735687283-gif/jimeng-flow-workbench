@@ -34,7 +34,10 @@ import {
   findDuplicateImportedImage,
 } from '../services/assetDedup'
 import { JimengError, upscaleImage } from '../services/jimeng'
+import { RealEsrganError, upscaleWithRealEsrgan } from '../services/realesrgan'
 import { cleanupOwnedResultBatch } from '../services/ownedTempDirectories'
+import type { UpscaleEngine, UpscaleImageRequest } from '@jimeng-flow/shared/upscale'
+import { DEFAULT_UPSCALE_ENGINE, normalizeUpscaleEngine } from '@jimeng-flow/shared/upscale'
 
 interface UploadBody {
   fileName: string
@@ -80,7 +83,7 @@ async function findDuplicateUpload(fileBuffer: Buffer, fileName: string, mimeTyp
 }
 
 function errorPayload(err: unknown) {
-  if (err instanceof JimengError) {
+  if (err instanceof JimengError || err instanceof RealEsrganError) {
     return {
       statusCode: err.statusCode,
       error: err.statusCode >= 500 ? 'Bad Gateway' : 'Bad Request',
@@ -119,6 +122,7 @@ async function saveUpscaleResult(
   result: GenerationResult,
   sourceAssetId: string,
   resolutionType: string,
+  provider: UpscaleEngine,
   flowId?: string,
 ) {
   if (result.localPath) {
@@ -129,7 +133,7 @@ async function saveUpscaleResult(
       originalName: `upscale-${sourceAssetId}${ext}`,
       mimeType: mimeForFile(result.localPath, 'image/png'),
       inputAssetIds: [sourceAssetId],
-      provider: 'dreamina',
+      provider,
       params: {
         flowId: flowId ?? null,
         operation: 'image_upscale',
@@ -149,7 +153,7 @@ async function saveUpscaleResult(
     originalName: `upscale-${sourceAssetId}${ext}`,
     mimeType,
     inputAssetIds: [sourceAssetId],
-    provider: 'dreamina',
+    provider,
     params: {
       flowId: flowId ?? null,
       operation: 'image_upscale',
@@ -159,7 +163,18 @@ async function saveUpscaleResult(
   })
 }
 
-const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
+/** 高清引擎依赖注入：测试可替换为假实现，默认走真实 service */
+export interface AssetsRouteDeps {
+  upscaleDreamina?: typeof upscaleImage
+  upscaleRealEsrgan?: typeof upscaleWithRealEsrgan
+}
+
+const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
+  app: FastifyInstance,
+  deps: AssetsRouteDeps,
+) => {
+  const upscaleDreamina = deps.upscaleDreamina ?? upscaleImage
+  const upscaleRealEsrgan = deps.upscaleRealEsrgan ?? upscaleWithRealEsrgan
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     const contentType = String(reply.getHeader('Content-Type') ?? '')
@@ -475,9 +490,10 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   )
 
   // POST /api/assets/:assetId/upscale
+  // body.engine 缺省 dreamina（向后兼容）；realesrgan 走本地 Real-ESRGAN 引擎
   app.post<{
     Params: { assetId: string }
-    Body: { resolutionType?: '2k' | '4k' | '8k' }
+    Body: UpscaleImageRequest
   }>('/api/assets/:assetId/upscale', async (req, reply) => {
     const sourceAsset = await getAsset(req.params.assetId)
     if (!sourceAsset) {
@@ -496,18 +512,35 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     }
 
     const resolutionType = req.body?.resolutionType ?? '2k'
-    try {
-      const results = await upscaleImage({
-        inputImage: req.params.assetId,
-        resolutionType,
+    const engine =
+      req.body?.engine === undefined
+        ? DEFAULT_UPSCALE_ENGINE
+        : normalizeUpscaleEngine(req.body.engine)
+    if (!engine) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'engine 仅支持 dreamina 或 realesrgan',
       })
+    }
+    try {
+      const results =
+        engine === 'realesrgan'
+          ? await upscaleRealEsrgan({
+              inputImage: req.params.assetId,
+              resolutionType,
+            })
+          : await upscaleDreamina({
+              inputImage: req.params.assetId,
+              resolutionType,
+            })
       try {
         const first = results[0]
         if (!first) {
           return reply.code(502).send({
             statusCode: 502,
             error: 'Bad Gateway',
-            message: 'dreamina 未返回高清结果',
+            message: `${engine} 未返回高清结果`,
           })
         }
         const sourceFlowId =
@@ -516,6 +549,7 @@ const assetsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           first,
           req.params.assetId,
           resolutionType,
+          engine,
           sourceFlowId,
         )
         return reply.code(201).send(asset)

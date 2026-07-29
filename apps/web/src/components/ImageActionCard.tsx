@@ -9,7 +9,6 @@ import {
 import { useEffect, useRef, useState } from 'react'
 
 type ValidationStatus = 'idle' | 'checking' | 'success' | 'error'
-type UpscaleResolution = '2k' | '4k' | '8k'
 type GridGeneratePreset = '2x2' | '3x3' | '4x4'
 
 /** 宫格生成菜单展示顺序：默认 3×3 在最前 */
@@ -20,13 +19,12 @@ interface ImageActionCardProps {
   validationLabel?: string
   validationAriaLabel?: string
   validationTitle?: string
-  upscaleResolution: UpscaleResolution
   busy?: boolean
   gridBusy?: boolean
   gridDisabled?: boolean
   closing?: boolean
-  onUpscale: (resolution: UpscaleResolution) => void
-  onUpscaleResolutionChange: (resolution: UpscaleResolution) => void
+  /** 点击「高清」打开高清配置界面（UpscaleOverlay） */
+  onUpscale: () => void
   onValidate: () => void
   onDownload: () => void
   onOpenFullSize: () => void
@@ -39,46 +37,33 @@ export function ImageActionCard({
   validationLabel = '校验',
   validationAriaLabel = '校验当前图片模型',
   validationTitle,
-  upscaleResolution,
   busy = false,
   gridBusy = false,
   gridDisabled = false,
   closing = false,
   onUpscale,
-  onUpscaleResolutionChange,
   onValidate,
   onDownload,
   onOpenFullSize,
   onGridGenerate,
   onGridCrop,
 }: ImageActionCardProps) {
-  const [upscaleMenuOpen, setUpscaleMenuOpen] = useState(false)
   const [gridMenuOpen, setGridMenuOpen] = useState(false)
-  const [draftResolution, setDraftResolution] =
-    useState<UpscaleResolution>(upscaleResolution)
   const cardRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!upscaleMenuOpen) {
-      setDraftResolution(upscaleResolution)
-    }
-  }, [upscaleMenuOpen, upscaleResolution])
 
   // 菜单统一支持点外部关闭、Escape 关闭
   useEffect(() => {
-    if (!upscaleMenuOpen && !gridMenuOpen) return
+    if (!gridMenuOpen) return
 
     const handlePointerDown = (event: globalThis.PointerEvent) => {
       const card = cardRef.current
       if (card && event.target instanceof Node && card.contains(event.target)) {
         return
       }
-      setUpscaleMenuOpen(false)
       setGridMenuOpen(false)
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setUpscaleMenuOpen(false)
         setGridMenuOpen(false)
       }
     }
@@ -88,13 +73,7 @@ export function ImageActionCard({
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [gridMenuOpen, upscaleMenuOpen])
-
-  const confirmUpscale = () => {
-    onUpscaleResolutionChange(draftResolution)
-    onUpscale(draftResolution)
-    setUpscaleMenuOpen(false)
-  }
+  }, [gridMenuOpen])
 
   const gridActionsDisabled = busy || gridBusy || gridDisabled
 
@@ -106,54 +85,17 @@ export function ImageActionCard({
       aria-label="图片工具"
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="image-upscale-control">
-        <button
-          type="button"
-          className="image-action-button"
-          onClick={() => {
-            setUpscaleMenuOpen((open) => !open)
-            setGridMenuOpen(false)
-          }}
-          disabled={busy}
-          aria-label="图片高清"
-          aria-haspopup="menu"
-          aria-expanded={upscaleMenuOpen}
-        >
-          <Sparkles size={17} strokeWidth={1.7} />
-          <span>高清</span>
-        </button>
-        {upscaleMenuOpen ? (
-          <div className="image-upscale-menu" role="menu" aria-label="高清参数">
-            <div className="image-upscale-options">
-              {(['2k', '4k', '8k'] as const).map((resolution) => (
-                <button
-                  key={resolution}
-                  type="button"
-                  className={`image-upscale-option${
-                    draftResolution === resolution ? ' active' : ''
-                  }`}
-                  onClick={() => {
-                    setDraftResolution(resolution)
-                  }}
-                  disabled={busy}
-                  role="menuitemradio"
-                  aria-checked={draftResolution === resolution}
-                >
-                  {resolution.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="image-upscale-confirm"
-              onClick={confirmUpscale}
-              disabled={busy}
-            >
-              确定
-            </button>
-          </div>
-        ) : null}
-      </div>
+      <button
+        type="button"
+        className="image-action-button"
+        onClick={onUpscale}
+        disabled={busy}
+        aria-label="图片高清"
+        title="高清增强配置"
+      >
+        <Sparkles size={17} strokeWidth={1.7} />
+        <span>高清</span>
+      </button>
       {onGridGenerate ? (
         <div className="image-upscale-control">
           <button
@@ -161,7 +103,6 @@ export function ImageActionCard({
             className="image-action-button icon-only"
             onClick={() => {
               setGridMenuOpen((open) => !open)
-              setUpscaleMenuOpen(false)
             }}
             disabled={gridActionsDisabled}
             aria-label="宫格生成"

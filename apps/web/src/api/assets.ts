@@ -9,6 +9,7 @@ import type {
   CropRegionsRequest,
   CropRegionsResponse,
 } from '@jimeng-flow/shared/grid'
+import type { UpscaleEngine, UpscaleImageRequest } from '@jimeng-flow/shared/upscale'
 
 /** 返回资产文件的访问 URL（供 <img src> / <video src> 使用） */
 export function getAssetFileUrl(id: string): string {
@@ -117,15 +118,18 @@ export async function saveAssetToLibrary(id: string): Promise<Asset> {
   return (await res.json()) as Asset
 }
 
-/** 使用 dreamina image_upscale 高清当前图片资产，返回新资产 */
+/** 高清当前图片资产，返回新资产；engine 缺省 dreamina，可选 realesrgan（本地 4x 保真放大） */
 export async function upscaleImageAsset(
   assetId: string,
   resolutionType = '2k',
+  engine?: UpscaleEngine,
 ): Promise<Asset> {
+  const body: UpscaleImageRequest = { resolutionType: resolutionType as UpscaleImageRequest['resolutionType'] }
+  if (engine) body.engine = engine
   const res = await fetch(`/api/assets/${encodeURIComponent(assetId)}/upscale`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ resolutionType }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const payload = (await res.json().catch(() => null)) as { message?: string } | null

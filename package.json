@@ -1,6 +1,6 @@
 {
   "name": "jimeng-flow-workbench",
-  "version": "0.2.10",
+  "version": "0.3.0",
   "description": "MO.K local-first AI canvas desktop application",
   "private": true,
   "type": "module",
@@ -20,10 +20,11 @@
     "dev": "concurrently -n web,server -c green,blue \"npm:dev:web\" \"npm:dev:server\"",
     "dev:desktop": "concurrently -k -s first -n web,desktop -c green,magenta \"npm:dev:web\" \"npm --workspace apps/desktop run dev\"",
     "dev:web": "npm --workspace apps/web run dev",
+    "fetch:realesrgan": "node scripts/fetch-realesrgan.mjs",
     "dev:server": "npm --workspace apps/server run dev",
     "lint": "oxlint apps packages scripts",
     "mok": "node scripts/mok.mjs",
-    "package:win": "npm run build:desktop && node scripts/package-win.mjs",
+    "package:win": "npm run fetch:realesrgan && npm run build:desktop && node scripts/package-win.mjs",
     "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs scripts/nsisInstaller.test.mjs && npm run test:server && npm run test:web && npm run test:desktop",
     "test:desktop": "node scripts/run-tests.mjs desktop",
     "test:server": "node scripts/run-tests.mjs server",
@@ -53,6 +54,13 @@
       {
         "from": "apps/web/dist",
         "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "vendor/realesrgan",
+        "to": "realesrgan",
         "filter": [
           "**/*"
         ]

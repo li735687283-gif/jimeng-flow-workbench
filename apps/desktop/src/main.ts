@@ -119,6 +119,7 @@ async function startDesktop(): Promise<void> {
     entryPath: serverEntry,
     execPath: process.execPath,
     projectRoot,
+    resourcesDir: isDevelopment ? undefined : process.resourcesPath,
     webRoot: isDevelopment ? undefined : join(process.resourcesPath, 'web'),
     workspaceDir,
   })

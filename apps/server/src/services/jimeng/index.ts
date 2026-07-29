@@ -293,7 +293,7 @@ function appendVideoModelResolutionArgs(
   if (resolution) args.push(`--video_resolution=${resolution}`)
 }
 
-async function resolveInputPaths(inputImages: string[] | undefined): Promise<string[]> {
+export async function resolveInputPaths(inputImages: string[] | undefined): Promise<string[]> {
   const paths: string[] = []
   for (const input of inputImages ?? []) {
     if (!input) continue

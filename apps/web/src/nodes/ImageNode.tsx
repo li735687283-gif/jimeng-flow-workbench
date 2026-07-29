@@ -42,12 +42,18 @@ import {
   upscaleImageAsset,
 } from '../api/assets'
 import { startImageGenerationFlow } from '../utils/imageGenerationFlow'
-import { startGridGeneration } from '../utils/gridGenerationFlow'
+import { measureImageAssetSize, startGridGeneration } from '../utils/gridGenerationFlow'
 import { runGridCrop } from '../utils/gridCropFlow'
 import { getImageDimensionsByRatio } from '../utils/agentGenerationPlan'
+import { getAspectRatioLabel } from '../utils/upscalePlan'
+import type {
+  UpscaleEngine,
+  UpscaleResolutionType,
+} from '@jimeng-flow/shared/upscale'
 import { getCodexStatus, testJimengConnection } from '../api/settings'
 import { ImageActionCard } from '../components/ImageActionCard'
 import { GridCropOverlay } from '../components/GridCropOverlay'
+import { UpscaleOverlay } from '../components/UpscaleOverlay'
 import {
   getImageResultAssetIds,
   ImageResultGallery,
@@ -350,7 +356,8 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
   const [validationMessage, setValidationMessage] = useState('')
-  const [upscaleResolution, setUpscaleResolution] = useState<'2k' | '4k' | '8k'>('2k')
+  const [upscaleOpen, setUpscaleOpen] = useState(false)
+  const [upscaleError, setUpscaleError] = useState<string | null>(null)
   const [fullSizeOpen, setFullSizeOpen] = useState(false)
   const [fullSizeScale, setFullSizeScale] = useState(1)
   const [fullSizeRotation, setFullSizeRotation] = useState(0)
@@ -889,11 +896,15 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     [generationRuns, id, nodeData.outputAssetIds],
   )
 
-  const handleUpscaleImage = useCallback(async (resolution = upscaleResolution) => {
+  const handleUpscaleImage = useCallback(async (
+    engine: UpscaleEngine,
+    resolution: UpscaleResolutionType,
+  ) => {
     if (!nodeData.assetId) {
       return
     }
     setActionBusy(true)
+    setUpscaleError(null)
     let targetNodeId = ''
     try {
       targetNodeId = useCanvasStore
@@ -907,34 +918,47 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       // 进度遮罩（不确定态进度条 + 扫光）也因此完全不显示。
       useGenerateStore.getState().setStatus(targetNodeId, 'running')
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
-      const asset = await upscaleImageAsset(nodeData.assetId, resolution)
+      const asset = await upscaleImageAsset(nodeData.assetId, resolution, engine)
+      // 实测新图真实尺寸写回节点：高清后宽高/比例已变，节点框与全屏查看器都读它
+      const measured = await measureImageAssetSize(asset.id)
       useCanvasStore.getState().updateNodeData(targetNodeId, {
         assetId: asset.id,
         status: 'success',
         error: undefined,
+        ...(measured
+          ? {
+              width: measured.width,
+              height: measured.height,
+              ratio: getAspectRatioLabel(measured.width, measured.height),
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       } as unknown as Partial<BaseNodeData>)
+      setUpscaleOpen(false)
       try {
         await useFlowStore.getState().saveCurrent()
       } catch {
         // 保存失败不打断高清结果展示；用户后续操作仍可继续。
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       if (targetNodeId) {
         useCanvasStore.getState().updateNodeData(targetNodeId, {
           status: 'error',
-          error: error instanceof Error ? error.message : String(error),
+          error: message,
           updatedAt: new Date().toISOString(),
         } as unknown as Partial<BaseNodeData>)
         void useFlowStore.getState().saveCurrent().catch(() => undefined)
       }
+      // 错误显示在高清配置面板内，不静默
+      setUpscaleError(message)
     } finally {
       if (targetNodeId) {
         useGenerateStore.getState().reset(targetNodeId)
       }
       setActionBusy(false)
     }
-  }, [id, nodeData.assetId, upscaleResolution])
+  }, [id, nodeData.assetId])
 
   const handleGridGenerate = useCallback(
     (grid: '2x2' | '3x3' | '4x4') => {
@@ -1574,9 +1598,10 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                 ? '校验即梦 CLI'
                 : '校验当前图片模型'
             }
-            upscaleResolution={upscaleResolution}
-            onUpscale={(resolution) => void handleUpscaleImage(resolution)}
-            onUpscaleResolutionChange={setUpscaleResolution}
+            onUpscale={() => {
+              setUpscaleError(null)
+              setUpscaleOpen(true)
+            }}
             onValidate={() => void handleValidateImageProvider()}
             onDownload={handleDownloadImage}
             onOpenFullSize={handleOpenFullSize}
@@ -1688,6 +1713,21 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             busy={gridCropBusy}
             onCancel={() => setGridCropOpen(false)}
             onConfirm={(regions) => void handleGridCropConfirm(regions)}
+          />
+        ) : null}
+
+        {upscaleOpen && imageAssetId ? (
+          <UpscaleOverlay
+            open={upscaleOpen}
+            imageUrl={getAssetFileUrl(imageAssetId)}
+            naturalWidth={nodeData.width ?? 0}
+            naturalHeight={nodeData.height ?? 0}
+            busy={actionBusy}
+            error={upscaleError}
+            onCancel={() => setUpscaleOpen(false)}
+            onConfirm={(engine, resolution) =>
+              void handleUpscaleImage(engine, resolution)
+            }
           />
         ) : null}
 

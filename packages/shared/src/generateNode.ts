@@ -105,6 +105,10 @@ export interface GenerationResult {
   mimeType?: string
   /** 该张图对应的 seed（若上游返回） */
   seed?: number
+  /** 结果实际像素宽（如 Real-ESRGAN 固定 4x，可能与目标分辨率不一致时标注） */
+  width?: number
+  /** 结果实际像素高 */
+  height?: number
 }
 
 /**

@@ -12,9 +12,7 @@ test('image action card keeps zoom action icon-only and exposes core actions', a
   const html = renderToStaticMarkup(
     <ImageActionCard
       validationStatus="success"
-      upscaleResolution="4k"
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
@@ -23,9 +21,7 @@ test('image action card keeps zoom action icon-only and exposes core actions', a
   const errorHtml = renderToStaticMarkup(
     <ImageActionCard
       validationStatus="error"
-      upscaleResolution="2k"
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
@@ -41,9 +37,11 @@ test('image action card keeps zoom action icon-only and exposes core actions', a
   assert.equal(html.includes('CLI 校验通过'), false)
   assert.equal(html.includes('validation-success'), true)
   assert.equal(errorHtml.includes('validation-error'), true)
-  assert.equal(html.includes('aria-haspopup="menu"'), true)
+  assert.equal(html.includes('aria-haspopup="menu"'), false)
   assert.equal(html.includes('aria-label="高清参数"'), false)
   assert.equal(html.includes('确定'), false)
+  // 高清按钮改为直接打开配置界面，不再内联 2K/4K/8K 小菜单
+  assert.equal(html.includes('image-upscale-menu'), false)
   for (const value of ['2K', '4K', '8K']) {
     assert.equal(html.includes(value), false)
   }
@@ -65,9 +63,7 @@ test('image action card can label provider-specific validation', async () => {
     <ImageActionCard
       validationLabel="校验 OpenAI"
       validationAriaLabel="校验 OpenAI CLI"
-      upscaleResolution="2k"
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
@@ -94,9 +90,7 @@ test('image action card hides grid actions without grid handlers', async () => {
 
   const html = renderToStaticMarkup(
     <ImageActionCard
-      upscaleResolution="4k"
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
@@ -112,9 +106,7 @@ test('image action card renders grid generate and grid crop actions', async () =
 
   const html = renderToStaticMarkup(
     <ImageActionCard
-      upscaleResolution="4k"
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
@@ -135,10 +127,8 @@ test('image action card disables grid actions when gridDisabled', async () => {
 
   const html = renderToStaticMarkup(
     <ImageActionCard
-      upscaleResolution="4k"
       gridDisabled={true}
       onUpscale={() => undefined}
-      onUpscaleResolutionChange={() => undefined}
       onValidate={() => undefined}
       onDownload={() => undefined}
       onOpenFullSize={() => undefined}
