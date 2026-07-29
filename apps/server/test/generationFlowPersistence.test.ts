@@ -30,8 +30,12 @@ after(async () => {
   await rm(workspaceDir, { recursive: true, force: true })
 })
 
+// 生成在后台真实执行（测试环境必然以 error 收尾），轮询预算要给足：
+// 全量套件并发执行时单次执行可能超过 1.6s，100 次曾反复偶发超时。
+const TERMINAL_POLL_ATTEMPTS = 600
+
 async function waitForTerminalGeneration(id: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < TERMINAL_POLL_ATTEMPTS; attempt++) {
     const generation = await generations.getGeneration(id)
     if (generation?.status === 'success' || generation?.status === 'error') {
       return
@@ -45,7 +49,7 @@ async function waitForTerminalFlowNode(
   flowId: string,
   nodeId: string,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < TERMINAL_POLL_ATTEMPTS; attempt++) {
     const flow = await flows.getFlow(flowId)
     const status = flow.nodes.find((item) => item.id === nodeId)?.data.status
     if (status === 'success' || status === 'error') return

@@ -4,7 +4,11 @@
 // 参考 PRD 10.1、7.1、8.6、12.1。
 
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify'
-import { DEFAULT_SETTINGS, type Settings } from '@jimeng-flow/shared'
+import {
+  DEFAULT_SETTINGS,
+  SETTINGS_SECRET_MASK,
+  type Settings,
+} from '@jimeng-flow/shared'
 import {
   SettingsSecretBindingError,
   getSettings,
@@ -16,6 +20,34 @@ import {
   testJimengConnection,
 } from '../services/jimeng'
 import { listModels, testLlmConnection } from '../services/llm'
+
+/** 测试连接时可回退到已存密钥的字段白名单 */
+const TEST_SECRET_FALLBACK_FIELDS = new Set([
+  'apiKey',
+  'llmApiKey',
+  'kimiApiKey',
+  'kimiCodingApiKey',
+  'deepseekApiKey',
+])
+
+type TestConnectionBody = Partial<Settings> & { apiKeyField?: string }
+
+/**
+ * 解析测试连接用密钥：表单提供真实密钥时直接用；
+ * 表单是掩码（已保存密钥不回显）或为空时，按 apiKeyField 回退到服务端已存密钥。
+ */
+async function resolveTestApiKey(body: TestConnectionBody): Promise<string> {
+  const provided = typeof body.llmApiKey === 'string' ? body.llmApiKey.trim() : ''
+  if (provided && provided !== SETTINGS_SECRET_MASK) return provided
+  const stored = await getSettings()
+  const field =
+    typeof body.apiKeyField === 'string' &&
+    TEST_SECRET_FALLBACK_FIELDS.has(body.apiKeyField)
+      ? (body.apiKeyField as keyof Settings)
+      : 'llmApiKey'
+  const value = stored[field]
+  return typeof value === 'string' ? value.trim() : ''
+}
 
 function isValidSettingsPatchValue(key: keyof Settings, value: unknown): boolean {
   const defaultValue = DEFAULT_SETTINGS[key]
@@ -144,21 +176,23 @@ const settingsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   })
 
   // POST /api/settings/test-llm
-  // 使用当前表单中的 llmBaseUrl + llmApiKey 测试连接，不保存配置。
-  app.post<{ Body: Partial<Settings> }>('/api/settings/test-llm', async (req) => {
+  // 使用当前表单中的 llmBaseUrl + llmApiKey 测试连接，不保存配置；
+  // 密钥为掩码/空时按 apiKeyField 回退到已存密钥。
+  app.post<{ Body: TestConnectionBody }>('/api/settings/test-llm', async (req) => {
     const result = await testLlmConnection({
       llmBaseUrl: req.body.llmBaseUrl,
-      llmApiKey: req.body.llmApiKey,
+      llmApiKey: await resolveTestApiKey(req.body),
     })
     return result
   })
 
   // POST /api/settings/llm-models
-  // 使用当前表单中的 llmBaseUrl + llmApiKey 拉取模型列表，不保存配置。
-  app.post<{ Body: Partial<Settings> }>('/api/settings/llm-models', async (req) => {
+  // 使用当前表单中的 llmBaseUrl + llmApiKey 拉取模型列表，不保存配置；
+  // 密钥为掩码/空时同样回退到已存密钥。
+  app.post<{ Body: TestConnectionBody }>('/api/settings/llm-models', async (req) => {
     const models = await listModels({
       baseUrl: req.body.llmBaseUrl,
-      apiKey: req.body.llmApiKey,
+      apiKey: await resolveTestApiKey(req.body),
       timeoutMs: 10_000,
     })
     return models

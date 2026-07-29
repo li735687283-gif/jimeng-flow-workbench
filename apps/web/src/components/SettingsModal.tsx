@@ -57,8 +57,6 @@ export interface SettingsModalProps {
 // 表单状态：以完整 Settings 形式保存，避免字段缺失
 type FormState = Settings
 
-const MASKED_KEY_TEST_MESSAGE = '已保存密钥不会回显；如需测试连接，请重新输入密钥'
-
 const sectionStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--theme-border, #2a2a2a)',
   padding: '16px 0',
@@ -703,14 +701,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   }
 
   const handleTestLlm = async () => {
-    if (isSettingsSecretMasked(form.llmApiKey)) {
-      setLlmTestResult({ ok: false, message: MASKED_KEY_TEST_MESSAGE })
-      return
-    }
     setTestingLlm(true)
     setLlmTestResult(null)
     try {
-      const result = await testLlmConnection(form)
+      // 密钥为掩码时传 apiKeyField，由服务端回退到已存密钥
+      const result = await testLlmConnection({
+        llmBaseUrl: form.llmBaseUrl,
+        llmApiKey: form.llmApiKey,
+        apiKeyField: 'llmApiKey',
+      })
       setLlmTestResult({
         ok: result.ok,
         message: result.message ?? (result.ok ? '连接成功' : '连接失败'),
@@ -728,13 +727,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const handleTestApiProvider = async (providerId: ApiProviderId) => {
     const definition = API_PROVIDER_DEFINITIONS[providerId]
     const apiKey = String(form[definition.apiKeyKey] ?? '')
-    if (isSettingsSecretMasked(apiKey)) {
-      setApiProviderTestResults((current) => ({
-        ...current,
-        [providerId]: { ok: false, message: MASKED_KEY_TEST_MESSAGE },
-      }))
-      return
-    }
     setTestingApiProvider(providerId)
     setApiProviderTestResults((current) => {
       const next = { ...current }
@@ -742,9 +734,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       return next
     })
     try {
+      // 密钥为掩码时传 apiKeyField，由服务端回退到已存密钥
       const result = await testLlmConnection({
         llmBaseUrl: String(form[definition.baseUrlKey] ?? ''),
         llmApiKey: apiKey,
+        apiKeyField: definition.apiKeyKey,
       })
       setApiProviderTestResults((current) => ({
         ...current,
@@ -770,14 +764,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     target: Partial<Settings> = form,
     opts?: { silent?: boolean },
   ) {
-    if (isSettingsSecretMasked(target.llmApiKey)) {
-      if (!opts?.silent) setLlmModelsMessage(MASKED_KEY_TEST_MESSAGE)
-      return
-    }
     setLoadingLlmModels(true)
     if (!opts?.silent) setLlmModelsMessage(null)
     try {
-      const models = await listLlmModelsForSettings(target)
+      const models = await listLlmModelsForSettings({
+        ...target,
+        apiKeyField: 'llmApiKey',
+      })
       setAvailableLlmModels(models)
       if (!opts?.silent) {
         setLlmModelsMessage(`已拉取 ${models.length} 个模型，可从下方添加常用项`)

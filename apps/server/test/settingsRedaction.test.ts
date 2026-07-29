@@ -79,6 +79,77 @@ test('masked secrets preserve the old value while explicit empty strings clear i
   assert.equal((await getSettings()).llmApiKey, '')
 })
 
+test('masked test-connection keys fall back to stored secrets by apiKeyField', async () => {
+  await app.inject({
+    method: 'PUT',
+    url: '/api/settings',
+    payload: { llmApiKey: 'stored-llm-key', kimiApiKey: 'stored-kimi-key-2' },
+  })
+
+  // 掩码 + apiKeyField=llmApiKey：回退到已存 llm 密钥。
+  // baseUrl 给一个必失败的本地地址：密钥解析成功才会走到网络调用，
+  // 报的是连接错误而不是「未配置 LLM API Key」
+  const fallback = await app.inject({
+    method: 'POST',
+    url: '/api/settings/test-llm',
+    payload: {
+      llmBaseUrl: 'http://127.0.0.1:9/v1',
+      llmApiKey: SETTINGS_SECRET_MASK,
+      apiKeyField: 'llmApiKey',
+    },
+  })
+  assert.equal(fallback.statusCode, 200)
+  assert.equal(fallback.json().ok, false)
+  assert.doesNotMatch(fallback.json().message, /未配置 LLM API Key/)
+
+  // 掩码 + apiKeyField=kimiApiKey：回退到已存 kimi 密钥（用于各 provider 的测试按钮）
+  const kimiFallback = await app.inject({
+    method: 'POST',
+    url: '/api/settings/test-llm',
+    payload: {
+      llmBaseUrl: 'http://127.0.0.1:9/v1',
+      llmApiKey: SETTINGS_SECRET_MASK,
+      apiKeyField: 'kimiApiKey',
+    },
+  })
+  assert.equal(kimiFallback.statusCode, 200)
+  assert.doesNotMatch(kimiFallback.json().message, /未配置 LLM API Key/)
+
+  // 非法 apiKeyField：回退字段仅限白名单，默认落到 llmApiKey
+  const invalidField = await app.inject({
+    method: 'POST',
+    url: '/api/settings/test-llm',
+    payload: {
+      llmBaseUrl: 'http://127.0.0.1:9/v1',
+      llmApiKey: SETTINGS_SECRET_MASK,
+      apiKeyField: 'evil',
+    },
+  })
+  assert.equal(invalidField.statusCode, 200)
+  assert.doesNotMatch(invalidField.json().message, /未配置 LLM API Key/)
+
+  // 清空已存密钥后：掩码回退不到任何密钥，报「未配置 LLM API Key」
+  await app.inject({ method: 'PUT', url: '/api/settings', payload: { llmApiKey: '' } })
+  const noStored = await app.inject({
+    method: 'POST',
+    url: '/api/settings/test-llm',
+    payload: {
+      llmBaseUrl: 'http://127.0.0.1:9/v1',
+      llmApiKey: SETTINGS_SECRET_MASK,
+      apiKeyField: 'llmApiKey',
+    },
+  })
+  assert.equal(noStored.statusCode, 200)
+  assert.match(noStored.json().message, /未配置 LLM API Key/)
+
+  // 恢复环境供后续用例使用
+  await app.inject({
+    method: 'PUT',
+    url: '/api/settings',
+    payload: { llmApiKey: 'llm-secret' },
+  })
+})
+
 test('Dreamina executable setting only accepts the PATH-resolved command', () => {
   assert.equal(isAllowedDreaminaExecutablePath('dreamina'), true)
   assert.equal(isAllowedDreaminaExecutablePath(' dreamina '), true)

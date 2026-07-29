@@ -117,12 +117,16 @@ export async function startCodexLogin(): Promise<CodexLoginStartResult> {
   return (await res.json()) as CodexLoginStartResult
 }
 
+/** 测试连接请求：表单字段 + 掩码时服务端回退已存密钥的字段名 */
+export type TestConnectionRequest = Partial<Settings> & { apiKeyField?: string }
+
 /**
  * 测试 LLM Provider 连接（不保存配置）。
- * @param settings 当前表单中的 llmBaseUrl、llmModel、llmApiKey 等字段
+ * @param settings 当前表单中的 llmBaseUrl、llmModel、llmApiKey 等字段；
+ *   llmApiKey 为掩码时传 apiKeyField，服务端回退到已存密钥
  */
 export async function testLlmConnection(
-  settings: Partial<Settings>,
+  settings: TestConnectionRequest,
 ): Promise<TestConnectionResult> {
   const res = await fetch('/api/settings/test-llm', {
     method: 'POST',
@@ -135,9 +139,9 @@ export async function testLlmConnection(
   return (await res.json()) as TestConnectionResult
 }
 
-/** 使用当前表单配置拉取中转站模型列表（不保存配置） */
+/** 使用当前表单配置拉取中转站模型列表（不保存配置，掩码时服务端回退已存密钥） */
 export async function listLlmModelsForSettings(
-  settings: Partial<Settings>,
+  settings: TestConnectionRequest,
 ): Promise<LlmModelInfo[]> {
   const res = await fetch('/api/settings/llm-models', {
     method: 'POST',
