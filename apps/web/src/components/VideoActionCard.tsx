@@ -1,6 +1,7 @@
 import {
   Download,
   Maximize2,
+  Minimize2,
   ShieldCheck,
 } from 'lucide-react'
 
@@ -14,6 +15,7 @@ interface VideoActionCardProps {
   closing?: boolean
   onValidate: () => void
   onDownload: () => void
+  onCompress: () => void
   onOpenFullSize: () => void
 }
 
@@ -25,6 +27,7 @@ export function VideoActionCard({
   closing = false,
   onValidate,
   onDownload,
+  onCompress,
   onOpenFullSize,
 }: VideoActionCardProps) {
   return (
@@ -46,6 +49,16 @@ export function VideoActionCard({
       </button>
       <span className="image-action-divider" aria-hidden="true" />
       <button
+        type="button"
+        className="image-action-button"
+        onClick={onCompress}
+        disabled={busy}
+        aria-label="压缩视频"
+        title="视频压缩"
+      >
+        <Minimize2 size={17} strokeWidth={1.7} />
+        <span>视频压缩</span>
+      </button>      <button
         type="button"
         className="image-action-button icon-only"
         onClick={onDownload}

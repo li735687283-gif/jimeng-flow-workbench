@@ -17,6 +17,7 @@ import type {
 import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNode'
 import { GRID_PRESET_CONFIGS, buildGridImagePrompt } from '@jimeng-flow/shared/grid'
 import type { VideoMode } from '@jimeng-flow/shared/videoNode'
+import type { VideoCompressionTargetHeight } from '@jimeng-flow/shared/videoCompression'
 import { nodeRegistry } from '../nodes/registry'
 import type { FlowNodeType, BaseNodeData } from '../types/nodeTypes'
 import { createGroupFrame, isGroupFrame } from '../utils/nodeGroup'
@@ -345,6 +346,10 @@ interface CanvasState {
     sourceId: string,
     resolution: UpscaleResolution,
   ) => string
+  createCompressedVideoNode: (
+    sourceId: string,
+    targetHeight: VideoCompressionTargetHeight,
+  ) => string
   createGridImageNode: (sourceId: string, grid: GridGeneratePreset) => string
   createCapturedFrameNode: (
     sourceId: string,
@@ -526,6 +531,58 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     return derivedNode.id
   },
 
+  createCompressedVideoNode: (sourceId, targetHeight) => {
+    const nodes = get().nodes
+    const source = nodes.find((node) => node.id === sourceId)
+    const def = nodeRegistry.video
+    if (!source || source.type !== 'video' || !def) return ''
+
+    const sourceSize = getNodeSize(source)
+    const sourceData = source.data as BaseNodeData
+    const assetId = getAssetId(source)
+    const existingCompressionCount = nodes.filter((node) => {
+      const data = node.data as BaseNodeData
+      return node.type === 'video' && data.compressionSourceNodeId === sourceId
+    }).length
+    const sameTypeCount = nodes.filter((node) => node.type === 'video').length + 1
+    const node = def.create(
+      {
+        x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
+        y:
+          source.position.y +
+          existingCompressionCount * (sourceSize.height + UPSCALE_NODE_STACK_GAP),
+      },
+      sameTypeCount,
+    )
+    const derivedNode: Node = {
+      ...node,
+      data: {
+        ...node.data,
+        title: `${sourceData.title ?? '视频'} ${targetHeight}P`,
+        status: 'running',
+        assetIds: [],
+        inputVideoAssetIds: assetId ? [assetId] : [],
+        compressionSourceNodeId: sourceId,
+        compressionTargetHeight: targetHeight,
+      },
+    }
+
+    set((state) => ({
+      nodes: [...state.nodes, derivedNode],
+      edges: addEdge(
+        {
+          source: sourceId,
+          target: derivedNode.id,
+          sourceHandle: null,
+          targetHandle: null,
+          type: 'cut',
+        },
+        state.edges,
+      ),
+      selectedNodeId: derivedNode.id,
+    }))
+    return derivedNode.id
+  },
   createGridImageNode: (sourceId, grid) => {
     const nodes = get().nodes
     const source = nodes.find((node) => node.id === sourceId)

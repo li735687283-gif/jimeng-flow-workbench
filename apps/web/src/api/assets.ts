@@ -10,6 +10,10 @@ import type {
   CropRegionsResponse,
 } from '@jimeng-flow/shared/grid'
 import type { UpscaleEngine, UpscaleImageRequest } from '@jimeng-flow/shared/upscale'
+import type {
+  VideoCompressionRequest,
+  VideoCompressionTargetHeight,
+} from '@jimeng-flow/shared/videoCompression'
 
 /** 返回资产文件的访问 URL（供 <img src> / <video src> 使用） */
 export function getAssetFileUrl(id: string): string {
@@ -138,6 +142,31 @@ export async function upscaleImageAsset(
   return (await res.json()) as Asset
 }
 
+/** 本地压缩视频到 480P 或 360P，返回新的派生视频资产。 */
+export async function compressVideoAsset(
+  assetId: string,
+  targetHeight: VideoCompressionTargetHeight,
+): Promise<Asset> {
+  const body: VideoCompressionRequest = { targetHeight }
+  const res = await fetch(
+    `/api/assets/${encodeURIComponent(assetId)}/compress-video`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as {
+      message?: string
+    } | null
+    throw new Error(
+      payload?.message ||
+        `视频压缩失败：${res.status} ${res.statusText}`,
+    )
+  }
+  return (await res.json()) as Asset
+}
 /** 按原图像素坐标区域裁剪资产，每个区域存为独立 PNG 素材，按传入顺序返回 */
 export async function cropAssetRegions(
   assetId: string,

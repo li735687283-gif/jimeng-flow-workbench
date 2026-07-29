@@ -550,3 +550,39 @@ The supplied reference shows the resolution list trapped below the conversation 
 - Production build: passed; the existing main-chunk size warning remains.
 
 final result: passed
+
+---
+
+# Design QA — 视频压缩
+
+## Sources
+
+- Reference: `.codex-logs/video-compression-reference.png`
+- Implementation: `.codex-logs/video-compression-implementation.png`
+- Combined comparison: `.codex-logs/video-compression-comparison-vertical.png`
+
+## Capture state
+
+- Browser: Codex in-app browser
+- CSS viewport: `1342 × 984`
+- Reference pixels: `1341 × 983`
+- Implementation capture pixels: `1205 × 984` (the in-app browser screenshot surface is narrower than its explicit CSS viewport)
+- State: existing `1248 × 704` video, compression dialog open, `480P` selected, expected output `850 × 480`
+
+## Evidence
+
+- Left side is the live source video preview with native playback controls.
+- Right side reports the measured source resolution and exposes only lower `480P` and `360P` choices.
+- Selecting `360P` updated the checked option and output summary to `638 × 360`; selecting `480P` restored `850 × 480`.
+- Cancel closed the dialog.
+- Browser console contained no error-level entries.
+- Real FFmpeg smoke test converted `1280 × 720` to `854 × 480` and retained an AAC audio stream.
+
+## Findings and history
+
+1. Initial implementation matched the reference structure but the video-node toolbar hid the compression label because it reused an icon-only class.
+2. The toolbar entry was changed to visibly show `视频压缩`.
+3. Final comparison confirmed the dark modal, header, left preview, right configuration panel, selected target treatment, output summary, and footer actions are visually aligned with the reference.
+4. The reference includes smart-adapt, 1080P, and 720P rows; the implementation intentionally omits them because this feature only permits down-compression to 480P or 360P.
+
+final result: passed

@@ -41,6 +41,14 @@ import {
 import { cleanupOwnedResultBatch } from '../services/ownedTempDirectories'
 import type { UpscaleEngine, UpscaleImageRequest } from '@jimeng-flow/shared/upscale'
 import { DEFAULT_UPSCALE_ENGINE, normalizeUpscaleEngine } from '@jimeng-flow/shared/upscale'
+import {
+  normalizeVideoCompressionTargetHeight,
+  type VideoCompressionRequest,
+} from '@jimeng-flow/shared/videoCompression'
+import {
+  compressVideoAsset,
+  VideoCompressionError,
+} from '../services/videoCompression'
 
 interface UploadBody {
   fileName: string
@@ -86,7 +94,11 @@ async function findDuplicateUpload(fileBuffer: Buffer, fileName: string, mimeTyp
 }
 
 function errorPayload(err: unknown) {
-  if (err instanceof JimengError || err instanceof NanoBananaUpscaleError) {
+  if (
+    err instanceof JimengError ||
+    err instanceof NanoBananaUpscaleError ||
+    err instanceof VideoCompressionError
+  ) {
     return {
       statusCode: err.statusCode,
       error: err.statusCode >= 500 ? 'Bad Gateway' : 'Bad Request',
@@ -170,6 +182,7 @@ async function saveUpscaleResult(
 export interface AssetsRouteDeps {
   upscaleDreamina?: typeof upscaleImage
   upscaleNanoBananaPro?: typeof upscaleWithNanoBananaPro
+  compressVideo?: typeof compressVideoAsset
 }
 
 const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
@@ -178,6 +191,7 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
 ) => {
   const upscaleDreamina = deps.upscaleDreamina ?? upscaleImage
   const upscaleNanoBananaPro = deps.upscaleNanoBananaPro ?? upscaleWithNanoBananaPro
+  const compressVideo = deps.compressVideo ?? compressVideoAsset
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     const contentType = String(reply.getHeader('Content-Type') ?? '')
@@ -561,6 +575,46 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
       }
     } catch (err) {
       app.log.error({ err }, '[assets/upscale] 调用失败')
+      const payload = errorPayload(err)
+      return reply.code(payload.statusCode).send(payload)
+    }
+  })
+
+  // POST /api/assets/:assetId/compress-video
+  app.post<{
+    Params: { assetId: string }
+    Body: VideoCompressionRequest
+  }>('/api/assets/:assetId/compress-video', async (req, reply) => {
+    const sourceAsset = await getAsset(req.params.assetId)
+    if (!sourceAsset) {
+      return reply.code(404).send({
+        statusCode: 404,
+        error: 'Not Found',
+        message: '资产不存在',
+      })
+    }
+    if (sourceAsset.type !== 'video') {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '只有视频资产可以压缩',
+      })
+    }
+    const targetHeight = normalizeVideoCompressionTargetHeight(
+      req.body?.targetHeight,
+    )
+    if (!targetHeight) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '目标分辨率仅支持 480P 或 360P',
+      })
+    }
+    try {
+      const asset = await compressVideo({ sourceAsset, targetHeight })
+      return reply.code(201).send(asset)
+    } catch (err) {
+      app.log.error({ err }, '[assets/compress-video] 调用失败')
       const payload = errorPayload(err)
       return reply.code(payload.statusCode).send(payload)
     }

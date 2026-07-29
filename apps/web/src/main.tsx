@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DEFAULT_SETTINGS } from '@jimeng-flow/shared'
 import './index.css'
+import './components/VideoCompressionOverlay.css'
 import App from './App.tsx'
 import { applyCanvasTheme, applyThemeBackgroundMode } from './utils/canvasTheme'
 

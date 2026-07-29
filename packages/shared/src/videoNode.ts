@@ -61,6 +61,15 @@ export interface VideoNodeData {
   generationRuns?: VideoGenerationRun[]
   /** 当前后端生成任务 id，用于刷新后恢复任务订阅 */
   generationId?: string
+  /** 视频压缩派生节点的来源节点 id。 */
+  compressionSourceNodeId?: string
+  /** 视频压缩派生节点的目标高度。 */
+  compressionTargetHeight?: 480 | 360
+  /** 视频压缩派生节点所引用的源视频资产。 */
+  inputVideoAssetIds?: string[]
+  /** 已知的视频像素尺寸（压缩结果可直接持久化）。 */
+  width?: number
+  height?: number
   mode: VideoMode
   model: string
   aspectRatio: VideoAspectRatio
@@ -347,6 +356,11 @@ export function mergeVideoDefaults(
     assetIds: data.assetIds ?? VIDEO_DEFAULTS.assetIds,
     generationRuns: normalizeVideoGenerationRuns(data.generationRuns),
     generationId: data.generationId,
+    compressionSourceNodeId: data.compressionSourceNodeId,
+    compressionTargetHeight: data.compressionTargetHeight,
+    inputVideoAssetIds: data.inputVideoAssetIds,
+    width: data.width,
+    height: data.height,
     mode: data.mode ?? VIDEO_DEFAULTS.mode,
     model: data.model ?? VIDEO_DEFAULTS.model,
     aspectRatio: data.aspectRatio ?? VIDEO_DEFAULTS.aspectRatio,

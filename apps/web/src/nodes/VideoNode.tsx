@@ -4,9 +4,14 @@ import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Film, Video, Volume2, VolumeX } from 'lucide-react'
 import { createGeneration } from '../api/generations'
-import { downloadAssetFile, getAssetFileUrl } from '../api/assets'
+import {
+  compressVideoAsset,
+  downloadAssetFile,
+  getAssetFileUrl,
+} from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
+import { VideoCompressionOverlay } from '../components/VideoCompressionOverlay'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
 import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
@@ -55,6 +60,9 @@ import {
   type VideoResolution,
 } from '@jimeng-flow/shared/videoNode'
 import type { GenerationResponse } from '@jimeng-flow/shared/generateNode'
+import type {
+  VideoCompressionTargetHeight,
+} from '@jimeng-flow/shared/videoCompression'
 import {
   getEditorStateFromVideoGenerationHistoryItem,
   getVideoGenerationHistoryItems,
@@ -101,6 +109,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const closeTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const generationUnsubscribeRef = useRef<(() => void) | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const mountedRef = useRef(true)
   const rememberedDefaultsRef = useRef(useGenerationDefaultsStore.getState().video)
   const initialVideoDefaults = resolveVideoGenerationDefaults({
     nodeData: rawNodeData,
@@ -135,9 +144,17 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   >('idle')
   /** 画布内直接挂首页同款 VideoPlayerModal */
   const [playerOpen, setPlayerOpen] = useState(false)
+  const [compressionOpen, setCompressionOpen] = useState(false)
+  const [compressionBusy, setCompressionBusy] = useState(false)
+  const [compressionError, setCompressionError] = useState<string | null>(null)
+  const [videoDimensions, setVideoDimensions] = useState({
+    width: nodeData.width ?? 0,
+    height: nodeData.height ?? 0,
+  })
 
   useEffect(() => {
     return () => {
+      mountedRef.current = false
       generationUnsubscribeRef.current?.()
       if (closeTimerRef.current !== null) {
         window.clearTimeout(closeTimerRef.current)
@@ -271,6 +288,69 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     },
     [id],
   )
+
+  const handleOpenCompression = useCallback(() => {
+    const video = videoRef.current
+    if (video?.videoWidth && video.videoHeight) {
+      setVideoDimensions({ width: video.videoWidth, height: video.videoHeight })
+    }
+    setCompressionError(null)
+    setCompressionOpen(true)
+  }, [])
+
+  const handleCompressVideo = useCallback(
+    async (
+      targetHeight: VideoCompressionTargetHeight,
+      outputWidth: number,
+      outputHeight: number,
+    ) => {
+      const sourceAssetId = nodeData.assetIds[0]
+      if (!sourceAssetId || compressionBusy) return
+      setCompressionBusy(true)
+      setCompressionError(null)
+      let targetNodeId = ''
+      try {
+        targetNodeId = useCanvasStore
+          .getState()
+          .createCompressedVideoNode(id, targetHeight)
+        if (!targetNodeId) throw new Error('无法创建压缩结果节点')
+        useGenerateStore.getState().setStatus(targetNodeId, 'running')
+        setCompressionOpen(false)
+        void useFlowStore.getState().saveCurrent().catch(() => undefined)
+
+        const asset = await compressVideoAsset(sourceAssetId, targetHeight)
+        useCanvasStore.getState().updateNodeData(targetNodeId, {
+          assetIds: [asset.id],
+          status: 'success',
+          error: undefined,
+          width: outputWidth,
+          height: outputHeight,
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+        useGenerateStore.getState().setStatus(targetNodeId, 'success')
+        await useFlowStore.getState().saveCurrent().catch(() => undefined)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (targetNodeId) {
+          useCanvasStore.getState().updateNodeData(targetNodeId, {
+            status: 'error',
+            error: message,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          useGenerateStore.getState().patch(targetNodeId, {
+            status: 'error',
+            error: message,
+          })
+          void useFlowStore.getState().saveCurrent().catch(() => undefined)
+        }
+        if (mountedRef.current) setCompressionError(message)
+      } finally {
+        if (mountedRef.current) setCompressionBusy(false)
+      }
+    },
+    [compressionBusy, id, nodeData.assetIds],
+  )
+
   /** 退出节点上可能触发的浏览器原生全屏（双击 video 常见） */
   const exitNativeVideoFullscreen = useCallback(() => {
     const video = videoRef.current as
@@ -404,7 +484,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       <div className="image-generation-progress-content">
         <div className="image-generation-progress-label">
           <span className="image-generation-progress-dot" />
-          <span>视频生成中</span>
+          <span>{nodeData.compressionSourceNodeId ? '视频压缩中' : '视频生成中'}</span>
         </div>
         <div
           className="image-generation-progress-track"
@@ -819,7 +899,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       <>
         {editorMounted && (
           <VideoActionCard
-            busy={actionBusy}
+            busy={actionBusy || compressionBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
             validationLabel={'校验'}
@@ -830,6 +910,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             }
             onValidate={() => void handleValidateVideoProvider()}
             onDownload={handleDownloadVideo}
+            onCompress={handleOpenCompression}
             onOpenFullSize={() => handleOpenFullSize()}
           />
         )}
@@ -855,6 +936,15 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               onLoadedMetadata={(event) => {
                 event.currentTarget.muted = videoMuted
                 if (!videoMuted) event.currentTarget.volume = 1
+                if (
+                  event.currentTarget.videoWidth > 0 &&
+                  event.currentTarget.videoHeight > 0
+                ) {
+                  setVideoDimensions({
+                    width: event.currentTarget.videoWidth,
+                    height: event.currentTarget.videoHeight,
+                  })
+                }
               }}
               style={{
                 width: '100%',
@@ -960,6 +1050,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       </>
     </NodeWrapper>
 
+    <VideoCompressionOverlay
+      open={compressionOpen && Boolean(playerSrc)}
+      videoUrl={playerSrc}
+      sourceWidth={videoDimensions.width}
+      sourceHeight={videoDimensions.height}
+      busy={compressionBusy}
+      error={compressionError}
+      onCancel={() => setCompressionOpen(false)}
+      onConfirm={(targetHeight, outputWidth, outputHeight) =>
+        void handleCompressVideo(targetHeight, outputWidth, outputHeight)
+      }
+    />
     {/* 首页同一个 VideoPlayerModal，直接挂到 body */}
     {typeof document !== 'undefined'
       ? createPortal(

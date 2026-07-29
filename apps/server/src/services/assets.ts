@@ -7,7 +7,7 @@
 //   <root>/workspace/outputs/yyyy-mm-dd/<assetId>.json   元数据
 // asset.path 为相对 workspace/ 的路径。
 
-import { mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
+import { copyFile, mkdir, writeFile, readFile, readdir } from 'node:fs/promises'
 import { dirname, extname, relative, resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import type { Asset, AssetCategory, AssetType } from '@jimeng-flow/shared/asset'
@@ -133,6 +133,9 @@ export interface SaveUploadInput {
   params?: Record<string, unknown>
 }
 
+export interface SaveLocalAssetInput extends Omit<SaveUploadInput, 'fileBuffer'> {
+  sourcePath: string
+}
 /**
  * 保存上传文件到 outputs 目录，生成资产 ID，写入 metadata.json。
  * - 自动按日期创建子目录
@@ -177,6 +180,44 @@ export async function saveUploadFile(input: SaveUploadInput): Promise<Asset> {
   return asset
 }
 
+/** 把已有本地文件以流式文件复制方式登记为资产，避免大视频整段读入内存。 */
+export async function saveLocalAssetFile(
+  input: SaveLocalAssetInput,
+): Promise<Asset> {
+  const type = deriveAssetType(input.mimeType, input.originalName)
+  if (!type) {
+    throw new Error(
+      getAssetUploadValidationError(input.mimeType, input.originalName) ??
+        '不支持的素材文件',
+    )
+  }
+  const outputsRoot = await getOutputsRoot()
+  const fileDir = resolve(outputsRoot, todayDateStr())
+  await mkdir(fileDir, { recursive: true })
+
+  const assetId = generateAssetId()
+  const ext = extname(input.originalName) || ''
+  const absFilePath = resolve(fileDir, `${assetId}${ext}`)
+  await copyFile(input.sourcePath, absFilePath)
+
+  const asset: Asset = {
+    id: assetId,
+    type,
+    path: toForwardSlash(relative(WORKSPACE_DIR, absFilePath)),
+    prompt: input.prompt,
+    sourceNodeId: input.sourceNodeId,
+    inputAssetIds: input.inputAssetIds ?? [],
+    provider: input.provider,
+    params: input.params,
+    createdAt: new Date().toISOString(),
+  }
+  await writeFile(
+    resolve(fileDir, `${assetId}.json`),
+    JSON.stringify(asset, null, 2),
+    'utf8',
+  )
+  return asset
+}
 /** 返回资产文件的绝对路径（含路径穿越校验） */
 export function getAssetFilePath(asset: Asset): string {
   const abs = resolve(WORKSPACE_DIR, asset.path)
