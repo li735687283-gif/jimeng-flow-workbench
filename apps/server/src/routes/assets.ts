@@ -34,7 +34,10 @@ import {
   findDuplicateImportedImage,
 } from '../services/assetDedup'
 import { JimengError, upscaleImage } from '../services/jimeng'
-import { RealEsrganError, upscaleWithRealEsrgan } from '../services/realesrgan'
+import {
+  NanoBananaUpscaleError,
+  upscaleWithNanoBananaPro,
+} from '../services/nanoBananaUpscale'
 import { cleanupOwnedResultBatch } from '../services/ownedTempDirectories'
 import type { UpscaleEngine, UpscaleImageRequest } from '@jimeng-flow/shared/upscale'
 import { DEFAULT_UPSCALE_ENGINE, normalizeUpscaleEngine } from '@jimeng-flow/shared/upscale'
@@ -83,7 +86,7 @@ async function findDuplicateUpload(fileBuffer: Buffer, fileName: string, mimeTyp
 }
 
 function errorPayload(err: unknown) {
-  if (err instanceof JimengError || err instanceof RealEsrganError) {
+  if (err instanceof JimengError || err instanceof NanoBananaUpscaleError) {
     return {
       statusCode: err.statusCode,
       error: err.statusCode >= 500 ? 'Bad Gateway' : 'Bad Request',
@@ -166,7 +169,7 @@ async function saveUpscaleResult(
 /** 高清引擎依赖注入：测试可替换为假实现，默认走真实 service */
 export interface AssetsRouteDeps {
   upscaleDreamina?: typeof upscaleImage
-  upscaleRealEsrgan?: typeof upscaleWithRealEsrgan
+  upscaleNanoBananaPro?: typeof upscaleWithNanoBananaPro
 }
 
 const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
@@ -174,7 +177,7 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
   deps: AssetsRouteDeps,
 ) => {
   const upscaleDreamina = deps.upscaleDreamina ?? upscaleImage
-  const upscaleRealEsrgan = deps.upscaleRealEsrgan ?? upscaleWithRealEsrgan
+  const upscaleNanoBananaPro = deps.upscaleNanoBananaPro ?? upscaleWithNanoBananaPro
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     const contentType = String(reply.getHeader('Content-Type') ?? '')
@@ -490,7 +493,7 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
   )
 
   // POST /api/assets/:assetId/upscale
-  // body.engine 缺省 dreamina（向后兼容）；realesrgan 走本地 Real-ESRGAN 引擎
+  // body.engine 缺省 dreamina（向后兼容）；nanobanana-pro 走 Nano Banana Pro 图生图高清
   app.post<{
     Params: { assetId: string }
     Body: UpscaleImageRequest
@@ -520,13 +523,13 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
       return reply.code(400).send({
         statusCode: 400,
         error: 'Bad Request',
-        message: 'engine 仅支持 dreamina 或 realesrgan',
+        message: 'engine 仅支持 dreamina 或 nanobanana-pro',
       })
     }
     try {
       const results =
-        engine === 'realesrgan'
-          ? await upscaleRealEsrgan({
+        engine === 'nanobanana-pro'
+          ? await upscaleNanoBananaPro({
               inputImage: req.params.assetId,
               resolutionType,
             })

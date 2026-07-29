@@ -35,8 +35,7 @@ npm run dev
 | `npm run dev:desktop` | 启动 Vite 和 Electron；桌面主进程按需启动 Server |
 | `npm run build` | 类型检查并构建 Web 生产包 |
 | `npm run build:desktop` | 构建 Web、Electron 主进程、preload 和生产 Server bundle |
-| `npm run package:win` | 生成 NSIS Windows 安装包与自动更新文件（自动先执行 `fetch:realesrgan`） |
-| `npm run fetch:realesrgan` | 下载 Real-ESRGAN 放大引擎二进制到 `vendor/`（新环境首次开发或打包前需要） |
+| `npm run package:win` | 生成 NSIS Windows 安装包与自动更新文件 |
 | `npm run typecheck` | 检查全部 workspace 的 TypeScript |
 | `npm run typecheck:desktop` | 只检查 Desktop TypeScript |
 | `npm run typecheck:server` | 只检查 Server TypeScript |
@@ -57,7 +56,6 @@ apps/web/         React + Vite 前端
 apps/server/      Fastify 本地后端
 apps/desktop/     Electron 主进程、preload、后端生命周期与自动更新
 packages/shared/  前后端共享类型与生成逻辑
-vendor/           Real-ESRGAN 等本地引擎二进制（Git 忽略，由 fetch 脚本下载，随安装包分发）
 workspace/        本地配置、工作流和生成资产（Git 忽略）
 ```
 

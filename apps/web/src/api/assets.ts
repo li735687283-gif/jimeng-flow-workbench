@@ -118,7 +118,7 @@ export async function saveAssetToLibrary(id: string): Promise<Asset> {
   return (await res.json()) as Asset
 }
 
-/** 高清当前图片资产，返回新资产；engine 缺省 dreamina，可选 realesrgan（本地 4x 保真放大） */
+/** 高清当前图片资产，返回新资产；engine 缺省 dreamina，可选 nanobanana-pro（Nano Banana Pro 智能高清） */
 export async function upscaleImageAsset(
   assetId: string,
   resolutionType = '2k',

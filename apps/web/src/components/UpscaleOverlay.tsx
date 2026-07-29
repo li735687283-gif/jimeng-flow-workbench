@@ -14,10 +14,10 @@ import {
   formatUpscaleScale,
   getAspectRatioLabel,
   getUpscaleOutputPlan,
+  getUpscaleResolutionOptions,
+  normalizeUpscaleResolutionForEngine,
   UPSCALE_ENGINE_OPTIONS,
 } from '../utils/upscalePlan'
-
-const UPSCALE_RESOLUTION_OPTIONS: UpscaleResolutionType[] = ['2k', '4k', '8k']
 
 interface UpscaleOverlayProps {
   open: boolean
@@ -45,8 +45,9 @@ export function UpscaleOverlay({
   onConfirm,
 }: UpscaleOverlayProps) {
   const [engine, setEngine] = useState<UpscaleEngine>(defaultEngine)
-  const [resolution, setResolution] =
-    useState<UpscaleResolutionType>(defaultResolution)
+  const [resolution, setResolution] = useState<UpscaleResolutionType>(() =>
+    normalizeUpscaleResolutionForEngine(defaultEngine, defaultResolution),
+  )
   // 以 <img> 实测尺寸为准（节点 data 里的宽高可能是高清前的旧值），加载前先用 props
   const [sourceSize, setSourceSize] = useState({
     width: naturalWidth,
@@ -57,7 +58,7 @@ export function UpscaleOverlay({
   useEffect(() => {
     if (!open) return
     setEngine(defaultEngine)
-    setResolution(defaultResolution)
+    setResolution(normalizeUpscaleResolutionForEngine(defaultEngine, defaultResolution))
     setSourceSize({ width: naturalWidth, height: naturalHeight })
   }, [defaultEngine, defaultResolution, naturalHeight, naturalWidth, open])
 
@@ -79,6 +80,7 @@ export function UpscaleOverlay({
     resolution,
   )
   const aspectLabel = getAspectRatioLabel(sourceSize.width, sourceSize.height)
+  const resolutionOptions = getUpscaleResolutionOptions(engine)
 
   const content = (
     <div className="upscale-overlay" role="dialog" aria-label="高清增强配置">
@@ -148,7 +150,12 @@ export function UpscaleOverlay({
                   key={option.id}
                   type="button"
                   className={`upscale-engine-card${active ? ' active' : ''}`}
-                  onClick={() => setEngine(option.id)}
+                  onClick={() => {
+                    setEngine(option.id)
+                    setResolution((current) =>
+                      normalizeUpscaleResolutionForEngine(option.id, current),
+                    )
+                  }}
                   disabled={busy}
                   role="radio"
                   aria-checked={active}
@@ -177,7 +184,7 @@ export function UpscaleOverlay({
             </div>
           ) : null}
           <div className="upscale-resolution-pills" role="radiogroup" aria-label="目标分辨率">
-            {UPSCALE_RESOLUTION_OPTIONS.map((option) => {
+            {resolutionOptions.map((option) => {
               const active = option === resolution
               return (
                 <button

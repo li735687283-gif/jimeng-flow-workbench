@@ -9,6 +9,8 @@ import {
   formatUpscaleScale,
   getAspectRatioLabel,
   getUpscaleOutputPlan,
+  getUpscaleResolutionOptions,
+  normalizeUpscaleResolutionForEngine,
 } from '../src/utils/upscalePlan'
 
 Object.assign(globalThis, { React })
@@ -42,9 +44,11 @@ test('upscale display helpers format scale, ratio, megapixels and summary', () =
   assert.equal(getAspectRatioLabel(0, 10), '')
   assert.equal(formatMegapixels(1920, 1080), '2.1 MP')
   assert.equal(buildUpscaleSummary('dreamina', '4k'), '高清 · 即梦放大 · 4K')
+  assert.deepEqual(getUpscaleResolutionOptions('nanobanana-pro'), ['2k', '4k'])
+  assert.equal(normalizeUpscaleResolutionForEngine('nanobanana-pro', '8k'), '4k')
   assert.equal(
-    buildUpscaleSummary('realesrgan', '2k'),
-    '高清 · Real-ESRGAN · 2K',
+    buildUpscaleSummary('nanobanana-pro', '2k'),
+    '高清 · Nano Banana Pro · 2K',
   )
 })
 
@@ -71,9 +75,9 @@ test('upscale overlay renders preview info, engine cards, resolution pills and s
   assert.equal(html.includes('2.1 MP'), true)
   // 引擎卡片：两张都在，默认选中即梦放大
   assert.equal(html.includes('即梦放大'), true)
-  assert.equal(html.includes('Real-ESRGAN'), true)
+  assert.equal(html.includes('Nano Banana Pro'), true)
   assert.equal(html.includes('生成式放大，会重绘补充细节'), true)
-  assert.equal(html.includes('本地保真放大，固定 4 倍'), true)
+  assert.equal(html.includes('智能高清增强，尽量保持原图构图与内容'), true)
   assert.match(html, /upscale-engine-card active[^>]*>\s*<span[^>]*>即梦放大/)
   // 目标分辨率：默认 2K 输出 2048×1152，倍率 ≈ 1.1x
   assert.equal(html.includes('2048×1152 px'), true)
@@ -96,24 +100,25 @@ test('upscale overlay respects default engine/resolution and busy/error states',
       imageUrl="/x.png"
       naturalWidth={1920}
       naturalHeight={1080}
-      defaultEngine="realesrgan"
+      defaultEngine="nanobanana-pro"
       defaultResolution="4k"
       busy={true}
-      error="REALESRGAN 未安装，请运行 npm run fetch:realesrgan"
+      error="Nano Banana Pro 服务暂时不可用"
       onCancel={() => undefined}
       onConfirm={() => undefined}
     />,
   )
 
-  assert.equal(html.includes('高清 · Real-ESRGAN · 4K'), true)
+  assert.equal(html.includes('高清 · Nano Banana Pro · 4K'), true)
   assert.equal(html.includes('4096×2304 px'), true)
-  assert.match(html, /upscale-engine-card active[^>]*>\s*<span[^>]*>Real-ESRGAN/)
+  assert.match(html, /upscale-engine-card active[^>]*>\s*<span[^>]*>Nano Banana Pro/)
+  assert.equal(html.includes('>8K<'), false)
   // 发送中：控件禁用 + loading 态
   assert.match(html, /disabled=""[^>]*aria-label="高清处理中"/)
   assert.equal(html.includes('upscale-send-spinner'), true)
   // 失败原因显示在面板内
   assert.equal(html.includes('role="alert"'), true)
-  assert.equal(html.includes('npm run fetch:realesrgan'), true)
+  assert.equal(html.includes('Nano Banana Pro 服务暂时不可用'), true)
 
   const closed = renderToStaticMarkup(
     <UpscaleOverlay

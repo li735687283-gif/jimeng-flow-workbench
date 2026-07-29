@@ -1,5 +1,5 @@
 // 高清路由引擎分发测试：engine 缺省 dreamina（向后兼容）、
-// realesrgan 分发、非法 engine 400。引擎调用通过路由 deps 注入替换。
+// nanobanana-pro 分发、非法 engine 400。引擎调用通过路由 deps 注入替换。
 
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -46,11 +46,11 @@ function createFakeEngine(calls: string[]) {
   }
 }
 
-async function createTestApp(calls: { dreamina: string[]; realesrgan: string[] }) {
+async function createTestApp(calls: { dreamina: string[]; nanobanana: string[] }) {
   const app = Fastify()
   await app.register(assetsRoutes, {
     upscaleDreamina: createFakeEngine(calls.dreamina),
-    upscaleRealEsrgan: createFakeEngine(calls.realesrgan),
+    upscaleNanoBananaPro: createFakeEngine(calls.nanobanana),
   })
   await app.ready()
   return app
@@ -58,7 +58,7 @@ async function createTestApp(calls: { dreamina: string[]; realesrgan: string[] }
 
 test('upscale 缺省 engine 走 dreamina（向后兼容）', async () => {
   const assetId = await createImageAsset()
-  const calls = { dreamina: [] as string[], realesrgan: [] as string[] }
+  const calls = { dreamina: [] as string[], nanobanana: [] as string[] }
   const app = await createTestApp(calls)
   try {
     const response = await app.inject({
@@ -68,7 +68,7 @@ test('upscale 缺省 engine 走 dreamina（向后兼容）', async () => {
     })
     assert.equal(response.statusCode, 201, response.body)
     assert.deepEqual(calls.dreamina, [assetId])
-    assert.deepEqual(calls.realesrgan, [])
+    assert.deepEqual(calls.nanobanana, [])
     assert.equal(response.json().provider, 'dreamina')
     assert.equal(response.json().params.operation, 'image_upscale')
   } finally {
@@ -76,20 +76,20 @@ test('upscale 缺省 engine 走 dreamina（向后兼容）', async () => {
   }
 })
 
-test('upscale engine=realesrgan 分发到 Real-ESRGAN 引擎并记录 provider', async () => {
+test('upscale engine=nanobanana-pro 分发到 Nano Banana Pro 并记录 provider', async () => {
   const assetId = await createImageAsset()
-  const calls = { dreamina: [] as string[], realesrgan: [] as string[] }
+  const calls = { dreamina: [] as string[], nanobanana: [] as string[] }
   const app = await createTestApp(calls)
   try {
     const response = await app.inject({
       method: 'POST',
       url: `/api/assets/${assetId}/upscale`,
-      payload: { resolutionType: '4k', engine: 'realesrgan' },
+      payload: { resolutionType: '4k', engine: 'nanobanana-pro' },
     })
     assert.equal(response.statusCode, 201, response.body)
-    assert.deepEqual(calls.realesrgan, [assetId])
+    assert.deepEqual(calls.nanobanana, [assetId])
     assert.deepEqual(calls.dreamina, [])
-    assert.equal(response.json().provider, 'realesrgan')
+    assert.equal(response.json().provider, 'nanobanana-pro')
     assert.equal(response.json().params.operation, 'image_upscale')
     assert.equal(response.json().params.resolutionType, '4k')
   } finally {
@@ -99,7 +99,7 @@ test('upscale engine=realesrgan 分发到 Real-ESRGAN 引擎并记录 provider',
 
 test('upscale 非法 engine 返回 400 且不调用任何引擎', async () => {
   const assetId = await createImageAsset()
-  const calls = { dreamina: [] as string[], realesrgan: [] as string[] }
+  const calls = { dreamina: [] as string[], nanobanana: [] as string[] }
   const app = await createTestApp(calls)
   try {
     const response = await app.inject({
@@ -108,9 +108,9 @@ test('upscale 非法 engine 返回 400 且不调用任何引擎', async () => {
       payload: { resolutionType: '2k', engine: 'bogus' },
     })
     assert.equal(response.statusCode, 400, response.body)
-    assert.match(response.json().message, /dreamina|realesrgan/)
+    assert.match(response.json().message, /dreamina|nanobanana-pro/)
     assert.deepEqual(calls.dreamina, [])
-    assert.deepEqual(calls.realesrgan, [])
+    assert.deepEqual(calls.nanobanana, [])
   } finally {
     await app.close()
   }
@@ -118,14 +118,14 @@ test('upscale 非法 engine 返回 400 且不调用任何引擎', async () => {
 
 test('upscale 引擎抛错时按错误 statusCode 映射响应', async () => {
   const assetId = await createImageAsset()
-  const { RealEsrganError } = await import('../src/services/realesrgan')
+  const { NanoBananaUpscaleError } = await import('../src/services/nanoBananaUpscale')
   const app = Fastify()
   await app.register(assetsRoutes, {
     upscaleDreamina: createFakeEngine([]),
-    upscaleRealEsrgan: async () => {
-      throw new RealEsrganError(
-        'REALESRGAN_NOT_INSTALLED',
-        'Real-ESRGAN 未安装，请运行 npm run fetch:realesrgan',
+    upscaleNanoBananaPro: async () => {
+      throw new NanoBananaUpscaleError(
+        'UNSUPPORTED_RESOLUTION',
+        'Nano Banana Pro 高清仅支持 2K 或 4K',
         400,
       )
     },
@@ -135,11 +135,11 @@ test('upscale 引擎抛错时按错误 statusCode 映射响应', async () => {
     const response = await app.inject({
       method: 'POST',
       url: `/api/assets/${assetId}/upscale`,
-      payload: { engine: 'realesrgan' },
+      payload: { engine: 'nanobanana-pro', resolutionType: '8k' },
     })
     assert.equal(response.statusCode, 400, response.body)
-    assert.equal(response.json().code, 'REALESRGAN_NOT_INSTALLED')
-    assert.match(response.json().message, /npm run fetch:realesrgan/)
+    assert.equal(response.json().code, 'UNSUPPORTED_RESOLUTION')
+    assert.match(response.json().message, /2K 或 4K/)
   } finally {
     await app.close()
   }

@@ -26,13 +26,35 @@ export const UPSCALE_ENGINE_OPTIONS: readonly UpscaleEngineOption[] = [
     description: '生成式放大，会重绘补充细节，画面风格统一；4K/8K 需要即梦 VIP',
   },
   {
-    id: 'realesrgan',
-    label: 'Real-ESRGAN',
-    description:
-      '本地保真放大，固定 4 倍，不改动画面内容；小图可能达不到目标分辨率时按 4x 实际尺寸交付',
+    id: 'nanobanana-pro',
+    label: 'Nano Banana Pro',
+    description: '智能高清增强，尽量保持原图构图与内容；支持 2K/4K，会消耗第三方图片 API 额度',
   },
 ]
 
+const UPSCALE_RESOLUTIONS_BY_ENGINE: Record<
+  UpscaleEngine,
+  readonly UpscaleResolutionType[]
+> = {
+  dreamina: ['2k', '4k', '8k'],
+  'nanobanana-pro': ['2k', '4k'],
+}
+
+export function getUpscaleResolutionOptions(
+  engine: UpscaleEngine,
+): readonly UpscaleResolutionType[] {
+  return UPSCALE_RESOLUTIONS_BY_ENGINE[engine]
+}
+
+export function normalizeUpscaleResolutionForEngine(
+  engine: UpscaleEngine,
+  resolution: UpscaleResolutionType,
+): UpscaleResolutionType {
+  const supported = getUpscaleResolutionOptions(engine)
+  return supported.includes(resolution)
+    ? resolution
+    : supported[supported.length - 1] ?? '2k'
+}
 export interface UpscaleOutputPlan {
   width: number
   height: number

@@ -1,9 +1,9 @@
 // 高清放大（upscale）共享契约：Web 请求体与 Server 路由/引擎分发共用。
 
-/** 高清放大引擎：dreamina（即梦云端 image_upscale）或 realesrgan（本地 Real-ESRGAN 4x 保真放大） */
-export type UpscaleEngine = 'dreamina' | 'realesrgan'
+/** 高清放大引擎：dreamina（即梦云端 image_upscale）或 nanobanana-pro（Nano Banana Pro 智能高清） */
+export type UpscaleEngine = 'dreamina' | 'nanobanana-pro'
 
-export const UPSCALE_ENGINES: readonly UpscaleEngine[] = ['dreamina', 'realesrgan']
+export const UPSCALE_ENGINES: readonly UpscaleEngine[] = ['dreamina', 'nanobanana-pro']
 
 export const DEFAULT_UPSCALE_ENGINE: UpscaleEngine = 'dreamina'
 
