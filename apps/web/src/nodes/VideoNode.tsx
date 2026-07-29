@@ -8,10 +8,12 @@ import {
   compressVideoAsset,
   downloadAssetFile,
   getAssetFileUrl,
+  trimVideoAsset,
 } from '../api/assets'
 import { testJimengConnection } from '../api/settings'
 import { VideoActionCard } from '../components/VideoActionCard'
 import { VideoCompressionOverlay } from '../components/VideoCompressionOverlay'
+import { VideoTrimOverlay } from '../components/VideoTrimOverlay'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
 import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
@@ -147,6 +149,9 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [compressionOpen, setCompressionOpen] = useState(false)
   const [compressionBusy, setCompressionBusy] = useState(false)
   const [compressionError, setCompressionError] = useState<string | null>(null)
+  const [trimOpen, setTrimOpen] = useState(false)
+  const [trimBusy, setTrimBusy] = useState(false)
+  const [trimError, setTrimError] = useState<string | null>(null)
   const [videoDimensions, setVideoDimensions] = useState({
     width: nodeData.width ?? 0,
     height: nodeData.height ?? 0,
@@ -297,6 +302,68 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     setCompressionError(null)
     setCompressionOpen(true)
   }, [])
+
+  const handleOpenTrim = useCallback(() => {
+    setTrimError(null)
+    setTrimOpen(true)
+  }, [])
+
+  const handleTrimVideo = useCallback(
+    async (startSeconds: number, durationSeconds: number) => {
+      const sourceAssetId = nodeData.assetIds[0]
+      if (!sourceAssetId || trimBusy) return
+      setTrimBusy(true)
+      setTrimError(null)
+      let targetNodeId = ''
+      try {
+        targetNodeId = useCanvasStore
+          .getState()
+          .createTrimmedVideoNode(id, startSeconds, durationSeconds)
+        if (!targetNodeId) throw new Error('无法创建裁切结果节点')
+        useGenerateStore.getState().setStatus(targetNodeId, 'running')
+        setTrimOpen(false)
+        void useFlowStore.getState().saveCurrent().catch(() => undefined)
+
+        const asset = await trimVideoAsset(
+          sourceAssetId,
+          startSeconds,
+          durationSeconds,
+        )
+        useCanvasStore.getState().updateNodeData(targetNodeId, {
+          assetIds: [asset.id],
+          status: 'success',
+          error: undefined,
+          ...(videoDimensions.width > 0 && videoDimensions.height > 0
+            ? {
+                width: videoDimensions.width,
+                height: videoDimensions.height,
+              }
+            : {}),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Partial<BaseNodeData>)
+        useGenerateStore.getState().setStatus(targetNodeId, 'success')
+        await useFlowStore.getState().saveCurrent().catch(() => undefined)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (targetNodeId) {
+          useCanvasStore.getState().updateNodeData(targetNodeId, {
+            status: 'error',
+            error: message,
+            updatedAt: new Date().toISOString(),
+          } as unknown as Partial<BaseNodeData>)
+          useGenerateStore.getState().patch(targetNodeId, {
+            status: 'error',
+            error: message,
+          })
+          void useFlowStore.getState().saveCurrent().catch(() => undefined)
+        }
+        if (mountedRef.current) setTrimError(message)
+      } finally {
+        if (mountedRef.current) setTrimBusy(false)
+      }
+    },
+    [id, nodeData.assetIds, trimBusy, videoDimensions],
+  )
 
   const handleCompressVideo = useCallback(
     async (
@@ -478,18 +545,23 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       ? callState.status
       : (data as BaseNodeData).status ?? nodeData.status
   const running = displayStatus === 'queued' || displayStatus === 'running'
+  const videoProgressLabel = nodeData.trimSourceNodeId
+    ? '视频裁切中'
+    : nodeData.compressionSourceNodeId
+      ? '视频压缩中'
+      : '视频生成中'
   const videoGenerationProgress = running
   const videoGenerationProgressOverlay = videoGenerationProgress ? (
     <div className="image-generation-progress-overlay" aria-live="polite">
       <div className="image-generation-progress-content">
         <div className="image-generation-progress-label">
           <span className="image-generation-progress-dot" />
-          <span>{nodeData.compressionSourceNodeId ? '视频压缩中' : '视频生成中'}</span>
+          <span>{videoProgressLabel}</span>
         </div>
         <div
           className="image-generation-progress-track"
           role="progressbar"
-          aria-label="视频生成中"
+          aria-label={videoProgressLabel}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuetext="生成中"
@@ -899,7 +971,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       <>
         {editorMounted && (
           <VideoActionCard
-            busy={actionBusy || compressionBusy}
+            busy={actionBusy || compressionBusy || trimBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
             validationLabel={'校验'}
@@ -910,6 +982,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             }
             onValidate={() => void handleValidateVideoProvider()}
             onDownload={handleDownloadVideo}
+            onTrim={handleOpenTrim}
             onCompress={handleOpenCompression}
             onOpenFullSize={() => handleOpenFullSize()}
           />
@@ -1060,6 +1133,18 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       onCancel={() => setCompressionOpen(false)}
       onConfirm={(targetHeight, outputWidth, outputHeight) =>
         void handleCompressVideo(targetHeight, outputWidth, outputHeight)
+      }
+    />
+    <VideoTrimOverlay
+      open={trimOpen && Boolean(playerSrc)}
+      videoUrl={playerSrc}
+      sourceWidth={videoDimensions.width}
+      sourceHeight={videoDimensions.height}
+      busy={trimBusy}
+      error={trimError}
+      onCancel={() => setTrimOpen(false)}
+      onConfirm={(startSeconds, durationSeconds) =>
+        void handleTrimVideo(startSeconds, durationSeconds)
       }
     />
     {/* 首页同一个 VideoPlayerModal，直接挂到 body */}

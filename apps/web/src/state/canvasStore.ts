@@ -350,6 +350,11 @@ interface CanvasState {
     sourceId: string,
     targetHeight: VideoCompressionTargetHeight,
   ) => string
+  createTrimmedVideoNode: (
+    sourceId: string,
+    startSeconds: number,
+    durationSeconds: number,
+  ) => string
   createGridImageNode: (sourceId: string, grid: GridGeneratePreset) => string
   createCapturedFrameNode: (
     sourceId: string,
@@ -540,9 +545,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     const sourceSize = getNodeSize(source)
     const sourceData = source.data as BaseNodeData
     const assetId = getAssetId(source)
-    const existingCompressionCount = nodes.filter((node) => {
+    const existingDerivedVideoCount = nodes.filter((node) => {
       const data = node.data as BaseNodeData
-      return node.type === 'video' && data.compressionSourceNodeId === sourceId
+      return (
+        node.type === 'video' &&
+        (data.compressionSourceNodeId === sourceId ||
+          data.trimSourceNodeId === sourceId)
+      )
     }).length
     const sameTypeCount = nodes.filter((node) => node.type === 'video').length + 1
     const node = def.create(
@@ -550,7 +559,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
         y:
           source.position.y +
-          existingCompressionCount * (sourceSize.height + UPSCALE_NODE_STACK_GAP),
+          existingDerivedVideoCount *
+            (sourceSize.height + UPSCALE_NODE_STACK_GAP),
       },
       sameTypeCount,
     )
@@ -564,6 +574,65 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         inputVideoAssetIds: assetId ? [assetId] : [],
         compressionSourceNodeId: sourceId,
         compressionTargetHeight: targetHeight,
+      },
+    }
+
+    set((state) => ({
+      nodes: [...state.nodes, derivedNode],
+      edges: addEdge(
+        {
+          source: sourceId,
+          target: derivedNode.id,
+          sourceHandle: null,
+          targetHandle: null,
+          type: 'cut',
+        },
+        state.edges,
+      ),
+      selectedNodeId: derivedNode.id,
+    }))
+    return derivedNode.id
+  },
+  createTrimmedVideoNode: (sourceId, startSeconds, durationSeconds) => {
+    const nodes = get().nodes
+    const source = nodes.find((node) => node.id === sourceId)
+    const def = nodeRegistry.video
+    if (!source || source.type !== 'video' || !def) return ''
+
+    const sourceSize = getNodeSize(source)
+    const sourceData = source.data as BaseNodeData
+    const assetId = getAssetId(source)
+    const existingDerivedVideoCount = nodes.filter((node) => {
+      const data = node.data as BaseNodeData
+      return (
+        node.type === 'video' &&
+        (data.compressionSourceNodeId === sourceId ||
+          data.trimSourceNodeId === sourceId)
+      )
+    }).length
+    const sameTypeCount = nodes.filter((node) => node.type === 'video').length + 1
+    const node = def.create(
+      {
+        x: source.position.x + sourceSize.width + UPSCALE_NODE_GAP,
+        y:
+          source.position.y +
+          existingDerivedVideoCount *
+            (sourceSize.height + UPSCALE_NODE_STACK_GAP),
+      },
+      sameTypeCount,
+    )
+    const derivedNode: Node = {
+      ...node,
+      data: {
+        ...node.data,
+        title: `${sourceData.title ?? '视频'} 裁切 ${startSeconds.toFixed(1)}s`,
+        status: 'running',
+        assetIds: [],
+        inputVideoAssetIds: assetId ? [assetId] : [],
+        trimSourceNodeId: sourceId,
+        trimStartSeconds: startSeconds,
+        trimDurationSeconds: durationSeconds,
+        durationSeconds,
       },
     }
 

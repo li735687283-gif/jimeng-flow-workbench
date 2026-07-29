@@ -2,6 +2,7 @@ import {
   Download,
   Maximize2,
   Minimize2,
+  Scissors,
   ShieldCheck,
 } from 'lucide-react'
 
@@ -15,6 +16,7 @@ interface VideoActionCardProps {
   closing?: boolean
   onValidate: () => void
   onDownload: () => void
+  onTrim: () => void
   onCompress: () => void
   onOpenFullSize: () => void
 }
@@ -27,6 +29,7 @@ export function VideoActionCard({
   closing = false,
   onValidate,
   onDownload,
+  onTrim,
   onCompress,
   onOpenFullSize,
 }: VideoActionCardProps) {
@@ -51,6 +54,17 @@ export function VideoActionCard({
       <button
         type="button"
         className="image-action-button"
+        onClick={onTrim}
+        disabled={busy}
+        aria-label="裁切视频长度"
+        title="长度裁切"
+      >
+        <Scissors size={17} strokeWidth={1.7} />
+        <span>长度裁切</span>
+      </button>
+      <button
+        type="button"
+        className="image-action-button"
         onClick={onCompress}
         disabled={busy}
         aria-label="压缩视频"
@@ -58,7 +72,8 @@ export function VideoActionCard({
       >
         <Minimize2 size={17} strokeWidth={1.7} />
         <span>视频压缩</span>
-      </button>      <button
+      </button>
+      <button
         type="button"
         className="image-action-button icon-only"
         onClick={onDownload}

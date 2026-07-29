@@ -67,6 +67,12 @@ export interface VideoNodeData {
   compressionTargetHeight?: 480 | 360
   /** 视频压缩派生节点所引用的源视频资产。 */
   inputVideoAssetIds?: string[]
+  /** 视频长度裁切派生节点的来源节点 id。 */
+  trimSourceNodeId?: string
+  /** 视频长度裁切的入点，单位秒。 */
+  trimStartSeconds?: number
+  /** 视频长度裁切的持续时间，单位秒。 */
+  trimDurationSeconds?: number
   /** 已知的视频像素尺寸（压缩结果可直接持久化）。 */
   width?: number
   height?: number
@@ -359,6 +365,9 @@ export function mergeVideoDefaults(
     compressionSourceNodeId: data.compressionSourceNodeId,
     compressionTargetHeight: data.compressionTargetHeight,
     inputVideoAssetIds: data.inputVideoAssetIds,
+    trimSourceNodeId: data.trimSourceNodeId,
+    trimStartSeconds: data.trimStartSeconds,
+    trimDurationSeconds: data.trimDurationSeconds,
     width: data.width,
     height: data.height,
     mode: data.mode ?? VIDEO_DEFAULTS.mode,

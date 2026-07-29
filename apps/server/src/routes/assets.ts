@@ -49,6 +49,11 @@ import {
   compressVideoAsset,
   VideoCompressionError,
 } from '../services/videoCompression'
+import {
+  normalizeVideoTrimRequest,
+  type VideoTrimRequest,
+} from '@jimeng-flow/shared/videoTrim'
+import { trimVideoAsset, VideoTrimError } from '../services/videoTrim'
 
 interface UploadBody {
   fileName: string
@@ -97,7 +102,8 @@ function errorPayload(err: unknown) {
   if (
     err instanceof JimengError ||
     err instanceof NanoBananaUpscaleError ||
-    err instanceof VideoCompressionError
+    err instanceof VideoCompressionError ||
+    err instanceof VideoTrimError
   ) {
     return {
       statusCode: err.statusCode,
@@ -183,6 +189,7 @@ export interface AssetsRouteDeps {
   upscaleDreamina?: typeof upscaleImage
   upscaleNanoBananaPro?: typeof upscaleWithNanoBananaPro
   compressVideo?: typeof compressVideoAsset
+  trimVideo?: typeof trimVideoAsset
 }
 
 const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
@@ -192,6 +199,7 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
   const upscaleDreamina = deps.upscaleDreamina ?? upscaleImage
   const upscaleNanoBananaPro = deps.upscaleNanoBananaPro ?? upscaleWithNanoBananaPro
   const compressVideo = deps.compressVideo ?? compressVideoAsset
+  const trimVideo = deps.trimVideo ?? trimVideoAsset
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff')
     const contentType = String(reply.getHeader('Content-Type') ?? '')
@@ -615,6 +623,44 @@ const assetsRoutes: FastifyPluginAsync<AssetsRouteDeps> = async (
       return reply.code(201).send(asset)
     } catch (err) {
       app.log.error({ err }, '[assets/compress-video] 调用失败')
+      const payload = errorPayload(err)
+      return reply.code(payload.statusCode).send(payload)
+    }
+  })
+
+  // POST /api/assets/:assetId/trim-video
+  app.post<{
+    Params: { assetId: string }
+    Body: VideoTrimRequest
+  }>('/api/assets/:assetId/trim-video', async (req, reply) => {
+    const sourceAsset = await getAsset(req.params.assetId)
+    if (!sourceAsset) {
+      return reply.code(404).send({
+        statusCode: 404,
+        error: 'Not Found',
+        message: '资产不存在',
+      })
+    }
+    if (sourceAsset.type !== 'video') {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '只有视频资产可以裁切',
+      })
+    }
+    const trim = normalizeVideoTrimRequest(req.body)
+    if (!trim) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: '裁切长度必须在 1 秒到 4 秒之间',
+      })
+    }
+    try {
+      const asset = await trimVideo({ sourceAsset, trim })
+      return reply.code(201).send(asset)
+    } catch (err) {
+      app.log.error({ err }, '[assets/trim-video] 调用失败')
       const payload = errorPayload(err)
       return reply.code(payload.statusCode).send(payload)
     }

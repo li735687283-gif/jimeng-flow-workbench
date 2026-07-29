@@ -14,6 +14,7 @@ import type {
   VideoCompressionRequest,
   VideoCompressionTargetHeight,
 } from '@jimeng-flow/shared/videoCompression'
+import type { VideoTrimRequest } from '@jimeng-flow/shared/videoTrim'
 
 /** 返回资产文件的访问 URL（供 <img src> / <video src> 使用） */
 export function getAssetFileUrl(id: string): string {
@@ -163,6 +164,32 @@ export async function compressVideoAsset(
     throw new Error(
       payload?.message ||
         `视频压缩失败：${res.status} ${res.statusText}`,
+    )
+  }
+  return (await res.json()) as Asset
+}
+
+/** 本地按入点和长度裁切视频，保留源分辨率并返回新的派生视频资产。 */
+export async function trimVideoAsset(
+  assetId: string,
+  startSeconds: number,
+  durationSeconds: number,
+): Promise<Asset> {
+  const body: VideoTrimRequest = { startSeconds, durationSeconds }
+  const res = await fetch(
+    `/api/assets/${encodeURIComponent(assetId)}/trim-video`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as {
+      message?: string
+    } | null
+    throw new Error(
+      payload?.message || `视频裁切失败：${res.status} ${res.statusText}`,
     )
   }
   return (await res.json()) as Asset

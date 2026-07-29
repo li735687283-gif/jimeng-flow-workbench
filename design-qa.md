@@ -586,3 +586,57 @@ final result: passed
 4. The reference includes smart-adapt, 1080P, and 720P rows; the implementation intentionally omits them because this feature only permits down-compression to 480P or 360P.
 
 final result: passed
+
+---
+
+# Design QA — 视频长度裁切
+
+## Sources
+
+- Source visual truth: `.codex-logs/video-trim-reference.png`
+- Implementation screenshot: `.codex-logs/video-trim-implementation.png`
+- Combined comparison: `.codex-logs/video-trim-comparison.png`
+
+## Capture state
+
+- Browser: Codex in-app browser
+- CSS viewport: `1280 × 720`; explicit tall-layout inspection: `1098 × 1060`
+- Reference pixels: `1095 × 1056`
+- Implementation capture pixels: `1205 × 720` from the in-app browser screenshot surface
+- Density normalization: both captures were placed on `1098 × 1060` comparison canvases with contain scaling and no crop
+- State: existing `1248 × 704`, `5.2s` video; default selection `0:00.0–0:04.0`
+
+## Required fidelity surfaces
+
+- Fonts and typography: follows the existing Chinese sans-serif stack; heading, time values, limit summary and action hierarchy match the reference.
+- Spacing and layout rhythm: header, large preview, transport controls, in/out controls, thumbnail timeline and footer preserve the reference ordering. The dialog adapts to a 720px-high viewport without hiding the timeline.
+- Colors and visual tokens: neutral dark surfaces use project-approved grayscale values; selected range uses the approved featured-gold accent, and errors use the approved danger red.
+- Image quality and asset fidelity: the preview and timeline use frames extracted from the actual source video in memory; no generic or persisted image asset replaces the source content. Icons come from the existing Lucide library.
+- Copy and content: `长度裁切`, `入点`, `出点`, `已选`, the `1–4s` limit, source resolution note and confirmation action are present and readable.
+
+## Interaction and runtime checks
+
+- Toolbar exposes a visible `长度裁切` entry.
+- Default selection is the maximum allowed `4.0s`; videos shorter than one second disable trimming.
+- `+ / -` controls move the in/out points by `0.1s` and update the selected duration immediately.
+- Dragging the yellow selection moved `0:00.1–0:04.1` to `0:00.6–0:04.6` without changing its four-second duration.
+- Dragging the out handle past the limit stopped at exactly `1.0s`, confirming the minimum duration guard.
+- Selection playback stopped automatically at the out point; reset restored `0:00.0–0:04.0`.
+- Cancel closed the dialog. Confirmation was intentionally not clicked on the user's saved canvas, so QA created no user asset.
+- Browser console errors: none.
+- Real FFmpeg smoke: trimmed from `1.5s` for `3.0s`; output was `1280 × 720`, retained AAC audio, and probed at `3.02s`.
+
+## Comparison history
+
+1. Pass 1 found a P2 responsive issue: at a 720px-high viewport the timeline fell below the scroll fold.
+2. The content area was converted to an adaptive grid with a flexible preview row and a fixed visible timeline row.
+3. Pass 2 showed the complete preview, transport, in/out controls, real thumbnails, range handles and footer in one viewport. No actionable P0/P1/P2 difference remained.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: the supplied reference uses a taller viewport and permits much longer selections; the implementation intentionally replaces that duration rule with the requested hard `1–4s` range.
+
+final result: passed
