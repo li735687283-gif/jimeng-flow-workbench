@@ -14,8 +14,9 @@ test('group title zoom factor grows inversely with canvas zoom within bounds', (
   // 画布缩小：按 1/zoom 反向放大
   assert.equal(getGroupTitleZoomFactor(0.5), 2)
   assert.equal(getGroupTitleZoomFactor(0.25), 4)
-  // 极端缩小：封顶 4 倍，防止失控
-  assert.equal(getGroupTitleZoomFactor(0.05), GROUP_TITLE_MAX_ZOOM_FACTOR)
+  // 缩到画布最小 zoom（0.05）：放大 20 倍，屏幕上组名字号保持恒定可读
+  assert.equal(getGroupTitleZoomFactor(0.05), 20)
+  // 超出范围：封顶 20 倍，防止失控
   assert.equal(getGroupTitleZoomFactor(0.001), GROUP_TITLE_MAX_ZOOM_FACTOR)
   // 非法 zoom：回落到下限，不放大
   assert.equal(getGroupTitleZoomFactor(0), GROUP_TITLE_MIN_ZOOM_FACTOR)

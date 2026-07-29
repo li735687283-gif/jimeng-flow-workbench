@@ -10,9 +10,9 @@ export const GROUP_FRAME_TYPE = 'groupFrame'
 export const GROUP_FRAME_PADDING = 40
 export const DEFAULT_GROUP_COLOR = '#757575'
 
-/** 组名标题反向缩放的上下限：最小 1 倍（不缩小）、最大 4 倍（防止极端缩放失控） */
+/** 组名标题反向缩放的上下限：最小 1 倍（不缩小）、最大 20 倍（= 1/画布最小 zoom 0.05，全缩放范围内组名屏幕尺寸恒定可读） */
 export const GROUP_TITLE_MIN_ZOOM_FACTOR = 1
-export const GROUP_TITLE_MAX_ZOOM_FACTOR = 4
+export const GROUP_TITLE_MAX_ZOOM_FACTOR = 20
 
 /**
  * 组名随画布缩放的反向放大因子：zoom 变小时按 1/zoom 放大字号，
