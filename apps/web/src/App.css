@@ -8223,6 +8223,53 @@
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.4);
 }
 
+.video-player-capture-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  margin: 0 2px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.video-player-capture-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.video-player-capture-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.video-player-capture-error {
+  position: absolute;
+  right: 18px;
+  bottom: 78px;
+  max-width: min(420px, calc(100% - 36px));
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 112, 112, 0.35);
+  border-radius: 10px;
+  background: rgba(70, 20, 24, 0.92);
+  color: #ff7878;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 /* Speed */
 .video-player-speed-group {
   position: relative;

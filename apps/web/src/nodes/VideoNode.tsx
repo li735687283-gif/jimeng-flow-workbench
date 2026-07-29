@@ -28,6 +28,7 @@ import {
   resolveImageGenerationPrompt,
 } from '../utils/imageGenerationInputs'
 import { resolveVideoGenerationDefaults } from '../utils/generationDefaults'
+import { captureCurrentVideoFrame } from '../utils/videoFrameCapture'
 import { resumeGenerationSubscription } from '../utils/generationResume'
 import { replaceGenerationSubscription } from '../utils/generationSubscription'
 import { useGenerationDefaultsStore } from '../state/generationDefaultsStore'
@@ -250,6 +251,26 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
   }, [nodeData.assetIds])
 
+  const handleCaptureFrame = useCallback(
+    async (video: HTMLVideoElement) => {
+      try {
+        const frame = captureCurrentVideoFrame(video)
+        const capturedNodeId = useCanvasStore
+          .getState()
+          .createCapturedFrameNode(id, frame)
+        if (!capturedNodeId) {
+          throw new Error('无法在画布中创建截帧节点')
+        }
+        await useFlowStore.getState().saveCurrent()
+        setSendError('')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSendError(`截取当前帧失败：${message}`)
+        throw error instanceof Error ? error : new Error(message)
+      }
+    },
+    [id],
+  )
   /** 退出节点上可能触发的浏览器原生全屏（双击 video 常见） */
   const exitNativeVideoFullscreen = useCallback(() => {
     const video = videoRef.current as
@@ -947,6 +968,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
             src={playerSrc}
             title={nodeData.title || '视频预览'}
             onClose={() => setPlayerOpen(false)}
+            onCaptureFrame={handleCaptureFrame}
           />,
           document.body,
         )

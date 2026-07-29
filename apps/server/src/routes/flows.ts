@@ -77,6 +77,7 @@ const flowsRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   // PUT /api/flows/:id → 更新工作流
   app.put<{ Params: { id: string }; Body: UpdateFlowRequest }>(
     '/api/flows/:id',
+    { bodyLimit: 64 * 1024 * 1024 },
     async (req, reply): Promise<Flow | unknown> => {
       const body = req.body ?? {}
       if (typeof body !== 'object' || Array.isArray(body)) {

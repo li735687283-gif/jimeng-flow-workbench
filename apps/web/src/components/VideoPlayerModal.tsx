@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  Camera,
+  LoaderCircle,
   Maximize2,
   Minimize2,
   Pause,
@@ -15,6 +17,7 @@ export interface VideoPlayerModalProps {
   src: string
   title?: string
   onClose: () => void
+  onCaptureFrame?: (video: HTMLVideoElement) => void | Promise<void>
 }
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -31,7 +34,13 @@ function formatTime(seconds: number): string {
  * 1. 双击或工具条放大 → 居中「小播放器」弹层（非全屏）
  * 2. 小播放器内再点放大 → 全屏（浏览器 Fullscreen，失败则 CSS 铺满）
  */
-export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModalProps) {
+export function VideoPlayerModal({
+  open,
+  src,
+  title,
+  onClose,
+  onCaptureFrame,
+}: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const progressRef = useRef<HTMLDivElement>(null)
@@ -58,6 +67,8 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
   const [showVolume, setShowVolume] = useState(false)
   const [showSpeed, setShowSpeed] = useState(false)
   const [showControls, setShowControls] = useState(true)
+  const [isCapturing, setIsCapturing] = useState(false)
+  const [captureError, setCaptureError] = useState('')
 
   const clearHideTimer = useCallback(() => {
     if (hideControlsTimer.current) {
@@ -164,6 +175,20 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     video.loop = !video.loop
     setIsLooping(video.loop)
   }, [])
+
+  const handleCaptureFrame = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || !onCaptureFrame || isCapturing) return
+    setIsCapturing(true)
+    setCaptureError('')
+    try {
+      await onCaptureFrame(video)
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : '截取当前帧失败')
+    } finally {
+      setIsCapturing(false)
+    }
+  }, [isCapturing, onCaptureFrame])
 
   const performSeek = useCallback((clientX: number) => {
     const video = videoRef.current
@@ -297,6 +322,7 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
     setShowControls(true)
     setShowVolume(false)
     setShowSpeed(false)
+    setCaptureError('')
     const t = window.setTimeout(() => {
       // 再保险：下一帧仍保持 windowed
       setIsFullscreen(false)
@@ -425,6 +451,12 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
           <div style={{ flex: 1 }} />
         </div>
 
+        {captureError ? (
+          <div className="video-player-capture-error" role="alert">
+            {captureError}
+          </div>
+        ) : null}
+
         <div
           className={`video-player-controls${showControls ? ' visible' : ''}`}
           onClick={(e) => e.stopPropagation()}
@@ -505,6 +537,23 @@ export function VideoPlayerModal({ open, src, title, onClose }: VideoPlayerModal
             </div>
 
             <div className="video-player-controls-right">
+              {onCaptureFrame ? (
+                <button
+                  type="button"
+                  className="video-player-capture-btn"
+                  onClick={() => void handleCaptureFrame()}
+                  disabled={isCapturing}
+                  title="截取当前帧并放到画布右侧"
+                  aria-label="截取当前帧"
+                >
+                  {isCapturing ? (
+                    <LoaderCircle size={15} className="spin" />
+                  ) : (
+                    <Camera size={15} />
+                  )}
+                  <span>{isCapturing ? '截取中' : '截取当前帧'}</span>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`video-player-icon-btn${isLooping ? ' active' : ''}`}

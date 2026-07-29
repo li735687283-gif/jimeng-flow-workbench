@@ -38,6 +38,14 @@ test('video player uses two-level open: windowed first, fullscreen only on toggl
   // 关闭路径
   assert.match(modal, /closeModal/)
 
+  // 当前帧截取：播放器把正在播放的 video 元素交给画布节点处理
+  assert.match(modal, /onCaptureFrame/)
+  assert.match(modal, /截取当前帧/)
+  assert.match(modal, /onCaptureFrame\(video\)/)
+  assert.match(videoNode, /captureCurrentVideoFrame/)
+  assert.match(videoNode, /createCapturedFrameNode/)
+  assert.match(videoNode, /onCaptureFrame=\{handleCaptureFrame\}/)
+
   // 首页 + 画布共用
   assert.match(app, /<VideoPlayerModal/)
   assert.match(videoNode, /createPortal/)
