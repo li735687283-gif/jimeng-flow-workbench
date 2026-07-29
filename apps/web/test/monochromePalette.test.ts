@@ -13,6 +13,7 @@ const approvedSemanticAccentHexes = new Set([
   '4a9eff',
   'f0b429',
   'f5c842',
+  '2da44e',
 ])
 
 function listSourceFiles(dir: string): string[] {
@@ -53,6 +54,6 @@ test('frontend source colors stay neutral except for approved semantic accents',
   assert.deepEqual(
     violations,
     [],
-    'Non-neutral hex colors must be approved danger red, action blue, or featured gold accents',
+    'Non-neutral hex colors must be approved danger red, action blue, featured gold, or success green accents',
   )
 })

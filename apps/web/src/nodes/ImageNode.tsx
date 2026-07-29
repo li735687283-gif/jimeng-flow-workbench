@@ -1568,15 +1568,6 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             busy={actionBusy}
             closing={editorClosing}
             validationStatus={validationStatus}
-            validationLabel={
-              validationStatus === 'checking'
-                ? '校验中'
-                : validationStatus === 'success'
-                  ? '校验通过'
-                  : validationStatus === 'error'
-                    ? '校验失败'
-                    : '校验'
-            }
             validationTitle={validationMessage || undefined}
             validationAriaLabel={
               shouldRequireJimengCliForImageModel(selectedModel?.id ?? '')

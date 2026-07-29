@@ -1,6 +1,6 @@
 {
   "name": "jimeng-flow-workbench",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "MO.K local-first AI canvas desktop application",
   "private": true,
   "type": "module",
@@ -24,7 +24,7 @@
     "lint": "oxlint apps packages scripts",
     "mok": "node scripts/mok.mjs",
     "package:win": "npm run build:desktop && node scripts/package-win.mjs",
-    "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web && npm run test:desktop",
+    "test": "node --test scripts/run-tests.test.mjs scripts/mok.test.mjs scripts/nsisInstaller.test.mjs && npm run test:server && npm run test:web && npm run test:desktop",
     "test:desktop": "node scripts/run-tests.mjs desktop",
     "test:server": "node scripts/run-tests.mjs server",
     "test:web": "node scripts/run-tests.mjs web",
@@ -66,7 +66,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "MO.K"
+      "shortcutName": "MO.K",
+      "include": "scripts/installer-foreground.nsh"
     },
     "publish": [
       {

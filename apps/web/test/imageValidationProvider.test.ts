@@ -75,7 +75,7 @@ test('image provider dispatcher surfaces Jimeng and Codex probe errors', async (
   )
 })
 
-test('validate button gives perceivable feedback: label follows status and failure reason is shown', async () => {
+test('validate button gives perceivable visual feedback: icon color and spinner ring', async () => {
   const source = await readFile(
     new URL('../src/nodes/ImageNode.tsx', import.meta.url),
     'utf8',
@@ -85,19 +85,32 @@ test('validate button gives perceivable feedback: label follows status and failu
     'utf8',
   )
   const css = await readFile(new URL('../src/App.css', import.meta.url), 'utf8')
+  const tokens = await readFile(new URL('../src/index.css', import.meta.url), 'utf8')
 
-  // 按钮文案随状态变化，不再永远是「校验」
-  assert.match(source, /'校验中'/)
-  assert.match(source, /'校验通过'/)
-  assert.match(source, /'校验失败'/)
-  // 失败原因进入编辑面板错误区（可操作反馈），tooltip 同步展示
+  // 失败原因仍进入编辑面板错误区（可操作反馈），tooltip 同步展示
   assert.match(source, /setSendError\(\s*`校验失败：/)
   assert.match(source, /setValidationMessage/)
   assert.match(source, /validationTitle=\{validationMessage \|\| undefined\}/)
   assert.match(card, /title=\{validationTitle\}/)
-  // 失败态颜色与默认灰可区分
+
+  // 按钮本体是纯视觉反馈：不再按状态切换文字（「校验通过/失败」只出现在消息里）
+  assert.doesNotMatch(source, /validationLabel=\{validationStatus/)
+
+  // 图标包裹层 + 校验中环形动画元素
+  assert.match(card, /className="validation-icon"/)
+  assert.match(card, /validationStatus === 'checking'/)
+  assert.match(card, /className="validation-spinner"/)
+  assert.match(css, /\.validation-spinner\s*\{[^}]*position:\s*absolute;[^}]*border-radius:\s*50%;[^}]*animation:\s*validation-spin/s)
+  assert.match(css, /@keyframes validation-spin/)
+
+  // 通过绿 / 失败红作用在图标上，使用令牌而非零散色值
   assert.match(
     css,
-    /\.image-action-button\.validation-error\s*\{[^}]*color:\s*var\(--menu-danger-text\);/s,
+    /\.image-action-button\.validation-success \.validation-icon\s*\{[^}]*color:\s*var\(--status-valid\);/s,
   )
+  assert.match(
+    css,
+    /\.image-action-button\.validation-error \.validation-icon\s*\{[^}]*color:\s*var\(--menu-danger-text\);/s,
+  )
+  assert.match(tokens, /--status-valid:\s*#2da44e;/)
 })

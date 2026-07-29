@@ -19,6 +19,8 @@
   --status-running: #d8d8d8;
   --status-success: #d8d8d8;
   --status-error: #a8a8a8;
+  /* 校验通过绿：深色面板与浅色主题下都可辨 */
+  --status-valid: #2da44e;
   --shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   --shadow-strong: 0 8px 24px rgba(0, 0, 0, 0.45);
   /* 画布节点不使用阴影（用户视觉决策 0.2.3），保留令牌便于状态规则统一引用 */

@@ -1668,17 +1668,42 @@
   transform: none;
 }
 
-.image-action-button.validation-success {
-  color: #f2f2f2;
+/* 校验结果只反映在盾牌图标颜色上：通过绿 / 失败红，按钮文字不变 */
+.image-action-button.validation-success .validation-icon {
+  color: var(--status-valid);
 }
 
-.image-action-button.validation-error {
+.image-action-button.validation-error .validation-icon {
   color: var(--menu-danger-text);
 }
 
 .image-action-button.validation-checking {
   color: #ffffff;
   opacity: 0.72;
+}
+
+.validation-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 校验中：盾牌外围一圈 indeterminate 旋转圆环，绝对定位不撑大按钮 */
+.validation-spinner {
+  position: absolute;
+  inset: -3.5px;
+  border-radius: 50%;
+  border: 1.6px solid rgba(255, 255, 255, 0.22);
+  border-top-color: currentColor;
+  pointer-events: none;
+  animation: validation-spin 0.9s linear infinite;
+}
+
+@keyframes validation-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .image-action-button.icon-only span {

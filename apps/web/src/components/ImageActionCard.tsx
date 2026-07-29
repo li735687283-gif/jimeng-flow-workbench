@@ -218,7 +218,12 @@ export function ImageActionCard({
         aria-label={validationAriaLabel}
         title={validationTitle}
       >
-        <ShieldCheck size={17} strokeWidth={1.7} />
+        <span className="validation-icon">
+          <ShieldCheck size={17} strokeWidth={1.7} />
+          {validationStatus === 'checking' ? (
+            <span className="validation-spinner" aria-hidden="true" />
+          ) : null}
+        </span>
         <span>{validationLabel}</span>
       </button>
       <span className="image-action-divider" aria-hidden="true" />

@@ -11,7 +11,7 @@ test('package scripts use the runner and discovery filters recursively in sorted
 
   assert.equal(
     packageJson.scripts.test,
-    'node --test scripts/run-tests.test.mjs scripts/mok.test.mjs && npm run test:server && npm run test:web && npm run test:desktop',
+    'node --test scripts/run-tests.test.mjs scripts/mok.test.mjs scripts/nsisInstaller.test.mjs && npm run test:server && npm run test:web && npm run test:desktop',
   );
   assert.equal(packageJson.scripts['test:desktop'], 'node scripts/run-tests.mjs desktop');
   assert.equal(packageJson.scripts['test:server'], 'node scripts/run-tests.mjs server');
