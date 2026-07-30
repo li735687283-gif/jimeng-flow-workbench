@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
-import { Film, Video, Volume2, VolumeX } from 'lucide-react'
+import { Film, Video } from 'lucide-react'
 import { createGeneration } from '../api/generations'
 import {
   compressVideoAsset,
@@ -139,7 +139,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false)
   const [countMenuOpen, setCountMenuOpen] = useState(false)
   const [sendError, setSendError] = useState('')
-  const [videoMuted, setVideoMuted] = useState(false)
   const [actionBusy, setActionBusy] = useState(false)
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
@@ -901,19 +900,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     [id, referenceAssetIds, updateNodeData],
   )
 
-  const handleToggleVideoMute = useCallback(() => {
-    setVideoMuted((muted) => {
-      const nextMuted = !muted
-      if (videoRef.current) {
-        videoRef.current.muted = nextMuted
-        if (!nextMuted) {
-          videoRef.current.volume = 1
-        }
-      }
-      return nextMuted
-    })
-  }, [])
-
   const playerSrc = firstAssetId ? getAssetFileUrl(firstAssetId) : ''
 
   // 捕获阶段拦截双击：阻止 Chromium 等视频控件的原生全屏
@@ -1003,12 +989,9 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               controlsList="nofullscreen nodownload noremoteplayback"
               disablePictureInPicture
               playsInline
-              muted={videoMuted}
               draggable={false}
               onDoubleClick={(event) => handleOpenFullSize(event)}
               onLoadedMetadata={(event) => {
-                event.currentTarget.muted = videoMuted
-                if (!videoMuted) event.currentTarget.volume = 1
                 if (
                   event.currentTarget.videoWidth > 0 &&
                   event.currentTarget.videoHeight > 0
@@ -1026,22 +1009,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
                 display: 'block',
               }}
             />
-            <button
-              type="button"
-              className={`video-sound-toggle nodrag nopan${videoMuted ? ' muted' : ''}`}
-              onClick={(event) => {
-                event.stopPropagation()
-                handleToggleVideoMute()
-              }}
-              aria-label={videoMuted ? '取消静音' : '静音'}
-              title={videoMuted ? '取消静音' : '静音'}
-            >
-              {videoMuted ? (
-                <VolumeX size={19} strokeWidth={1.9} />
-              ) : (
-                <Volume2 size={19} strokeWidth={1.9} />
-              )}
-            </button>
             {videoGenerationProgressOverlay}
           </div>
         ) : (

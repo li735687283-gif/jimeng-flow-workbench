@@ -640,3 +640,54 @@ final result: passed
 - P3: the supplied reference uses a taller viewport and permits much longer selections; the implementation intentionally replaces that duration rule with the requested hard `1–4s` range.
 
 final result: passed
+
+---
+
+# Design QA — 移除视频节点喇叭
+
+## Sources
+
+- Source visual truth: `C:/Users/Lzw/AppData/Local/Temp/codex-clipboard-d72afc85-e180-4c32-899b-7fa63447daa2.png`
+- Implementation screenshot: `.codex-logs/remove-video-speaker-implementation.png`
+- Combined comparison: `.codex-logs/remove-video-speaker-comparison.png`
+
+## Capture state
+
+- Browser: Codex in-app browser
+- CSS viewport: `1280 × 720`
+- Source pixels: `296 × 300`
+- Implementation focus capture: `351 × 208`
+- Density normalization: both images use density `1`; the combined comparison preserves each focus crop at native pixels with a `24px` separator.
+- State: an existing canvas video node is selected, the pointer is over the video preview, native playback controls remain enabled, and audio is unmuted.
+
+## Required fidelity surfaces
+
+- Fonts and typography: no typography changed; the video-node title and toolbar remain on the existing project type scale.
+- Spacing and layout rhythm: removing the absolutely positioned overlay leaves the video crop, radius and native control layout unchanged.
+- Colors and visual tokens: no palette or token changed; the dark speaker tile and its border are intentionally absent.
+- Image quality and asset fidelity: the implementation uses the existing source video without replacement, crop changes or new assets.
+- Copy and content: no product copy changed; only the redundant custom sound control was removed.
+
+## Full-view and focused comparison evidence
+
+- DOM inspection found `0` `.video-sound-toggle` elements across the rendered canvas.
+- The selected video still reports `controls: true` and `muted: false`, so playback and audio remain available through the native player.
+- The focused side-by-side comparison shows the reference's large lower-right speaker overlay and the implementation without that overlay.
+- A separate full-canvas inspection confirmed the video toolbar, node title, video preview and neighboring nodes remain intact.
+- Browser console errors: none.
+- No additional focused region was needed because the requested change is isolated to one lower-right overlay control.
+
+## Comparison history
+
+1. The source identified one unwanted P2 overlay: a second, oversized speaker control covering the lower-right video content.
+2. The custom button, dedicated mute state and unused CSS were removed; the native video controls were retained.
+3. Post-fix browser capture and DOM inspection confirmed the overlay is gone with no P0/P1/P2 regression.
+
+## Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- P3: none.
+
+final result: passed

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-test('video node playback keeps audio enabled and history inside editor panel', () => {
+test('video node playback keeps audio enabled without an extra sound overlay', () => {
   const nodeSource = readFileSync('apps/web/src/nodes/VideoNode.tsx', 'utf8')
   const panelSource = readFileSync(
     'apps/web/src/components/VideoGenerationPanel.tsx',
@@ -15,13 +15,11 @@ test('video node playback keeps audio enabled and history inside editor panel', 
   const mainVideoMarkup = nodeSource.slice(videoTagIndex, videoCloseIndex)
 
   assert.equal(/\n\s+muted\s*(\n|$)/.test(mainVideoMarkup), false)
-  assert.equal(mainVideoMarkup.includes('muted={videoMuted}'), true)
-  assert.equal(nodeSource.includes('Volume2'), true)
-  assert.equal(nodeSource.includes('VolumeX'), true)
-  assert.equal(nodeSource.includes('videoMuted'), true)
-  assert.equal(nodeSource.includes('handleToggleVideoMute'), true)
-  assert.equal(nodeSource.includes('aria-label={videoMuted ? \'取消静音\' : \'静音\'}'), true)
-  assert.equal(css.includes('.video-sound-toggle'), true)
+  assert.equal(mainVideoMarkup.includes('muted='), false)
+  assert.equal(nodeSource.includes('videoMuted'), false)
+  assert.equal(nodeSource.includes('handleToggleVideoMute'), false)
+  assert.equal(nodeSource.includes('video-sound-toggle'), false)
+  assert.equal(css.includes('.video-sound-toggle'), false)
   assert.equal(nodeSource.includes('className="video-media-stack"'), false)
   assert.equal(panelSource.includes('<VideoGenerationHistoryStrip'), true)
   assert.match(

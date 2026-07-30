@@ -1554,40 +1554,6 @@
   overflow: visible;
 }
 
-.video-sound-toggle {
-  position: absolute;
-  right: 14px;
-  bottom: 54px;
-  z-index: 8;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  color: #f2f2f2;
-  background: rgba(18, 18, 18, 0.68);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  transition:
-    color var(--motion-base) var(--ease-standard),
-    border-color var(--motion-base) var(--ease-standard),
-    background var(--motion-base) var(--ease-standard),
-    transform var(--motion-base) var(--ease-standard);
-}
-
-.video-sound-toggle:hover {
-  color: #ffffff;
-  background: rgba(34, 34, 34, 0.86);
-  border-color: rgba(255, 255, 255, 0.3);
-  transform: translateY(-1px);
-}
-
-.video-sound-toggle.muted {
-  color: #c8c8c8;
-}
-
 .image-node-container {
   position: relative;
   overflow: hidden;
