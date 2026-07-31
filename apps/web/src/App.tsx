@@ -471,6 +471,7 @@ function AppInner() {
         open={!!videoPlayer}
         src={videoPlayer?.src ?? ''}
         title={videoPlayer?.title}
+        onCaptureFrame={videoPlayer?.onCaptureFrame}
         onClose={() => {
           // 直接关全局 store，避免引用失效导致关不掉
           useVideoPlayerStore.getState().closePlayer()

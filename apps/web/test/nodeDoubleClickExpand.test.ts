@@ -30,6 +30,7 @@ test('text, image, and video nodes reuse their expanded viewers on double click'
     videoNode,
     /className="media-display-node video-media-display"[\s\S]{0,220}onDoubleClick=\{\(event\) => handleOpenFullSize\(event\)\}/,
   )
-  assert.match(videoNode, /setPlayerOpen\(true\)/)
-  assert.match(videoNode, /<VideoPlayerModal/)
+  assert.match(videoNode, /useVideoPlayerStore/)
+  assert.match(videoNode, /openVideoPlayer\(/)
+  assert.doesNotMatch(videoNode, /<VideoPlayerModal/)
 })

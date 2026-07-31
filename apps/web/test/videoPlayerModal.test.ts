@@ -2,68 +2,97 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-test('video player uses two-level open: windowed first, fullscreen only on toggle', async () => {
+test('video player opens as one shared full-viewport shell with controls outside the media', async () => {
   const modal = await readFile(
     new URL('../src/components/VideoPlayerModal.tsx', import.meta.url),
     'utf8',
   )
   const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+  const store = await readFile(
+    new URL('../src/state/videoPlayerStore.ts', import.meta.url),
+    'utf8',
+  )
   const videoNode = await readFile(
     new URL('../src/nodes/VideoNode.tsx', import.meta.url),
     'utf8',
   )
+  const actionCard = await readFile(
+    new URL('../src/components/VideoActionCard.tsx', import.meta.url),
+    'utf8',
+  )
   const css = await readFile(new URL('../src/App.css', import.meta.url), 'utf8')
 
-  // 一级：小播放器弹层
+  // 单层全视口播放器：不再先开小窗，也不调用浏览器 Fullscreen API。
   assert.match(modal, /video-player-overlay/)
   assert.match(modal, /video-player-container/)
-  assert.match(modal, /data-player-mode/)
-  assert.match(modal, /windowed/)
-  assert.match(modal, /视频小播放器/)
-  assert.match(modal, /setIsFullscreen\(false\)/)
-  // 打开时不得 requestFullscreen
-  assert.doesNotMatch(
-    modal,
-    /useEffect\(\(\) => \{[\s\S]*requestFullscreen[\s\S]*\}, \[open/,
-  )
-
-  // 二级：仅 toggleFullscreen 进入应用内全屏（不自动 requestFullscreen）
-  assert.match(modal, /toggleFullscreen/)
-  assert.match(modal, /setIsFullscreen\(\(prev\) => !prev\)/)
-  assert.match(modal, /onClick=\{toggleFullscreen\}/)
+  assert.match(modal, /data-player-mode="fullscreen"/)
+  assert.match(modal, /aria-label="视频播放器"/)
+  assert.doesNotMatch(modal, /windowed/)
+  assert.doesNotMatch(modal, /toggleFullscreen/)
+  assert.doesNotMatch(modal, /requestFullscreen/)
   assert.match(modal, /Minimize2/)
-  // 打开时强制 windowed
-  assert.match(modal, /强制非全屏打开|绝不全屏打开/)
-
-  // 关闭路径
   assert.match(modal, /closeModal/)
 
-  // 当前帧截取：播放器把正在播放的 video 元素交给画布节点处理
+  // 顶栏、视频舞台、控制栏是三个兄弟区域，不覆盖视频画面。
+  const headerIndex = modal.indexOf('className="video-player-top-bar')
+  const stageIndex = modal.indexOf('className="video-player-stage"')
+  const controlsIndex = modal.indexOf('className="video-player-controls')
+  assert.ok(headerIndex >= 0)
+  assert.ok(stageIndex > headerIndex)
+  assert.ok(controlsIndex > stageIndex)
+  assert.match(
+    css,
+    /\.video-player-container\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/s,
+  )
+  assert.match(
+    css,
+    /\.video-player-stage\s*\{[^}]*flex:\s*1\s+1\s+auto;[^}]*min-height:\s*0;/s,
+  )
+  assert.match(css, /\.video-player-top-bar\s*\{[^}]*position:\s*relative;/s)
+  assert.match(css, /\.video-player-controls\s*\{[^}]*position:\s*relative;/s)
+
+  // 当前帧截取位于底部外置控制栏，播放器把 video 元素交给画布节点处理。
   assert.match(modal, /onCaptureFrame/)
   assert.match(modal, /截取当前帧/)
   assert.match(modal, /onCaptureFrame\(video\)/)
+  assert.ok(modal.lastIndexOf('截取当前帧') > controlsIndex)
   assert.match(videoNode, /captureCurrentVideoFrame/)
   assert.match(videoNode, /createCapturedFrameNode/)
-  assert.match(videoNode, /onCaptureFrame=\{handleCaptureFrame\}/)
+  const openHandler = videoNode.slice(
+    videoNode.indexOf('const handleOpenFullSize'),
+    videoNode.indexOf('const persistPromptDraft'),
+  )
+  assert.match(openHandler, /openVideoPlayer\(/)
+  assert.match(openHandler, /handleCaptureFrame/)
+  assert.match(app, /onCaptureFrame=\{videoPlayer\?\.onCaptureFrame\}/)
+  assert.match(store, /onCaptureFrame\?/)
 
-  // 首页 + 画布共用
+  // 播放速度入口彻底移除。
+  assert.doesNotMatch(modal, /PLAYBACK_RATES|playbackRate|播放速度|video-player-speed/)
+  assert.doesNotMatch(css, /\.video-player-speed/)
+
+  // 首页 + 画布只共用 App 层的一个播放器实例。
   assert.match(app, /<VideoPlayerModal/)
-  assert.match(videoNode, /createPortal/)
-  assert.match(videoNode, /VideoPlayerModal/)
-  assert.match(videoNode, /playerOpen/)
-  assert.match(videoNode, /setPlayerOpen\(true\)/)
-  // 双击节点 + 工具条放大 都打开一级播放器
+  assert.match(videoNode, /useVideoPlayerStore/)
+  assert.match(videoNode, /openVideoPlayer/)
+  assert.doesNotMatch(videoNode, /createPortal/)
+  assert.doesNotMatch(videoNode, /<VideoPlayerModal/)
+  assert.doesNotMatch(videoNode, /playerOpen/)
+
+  // 双击节点 + 工具条放大 都直接打开全视口播放器。
   assert.match(videoNode, /onOpenFullSize=\{\(\) => handleOpenFullSize\(\)\}/)
   assert.match(videoNode, /onDoubleClick=\{\(event\) => handleOpenFullSize\(event\)\}/)
   assert.match(videoNode, /controlsList="nofullscreen/)
   assert.match(videoNode, /dblclick/)
   assert.match(videoNode, /exitNativeVideoFullscreen/)
-  // 节点侧不得直接 requestFullscreen
   assert.doesNotMatch(videoNode, /requestFullscreen/)
 
-  // CSS：约 8/9 视口的小播放器（2/3 再大 1/3）+ 全屏态
-  assert.match(css, /\.video-player-overlay/)
-  assert.match(css, /88\.889vw|8\/9/)
-  assert.match(css, /\.video-player-container\.is-fullscreen/)
-  assert.match(css, /:fullscreen/)
+  // 节点原生三点菜单隐藏；放大按钮不受其他任务 busy 状态禁用。
+  assert.match(css, /video::-webkit-media-controls-overflow-button/)
+  const maximizeLabelIndex = actionCard.indexOf('aria-label="放大查看视频"')
+  const maximizeButtonStart = actionCard.lastIndexOf('<button', maximizeLabelIndex)
+  const maximizeButtonEnd = actionCard.indexOf('</button>', maximizeLabelIndex)
+  const maximizeButton = actionCard.slice(maximizeButtonStart, maximizeButtonEnd)
+  assert.ok(maximizeLabelIndex >= 0)
+  assert.doesNotMatch(maximizeButton, /disabled=/)
 })

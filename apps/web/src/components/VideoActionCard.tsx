@@ -91,7 +91,6 @@ export function VideoActionCard({
           event.stopPropagation()
           onOpenFullSize()
         }}
-        disabled={busy}
         aria-label="放大查看视频"
         title="放大"
       >

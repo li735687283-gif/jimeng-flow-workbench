@@ -1,4 +1,3 @@
-import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { NodeProps } from '@xyflow/react'
@@ -15,12 +14,12 @@ import { VideoActionCard } from '../components/VideoActionCard'
 import { VideoCompressionOverlay } from '../components/VideoCompressionOverlay'
 import { VideoTrimOverlay } from '../components/VideoTrimOverlay'
 import { VideoGenerationPanel } from '../components/VideoGenerationPanel'
-import { VideoPlayerModal } from '../components/VideoPlayerModal'
 import { NodeWrapper } from './NodeWrapper'
 import { useCanvasStore } from '../state/canvasStore'
 import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
+import { useVideoPlayerStore } from '../state/videoPlayerStore'
 import type { BaseNodeData } from '../types/nodeTypes'
 import {
   shouldCloseFloatingEditorOnPointerDown,
@@ -102,6 +101,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
   const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const openVideoPlayer = useVideoPlayerStore((state) => state.openPlayer)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
   )
@@ -143,8 +143,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const [validationStatus, setValidationStatus] = useState<
     'idle' | 'checking' | 'success' | 'error'
   >('idle')
-  /** 画布内直接挂首页同款 VideoPlayerModal */
-  const [playerOpen, setPlayerOpen] = useState(false)
   const [compressionOpen, setCompressionOpen] = useState(false)
   const [compressionBusy, setCompressionBusy] = useState(false)
   const [compressionError, setCompressionError] = useState<string | null>(null)
@@ -437,11 +435,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     }
   }, [])
 
-  /**
-   * 打开一级小播放器（非全屏）。
-   * 入口：工具条放大、双击节点/视频。
-   * 全屏仅在播放器内再点全屏按钮。
-   */
+  /** 工具条放大或双击节点时，直接打开首页同款全视口播放器。 */
   const handleOpenFullSize = useCallback(
     (event?: {
       target?: EventTarget | null
@@ -459,12 +453,22 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         return
       }
       event?.preventDefault?.()
-      // 先干掉原生全屏，再开我们的弹层小播放器
       exitNativeVideoFullscreen()
-      if (!nodeData.assetIds[0]) return
-      setPlayerOpen(true)
+      const assetId = nodeData.assetIds[0]
+      if (!assetId) return
+      openVideoPlayer(
+        getAssetFileUrl(assetId),
+        nodeData.title || '视频预览',
+        handleCaptureFrame,
+      )
     },
-    [exitNativeVideoFullscreen, nodeData.assetIds],
+    [
+      exitNativeVideoFullscreen,
+      handleCaptureFrame,
+      nodeData.assetIds,
+      nodeData.title,
+      openVideoPlayer,
+    ],
   )
 
   const persistPromptDraft = useCallback(
@@ -911,9 +915,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       event.preventDefault()
       event.stopPropagation()
       exitNativeVideoFullscreen()
-      if (!nodeData.assetIds[0]) return
-      // 只开一级小播放器，绝不进系统全屏
-      setPlayerOpen(true)
+      handleOpenFullSize()
     }
 
     const onFullscreenChange = () => {
@@ -941,7 +943,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         exitNativeVideoFullscreen as EventListener,
       )
     }
-  }, [exitNativeVideoFullscreen, firstAssetId, nodeData.assetIds])
+  }, [exitNativeVideoFullscreen, firstAssetId, handleOpenFullSize])
 
   return (
     <>
@@ -986,7 +988,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               src={playerSrc}
               controls
               // 去掉原生全屏入口，避免与双击/工具条逻辑冲突
-              controlsList="nofullscreen nodownload noremoteplayback"
+              controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
               disablePictureInPicture
               playsInline
               draggable={false}
@@ -1114,19 +1116,6 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         void handleTrimVideo(startSeconds, durationSeconds)
       }
     />
-    {/* 首页同一个 VideoPlayerModal，直接挂到 body */}
-    {typeof document !== 'undefined'
-      ? createPortal(
-          <VideoPlayerModal
-            open={playerOpen && Boolean(playerSrc)}
-            src={playerSrc}
-            title={nodeData.title || '视频预览'}
-            onClose={() => setPlayerOpen(false)}
-            onCaptureFrame={handleCaptureFrame}
-          />,
-          document.body,
-        )
-      : null}
     </>
   )
 }
