@@ -20,6 +20,7 @@ import { getCurrentFlowId, useFlowStore } from '../state/flowStore'
 import { IDLE_CALL_STATE, useGenerateStore } from '../state/generateStore'
 import { useSettingsStore } from '../state/settingsStore'
 import { useVideoPlayerStore } from '../state/videoPlayerStore'
+import { useAssetStore } from '../state/assetStore'
 import type { BaseNodeData } from '../types/nodeTypes'
 import {
   shouldCloseFloatingEditorOnPointerDown,
@@ -27,6 +28,7 @@ import {
 } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
 import { mergeReferenceAssetIds } from '../utils/assetLibrarySelection'
+import { getAssetDisplayName } from '../utils/assetDisplayName'
 import { subscribeGenerationWithFallback } from '../utils/generationStatusSubscription'
 import {
   getImageGenerationInputImages,
@@ -106,6 +108,8 @@ export function VideoNode({ id, data, selected }: NodeProps) {
     (state) => state.openAssetReferencePicker,
   )
   const openVideoPlayer = useVideoPlayerStore((state) => state.openPlayer)
+  const assetMetadata = useAssetStore((state) => state.assets)
+  const fetchAsset = useAssetStore((state) => state.fetchAsset)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
   )
@@ -645,13 +649,22 @@ export function VideoNode({ id, data, selected }: NodeProps) {
       upstreamImageAssetIds,
     ],
   )
+  useEffect(() => {
+    const missingAssetIds = referenceAssetIds.filter(
+      (assetId) => !assetMetadata[assetId],
+    )
+    if (missingAssetIds.length === 0) return
+    void Promise.all(missingAssetIds.map((assetId) => fetchAsset(assetId)))
+  }, [assetMetadata, fetchAsset, referenceAssetIds])
+
   const mentionImages = useMemo(
     () =>
       referenceAssetIds.map((assetId, index) => ({
         assetId,
         label: `图片${index + 1}`,
+        displayName: getAssetDisplayName(assetId, assetMetadata[assetId]?.path),
       })),
-    [referenceAssetIds],
+    [assetMetadata, referenceAssetIds],
   )
   /** 上游文本节点：可作为视频提示词，无需在视频节点重复填写 */
   const upstreamTextRefs = useMemo(

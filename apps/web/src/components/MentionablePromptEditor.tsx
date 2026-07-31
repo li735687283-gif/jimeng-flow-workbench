@@ -11,11 +11,12 @@ import {
   type WheelEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { getAssetFileUrl } from '../api/assets'
+import { getAssetThumbUrl } from '../api/assets'
 
 export interface MentionImage {
   assetId: string
   label: string
+  displayName?: string
 }
 
 interface MentionablePromptEditorProps {
@@ -30,7 +31,16 @@ interface ActiveMention {
   start: number
 }
 
+interface PreviewPosition {
+  left: number
+  top: number
+}
+
 const MENTION_REGEX = /@([^@\s]*)$/
+const MENTION_PREVIEW_WIDTH = 240
+const MENTION_PREVIEW_HEIGHT = 190
+const MENTION_PREVIEW_GAP = 10
+const MENTION_PREVIEW_MARGIN = 12
 
 function detectMention(value: string, caret: number): ActiveMention | null {
   const upToCaret = value.slice(0, caret)
@@ -43,8 +53,82 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function renderHighlightedText(text: string, regex: RegExp | null): ReactNode {
+function MentionToken({ image }: { image: MentionImage }) {
+  const tokenRef = useRef<HTMLSpanElement | null>(null)
+  const [previewPosition, setPreviewPosition] = useState<PreviewPosition | null>(
+    null,
+  )
+  const displayName = image.displayName?.trim() || image.label
+
+  const showPreview = useCallback(() => {
+    const token = tokenRef.current
+    if (!token || typeof window === 'undefined') return
+    const rect = token.getBoundingClientRect()
+    const left = Math.min(
+      Math.max(MENTION_PREVIEW_MARGIN, rect.left),
+      Math.max(
+        MENTION_PREVIEW_MARGIN,
+        window.innerWidth - MENTION_PREVIEW_WIDTH - MENTION_PREVIEW_MARGIN,
+      ),
+    )
+    const roomBelow =
+      rect.bottom + MENTION_PREVIEW_GAP + MENTION_PREVIEW_HEIGHT <=
+      window.innerHeight - MENTION_PREVIEW_MARGIN
+    const top = roomBelow
+      ? rect.bottom + MENTION_PREVIEW_GAP
+      : Math.max(
+          MENTION_PREVIEW_MARGIN,
+          rect.top - MENTION_PREVIEW_HEIGHT - MENTION_PREVIEW_GAP,
+        )
+    setPreviewPosition({ left, top })
+  }, [])
+
+  return (
+    <span
+      ref={tokenRef}
+      className="mention-token"
+      title={displayName}
+      onMouseEnter={showPreview}
+      onMouseLeave={() => setPreviewPosition(null)}
+      onClick={showPreview}
+    >
+      <img
+        src={getAssetThumbUrl(image.assetId, 320)}
+        alt=""
+        className="mention-token-thumb"
+        draggable={false}
+      />
+      <span className="mention-token-label">{displayName}</span>
+      {previewPosition && typeof document !== 'undefined'
+        ? createPortal(
+            <span
+              className="mention-token-preview"
+              style={previewPosition}
+              aria-hidden="true"
+            >
+              <img
+                src={getAssetThumbUrl(image.assetId, 640)}
+                alt=""
+                draggable={false}
+              />
+              <span>{displayName}</span>
+            </span>,
+            document.body,
+          )
+        : null}
+    </span>
+  )
+}
+
+function renderHighlightedText(
+  text: string,
+  regex: RegExp | null,
+  mentionImages: MentionImage[],
+): ReactNode {
   if (!regex || !text) return text
+  const imagesByLabel = new Map(
+    mentionImages.map((image) => [image.label, image]),
+  )
   const parts: ReactNode[] = []
   let lastIndex = 0
   let match
@@ -54,10 +138,15 @@ function renderHighlightedText(text: string, regex: RegExp | null): ReactNode {
     if (match.index > lastIndex) {
       parts.push(text.slice(lastIndex, match.index))
     }
+    const image = imagesByLabel.get(match[0].slice(1))
     parts.push(
-      <span key={`m-${key++}`} className="mention-token">
-        {match[0]}
-      </span>,
+      image ? (
+        <MentionToken key={`m-${key++}`} image={image} />
+      ) : (
+        <span key={`m-${key++}`} className="mention-token mention-token-text">
+          {match[0]}
+        </span>
+      ),
     )
     lastIndex = match.index + match[0].length
   }
@@ -97,6 +186,7 @@ export function MentionablePromptEditor({
     return mentionImages.filter(
       (img) =>
         img.label.toLowerCase().includes(query) ||
+        img.displayName?.toLowerCase().includes(query) ||
         img.assetId.toLowerCase().includes(query),
     )
   }, [activeMention, mentionImages])
@@ -256,7 +346,7 @@ export function MentionablePromptEditor({
         className={`prompt-editor-highlight${isExpanded ? ' prompt-editor-highlight-modal' : ''}`}
         aria-hidden="true"
       >
-        {renderHighlightedText(value, mentionHighlightRegex) || null}
+        {renderHighlightedText(value, mentionHighlightRegex, mentionImages) || null}
       </div>
     )
   }
@@ -278,12 +368,14 @@ export function MentionablePromptEditor({
               onPointerEnter={() => setHighlightedIndex(index)}
             >
               <img
-                src={getAssetFileUrl(image.assetId)}
-                alt={image.label}
+                src={getAssetThumbUrl(image.assetId, 320)}
+                alt={image.displayName || image.label}
                 className="mention-popup-thumb"
                 draggable={false}
               />
-              <span className="mention-popup-name">{image.label}</span>
+              <span className="mention-popup-name">
+                {image.displayName || image.label}
+              </span>
             </button>
           ))}
         </div>

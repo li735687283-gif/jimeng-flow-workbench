@@ -691,3 +691,56 @@ final result: passed
 - P3: none.
 
 final result: passed
+
+---
+
+# Video @ Image Reference Design QA
+
+- Source visual truth: `C:\Users\Lzw\AppData\Local\Temp\codex-clipboard-2ea2f351-aa33-4638-902a-7b4d29da8df9.png`
+- Implementation screenshot: `C:\Users\Lzw\AppData\Local\Temp\mok-video-at-reference-final-ui.jpg`
+- Hover preview screenshot: `C:\Users\Lzw\AppData\Local\Temp\mok-video-at-reference-hover.jpg`
+- Combined comparison: `C:\Users\Lzw\AppData\Local\Temp\mok-video-at-reference-comparison.png`
+- Browser viewport: 1280 × 1100 CSS px
+- Device pixel ratio: 1.5
+- Source pixels: 198 × 57
+- Implementation capture pixels: 1215 × 1100
+- State: video node prompt editor open, one image referenced, `@图片1` rendered with following prompt text; hover/click preview open in the interaction capture
+- Density normalization: focused source was fitted to 260 × 75 and the implementation crop to 410 × 75 on one 686 × 75 comparison canvas. No device frame or browser chrome was compared.
+
+## Full-view comparison evidence
+
+The implementation keeps the existing MO.K dark node editor and places the image-reference chip inside the prompt text flow. The chip remains legible inside the floating video editor and the preview is portaled above the canvas, so neither the node nor editor panel clips it.
+
+## Focused region comparison evidence
+
+The combined comparison verifies the reference surfaces at readable size: a dark rounded chip, square image thumbnail, bold truncated filename, and following prompt copy on the same line. The implementation uses the actual asset filename instead of a generic `图片1` display label.
+
+## Findings
+
+- No remaining P0/P1/P2 mismatch.
+- Fonts and typography: 16 px semibold filename and ellipsis now match the reference hierarchy; following prompt text retains the editor typography.
+- Spacing and layout rhythm: 36 px chip height, 28 px thumbnail, 9 px radius, and compact inline spacing match the reference density.
+- Colors and visual tokens: chip, hover, border, preview, and shadow use the existing MO.K theme tokens.
+- Image quality and asset fidelity: both the chip and hover preview use real asset thumbnails (`w=320` and `w=640`); no placeholder or recreated image is used.
+- Copy and content: the visible chip uses the real asset filename while the stored prompt keeps the stable `@图片1` token for backward compatibility.
+
+## Comparison history
+
+1. Initial comparison found a P2 density mismatch: the chip was too short and the filename too small in the real canvas.
+2. Fixed the chip from 32 px to 36 px, thumbnail from 24 px to 28 px, filename from 14 px to 16 px, and increased the theme-aware surface contrast.
+3. Post-fix comparison shows no actionable P0/P1/P2 mismatch.
+
+## Primary interactions tested
+
+- Type `@` and open the upstream-image menu.
+- Select the referenced image and render the inline chip.
+- Preserve following prompt text on the same line.
+- Open the larger thumbnail preview without node or editor clipping.
+- Reload the flow and restore the chip from persisted prompt/reference data.
+- Browser console errors checked: none.
+
+## Follow-up polish
+
+- P3: the reference screenshot uses an `IMG_…` filename while the test asset uses an `asset_…` filename. This is real content variance, not visual drift; both truncate with the same pattern.
+
+final result: passed

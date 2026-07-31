@@ -16,7 +16,7 @@ test('MentionablePromptEditor supports @ mention with upstream images', () => {
   assert.match(source, /MENTION_REGEX/)
   assert.match(source, /@[^@\\s]*\$/)
   assert.match(source, /handleSelect/)
-  assert.match(source, /getAssetFileUrl/)
+  assert.match(source, /getAssetThumbUrl/)
   assert.match(source, /mention-popup/)
   assert.match(source, /mention-popup-thumb/)
   assert.match(source, /mention-popup-name/)
@@ -40,6 +40,9 @@ test('MentionablePromptEditor supports @ mention with upstream images', () => {
   assert.match(css, /\.mention-popup-item/)
   assert.match(css, /\.mention-popup-thumb/)
   assert.match(css, /\.mention-token/)
+  assert.match(css, /\.mention-token-thumb/)
+  assert.match(css, /\.mention-token-label/)
+  assert.match(css, /\.mention-token-preview/)
   assert.match(css, /\.prompt-editor-highlight\b/)
   assert.match(css, /\.mention-textarea/)
   assert.match(css, /-webkit-text-fill-color:\s*transparent/)
@@ -75,6 +78,28 @@ test('MentionablePromptEditor only mounts the duplicate text layer for an actual
   assert.equal(mentionHtml.includes('mention-token'), true)
 })
 
+test('MentionablePromptEditor renders a referenced image as a thumbnail chip with hover preview', async () => {
+  const { MentionablePromptEditor } = await import(
+    '../src/components/MentionablePromptEditor'
+  )
+  const html = renderToStaticMarkup(
+    React.createElement(MentionablePromptEditor, {
+      disabled: false,
+      value: '@图片1 无线画布节点编辑器',
+      mentionImages: [{
+        assetId: 'asset_1',
+        label: '图片1',
+        displayName: 'IMG_GEN_20260722.png',
+      }],
+      onChange: () => undefined,
+    }),
+  )
+
+  assert.match(html, /mention-token-thumb/)
+  assert.match(html, /mention-token-label/)
+  assert.match(html, /IMG_GEN_20260722\.png/)
+  assert.match(html, /\/api\/assets\/asset_1\/thumb\?w=320/)
+})
 test('VideoGenerationPanel passes mentionImages to the editor', () => {
   const source = readFileSync('apps/web/src/components/VideoGenerationPanel.tsx', 'utf8')
 
@@ -88,5 +113,8 @@ test('VideoNode builds mentionImages from referenceAssetIds', () => {
 
   assert.match(source, /mentionImages/)
   assert.match(source, /图片\$\{index \+ 1\}/)
+  assert.match(source, /getAssetDisplayName/)
+  assert.match(source, /displayName/)
+  assert.match(source, /useAssetStore/)
   assert.match(source, /mentionImages=\{mentionImages\}/)
 })

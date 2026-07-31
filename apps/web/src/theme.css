@@ -906,7 +906,21 @@ textarea::placeholder {
 }
 
 .mention-token {
-  color: var(--theme-accent) !important;
+  color: var(--theme-heading) !important;
+  background: color-mix(in srgb, var(--theme-control) 94%, var(--theme-heading) 6%) !important;
+  border-color: var(--theme-border) !important;
+}
+
+.mention-token:hover {
+  background: color-mix(in srgb, var(--theme-control) 88%, var(--theme-heading) 12%) !important;
+  border-color: var(--theme-border-strong) !important;
+}
+
+.mention-token-preview {
+  color: var(--theme-heading) !important;
+  background: var(--theme-menu) !important;
+  border-color: var(--theme-border) !important;
+  box-shadow: var(--theme-panel-shadow) !important;
 }
 
 .image-model-menu,
