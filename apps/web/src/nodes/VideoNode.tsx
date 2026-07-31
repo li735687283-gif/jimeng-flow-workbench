@@ -509,10 +509,12 @@ export function VideoNode({ id, data, selected }: NodeProps) {
         !!target.closest('.image-editor-panel') ||
         !!target.closest('.video-generation-panel') ||
         !!target.closest('.video-player-overlay') ||
-        !!target.closest('.prompt-editor-modal')
+        !!target.closest('.prompt-editor-modal') ||
+        !!target.closest('.viewport-menu-layer')
       const isInsideMenuRoot =
         !!target.closest('.image-editor-menu-anchor') ||
-        !!target.closest('.prompt-template-library')
+        !!target.closest('.prompt-template-library') ||
+        !!target.closest('.viewport-menu-layer')
       if (
         shouldCloseFloatingMenuOnPointerDown({
           button: event.button,

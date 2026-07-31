@@ -6,7 +6,8 @@ import {
   Slice,
   Sparkles,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { ViewportMenuPortal } from './menus/ViewportMenuPortal'
 
 type ValidationStatus = 'idle' | 'checking' | 'success' | 'error'
 type GridGeneratePreset = '2x2' | '3x3' | '4x4'
@@ -49,37 +50,12 @@ export function ImageActionCard({
   onGridCrop,
 }: ImageActionCardProps) {
   const [gridMenuOpen, setGridMenuOpen] = useState(false)
-  const cardRef = useRef<HTMLDivElement | null>(null)
-
-  // 菜单统一支持点外部关闭、Escape 关闭
-  useEffect(() => {
-    if (!gridMenuOpen) return
-
-    const handlePointerDown = (event: globalThis.PointerEvent) => {
-      const card = cardRef.current
-      if (card && event.target instanceof Node && card.contains(event.target)) {
-        return
-      }
-      setGridMenuOpen(false)
-    }
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setGridMenuOpen(false)
-      }
-    }
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [gridMenuOpen])
+  const gridMenuAnchorRef = useRef<HTMLDivElement | null>(null)
 
   const gridActionsDisabled = busy || gridBusy || gridDisabled
 
   return (
     <div
-      ref={cardRef}
       className={`image-action-card nodrag nopan${closing ? ' closing' : ''}`}
       role="toolbar"
       aria-label="图片工具"
@@ -97,7 +73,7 @@ export function ImageActionCard({
         <span>高清</span>
       </button>
       {onGridGenerate ? (
-        <div className="image-upscale-control">
+        <div ref={gridMenuAnchorRef} className="image-upscale-control">
           <button
             type="button"
             className="image-action-button icon-only"
@@ -112,12 +88,13 @@ export function ImageActionCard({
           >
             <Grid3x3 size={17} strokeWidth={1.7} />
           </button>
-          {gridMenuOpen ? (
-            <div
-              className="image-upscale-menu"
-              role="menu"
-              aria-label="宫格生成规格"
-            >
+          <ViewportMenuPortal
+            anchorRef={gridMenuAnchorRef}
+            open={gridMenuOpen}
+            onClose={() => setGridMenuOpen(false)}
+            className="image-upscale-menu"
+            ariaLabel="宫格生成规格"
+          >
               <div className="image-upscale-options">
                 {GRID_GENERATE_MENU_OPTIONS.map((grid) => (
                   <button
@@ -135,8 +112,7 @@ export function ImageActionCard({
                   </button>
                 ))}
               </div>
-            </div>
-          ) : null}
+          </ViewportMenuPortal>
         </div>
       ) : null}
       {onGridCrop ? (

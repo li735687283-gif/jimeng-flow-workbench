@@ -9208,6 +9208,23 @@
   overscroll-behavior: contain;
 }
 
+.viewport-menu-layer.image-model-menu,
+.viewport-menu-layer.image-quality-menu,
+.viewport-menu-layer.image-count-menu {
+  position: fixed;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.viewport-menu-layer.image-upscale-menu,
+.viewport-menu-layer.text-action-color-menu {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  transform: none;
+  animation: image-menu-enter 180ms var(--ease-out-soft) both;
+}
+
 .secondary-menu-options {
   position: fixed;
   width: max-content;

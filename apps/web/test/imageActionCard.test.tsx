@@ -152,7 +152,8 @@ test('image action card wires grid callbacks with 3x3 default first', async () =
   // 点选项即触发回调并关闭菜单
   assert.match(source, /setGridMenuOpen\(false\)\s+onGridGenerate\(grid\)/)
   assert.match(source, /onClick=\{onGridCrop\}/)
-  // 菜单支持点外部关闭与 Escape 关闭
-  assert.match(source, /addEventListener\('pointerdown', handlePointerDown\)/)
-  assert.match(source, /event\.key === 'Escape'/)
+  // 统一视口菜单负责点外部关闭、Escape 与上下碰撞检测
+  assert.match(source, /<ViewportMenuPortal/)
+  assert.match(source, /onClose=\{\(\) => setGridMenuOpen\(false\)\}/)
+  assert.doesNotMatch(source, /addEventListener\('pointerdown'/)
 })

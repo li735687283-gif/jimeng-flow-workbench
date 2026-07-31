@@ -92,6 +92,7 @@ export function ViewportMenuPortal({
         left: next.left,
         minWidth: Math.max(anchorRect.width, minWidth),
         maxHeight: next.maxHeight,
+        overflowY: menu.scrollHeight > next.maxHeight ? 'auto' : undefined,
         visibility: 'visible',
       })
     }

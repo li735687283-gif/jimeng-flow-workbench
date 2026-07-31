@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Check,
   Copy,
   Maximize2,
   Palette,
 } from 'lucide-react'
+
+import { ViewportMenuPortal } from './menus/ViewportMenuPortal'
 
 import {
   resolveTextFrameColor,
@@ -31,6 +33,7 @@ export function TextActionCard({
 }: TextActionCardProps) {
   const resolvedFrameColor = resolveTextFrameColor(frameColor)
   const [colorMenuOpen, setColorMenuOpen] = useState(false)
+  const colorMenuAnchorRef = useRef<HTMLDivElement | null>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -57,7 +60,10 @@ export function TextActionCard({
       aria-label="文本节点工具"
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="image-upscale-control text-action-color-control">
+      <div
+        ref={colorMenuAnchorRef}
+        className="image-upscale-control text-action-color-control"
+      >
         <button
           type="button"
           className="image-action-button"
@@ -75,12 +81,13 @@ export function TextActionCard({
             aria-hidden="true"
           />
         </button>
-        {colorMenuOpen ? (
-          <div
-            className="text-action-color-menu"
-            role="menu"
-            aria-label="选择文本框颜色"
-          >
+        <ViewportMenuPortal
+          anchorRef={colorMenuAnchorRef}
+          open={colorMenuOpen}
+          onClose={() => setColorMenuOpen(false)}
+          className="text-action-color-menu"
+          ariaLabel="选择文本框颜色"
+        >
             {TEXT_FRAME_COLOR_PRESETS.map((preset) => {
               const active = preset.color === resolvedFrameColor
               return (
@@ -105,8 +112,7 @@ export function TextActionCard({
                 </button>
               )
             })}
-          </div>
-        ) : null}
+        </ViewportMenuPortal>
       </div>
 
       <button

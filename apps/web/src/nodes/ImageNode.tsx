@@ -62,6 +62,7 @@ import { ImageFullscreenViewer } from '../components/ImageFullscreenViewer'
 import { PromptEditor } from '../components/PromptEditor'
 import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
+import { ViewportMenuPortal } from '../components/menus/ViewportMenuPortal'
 import { useCanvasStore } from '../state/canvasStore'
 import { useFlowStore } from '../state/flowStore'
 import { useAssetStore } from '../state/assetStore'
@@ -1113,10 +1114,12 @@ export function ImageNode({ id, data, selected }: NodeProps) {
         !!target.closest('.image-editor-panel') ||
         !!target.closest('.prompt-template-library') ||
         !!target.closest('.image-fullscreen-viewer') ||
-        !!target.closest('.prompt-editor-modal')
+        !!target.closest('.prompt-editor-modal') ||
+        !!target.closest('.viewport-menu-layer')
       const isInsideMenuRoot =
         !!target.closest('.image-editor-menu-anchor') ||
-        !!target.closest('.prompt-template-library')
+        !!target.closest('.prompt-template-library') ||
+        !!target.closest('.viewport-menu-layer')
       if (
         shouldCloseFloatingMenuOnPointerDown({
           button: event.button,
@@ -1811,8 +1814,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   <span>{selectedModel?.label || '未选择图片模型'}</span>
                   <ChevronDown size={16} strokeWidth={1.8} />
                 </button>
-                {modelMenuOpen && (
-                  <div className="image-model-menu" style={modelMenuStyle}>
+                <ViewportMenuPortal
+                  anchorRef={modelMenuButtonRef}
+                  open={modelMenuOpen}
+                  onClose={() => setModelMenuOpen(false)}
+                  className="image-model-menu"
+                  style={modelMenuStyle}
+                >
                     {modelOptions.map((model) => (
                       <button
                         type="button"
@@ -1838,8 +1846,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         ) : null}
                       </button>
                     ))}
-                  </div>
-                )}
+                </ViewportMenuPortal>
               </div>
 
               <div
@@ -1856,8 +1863,12 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   <span>{`${ratio} · ${quality} · ${resolution}`}</span>
                   <ChevronDown size={15} strokeWidth={1.8} />
                 </button>
-                {qualityMenuOpen && (
-                  <div className="image-quality-menu">
+                <ViewportMenuPortal
+                  anchorRef={qualityMenuButtonRef}
+                  open={qualityMenuOpen}
+                  onClose={() => setQualityMenuOpen(false)}
+                  className="image-quality-menu"
+                >
                     <div className="image-quality-section">
                       <span>画质</span>
                       <div className="image-quality-row">
@@ -1904,8 +1915,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         ))}
                       </div>
                     </div>
-                  </div>
-                )}
+                </ViewportMenuPortal>
               </div>
 
               <div
@@ -1923,8 +1933,13 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                   <span>{selectedCount}张</span>
                   {!isSingleImageModel ? <ChevronDown size={15} strokeWidth={1.8} /> : null}
                 </button>
-                {countMenuOpen && !isSingleImageModel && (
-                  <div className="image-count-menu">
+                <ViewportMenuPortal
+                  anchorRef={countMenuButtonRef}
+                  open={countMenuOpen && !isSingleImageModel}
+                  onClose={() => setCountMenuOpen(false)}
+                  align="end"
+                  className="image-count-menu"
+                >
                     {COUNT_OPTIONS.map((item) => (
                       <button
                         type="button"
@@ -1939,8 +1954,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
                         {item === count ? <Check size={15} strokeWidth={1.8} /> : null}
                       </button>
                     ))}
-                  </div>
-                )}
+                </ViewportMenuPortal>
               </div>
               <div
                 className={`image-editor-menu-anchor ${

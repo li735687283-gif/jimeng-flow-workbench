@@ -31,6 +31,7 @@ import type { BaseNodeData } from '../types/nodeTypes'
 import { PromptEditor } from '../components/PromptEditor'
 import { PromptTemplateLibrary } from '../components/PromptTemplateLibrary'
 import { ReferenceAssetStrip } from '../components/ReferenceAssetStrip'
+import { ViewportMenuPortal } from '../components/menus/ViewportMenuPortal'
 import { TextActionCard } from '../components/TextActionCard'
 import { resolveTextFrameColor } from '../utils/textFrameColors'
 import { runTextNode } from '../api/llm'
@@ -519,10 +520,12 @@ export function TextNode({ id, data, selected, width, height }: NodeProps) {
         !!target.closest(`[data-flow-node-id="${id}"]`) ||
         !!target.closest('.image-editor-panel') ||
         !!target.closest('.prompt-editor-modal') ||
+        !!target.closest('.viewport-menu-layer') ||
         !!target.closest('.prompt-template-library')
       const isInsideMenuRoot =
         !!target.closest('.image-editor-menu-anchor') ||
-        !!target.closest('.prompt-template-library')
+        !!target.closest('.prompt-template-library') ||
+        !!target.closest('.viewport-menu-layer')
 
       if (
         shouldCloseFloatingMenuOnPointerDown({
@@ -1059,8 +1062,13 @@ export function TextNode({ id, data, selected, width, height }: NodeProps) {
                   <span>{selectedModel?.label || '选择模型'}</span>
                   <ChevronDown size={16} strokeWidth={1.8} />
                 </button>
-                {modelMenuOpen && (
-                  <div className="image-model-menu" style={modelMenuStyle}>
+                <ViewportMenuPortal
+                  anchorRef={modelMenuButtonRef}
+                  open={modelMenuOpen}
+                  onClose={() => setModelMenuOpen(false)}
+                  className="image-model-menu"
+                  style={modelMenuStyle}
+                >
                     {modelOptions.length === 0 ? (
                       <div className="image-model-empty">
                         暂无可用模型，请先在设置中配置 LLM
@@ -1092,8 +1100,7 @@ export function TextNode({ id, data, selected, width, height }: NodeProps) {
                         </button>
                       ))
                     )}
-                  </div>
-                )}
+                </ViewportMenuPortal>
               </div>
 
               {/* 提示词模板库入口（与图片节点同构：LayoutTemplate 图标按钮） */}

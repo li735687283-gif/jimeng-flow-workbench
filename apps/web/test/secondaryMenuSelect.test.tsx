@@ -93,3 +93,41 @@ test('point-anchored canvas menus reuse viewport collision and Escape handling',
   assert.match(portalSource, /event.key === 'Escape'/)
   assert.match(portalSource, /maxHeight: next.maxHeight/)
 })
+
+test('all node editor dropdowns use viewport collision placement instead of node-local menus', () => {
+  const videoPanel = readFileSync(
+    'apps/web/src/components/VideoGenerationPanel.tsx',
+    'utf8',
+  )
+  const imageNode = readFileSync(
+    'apps/web/src/nodes/ImageNode.tsx',
+    'utf8',
+  )
+  const textNode = readFileSync(
+    'apps/web/src/nodes/TextNode.tsx',
+    'utf8',
+  )
+  const videoNode = readFileSync(
+    'apps/web/src/nodes/VideoNode.tsx',
+    'utf8',
+  )
+
+  const imageActionCard = readFileSync(
+    'apps/web/src/components/ImageActionCard.tsx',
+    'utf8',
+  )
+  const textActionCard = readFileSync(
+    'apps/web/src/components/TextActionCard.tsx',
+    'utf8',
+  )
+
+  assert.equal((videoPanel.match(/<ViewportMenuPortal/g) ?? []).length, 3)
+  assert.equal((imageNode.match(/<ViewportMenuPortal/g) ?? []).length, 3)
+  assert.equal((textNode.match(/<ViewportMenuPortal/g) ?? []).length, 1)
+  assert.equal((imageActionCard.match(/<ViewportMenuPortal/g) ?? []).length, 1)
+  assert.equal((textActionCard.match(/<ViewportMenuPortal/g) ?? []).length, 1)
+
+  for (const source of [imageNode, textNode, videoNode]) {
+    assert.match(source, /target\.closest\('\.viewport-menu-layer'\)/)
+  }
+})

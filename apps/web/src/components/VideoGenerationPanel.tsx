@@ -6,7 +6,7 @@ import {
   Film,
   Sparkles,
 } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import { useRef, type CSSProperties } from 'react'
 import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_COUNTS,
@@ -22,6 +22,7 @@ import type { VideoModelOption } from '../utils/videoModels'
 import type { VideoGenerationHistoryItem } from '../utils/videoGenerationHistory'
 import { MentionablePromptEditor, type MentionImage } from './MentionablePromptEditor'
 import { ReferenceAssetStrip } from './ReferenceAssetStrip'
+import { ViewportMenuPortal } from './menus/ViewportMenuPortal'
 import { VideoGenerationHistoryStrip } from './VideoGenerationHistoryStrip'
 
 interface VideoGenerationPanelProps {
@@ -106,6 +107,9 @@ export function VideoGenerationPanel({
   onSelectHistory,
   onSend,
 }: VideoGenerationPanelProps) {
+  const modelMenuAnchorRef = useRef<HTMLDivElement>(null)
+  const qualityMenuAnchorRef = useRef<HTMLDivElement>(null)
+  const countMenuAnchorRef = useRef<HTMLDivElement>(null)
   const selectedModel =
     modelOptions.find((model) => model.id === selectedModelId) ??
     modelOptions[0]
@@ -165,7 +169,7 @@ export function VideoGenerationPanel({
       />
 
       <div className="image-editor-bottom">
-        <div className="image-editor-menu-anchor">
+        <div ref={modelMenuAnchorRef} className="image-editor-menu-anchor">
           <button
             type="button"
             className="image-editor-model-button"
@@ -176,8 +180,12 @@ export function VideoGenerationPanel({
             <span>{selectedModel?.label ?? '选择视频模型'}</span>
             <ChevronDown size={16} strokeWidth={1.8} />
           </button>
-          {modelMenuOpen ? (
-            <div className="image-model-menu">
+          <ViewportMenuPortal
+            anchorRef={modelMenuAnchorRef}
+            open={modelMenuOpen}
+            onClose={onModelToggle}
+            className="image-model-menu"
+          >
               {modelOptions.map((model) => (
                 <button
                   type="button"
@@ -198,11 +206,10 @@ export function VideoGenerationPanel({
                   ) : null}
                 </button>
               ))}
-            </div>
-          ) : null}
+          </ViewportMenuPortal>
         </div>
 
-        <div className="image-editor-menu-anchor">
+        <div ref={qualityMenuAnchorRef} className="image-editor-menu-anchor">
           <button
             type="button"
             className="image-editor-pill"
@@ -212,8 +219,12 @@ export function VideoGenerationPanel({
             <span>{`${aspectRatio} · ${resolution} · ${durationSeconds}s`}</span>
             <ChevronDown size={15} strokeWidth={1.8} />
           </button>
-          {qualityMenuOpen ? (
-            <div className="image-quality-menu video-quality-menu">
+          <ViewportMenuPortal
+            anchorRef={qualityMenuAnchorRef}
+            open={qualityMenuOpen}
+            onClose={onQualityToggle}
+            className="image-quality-menu video-quality-menu"
+          >
               <div className="image-quality-section">
                 <span>比例</span>
                 <div className="image-ratio-grid video-ratio-grid">
@@ -287,11 +298,13 @@ export function VideoGenerationPanel({
                   </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+          </ViewportMenuPortal>
         </div>
 
-        <div className="image-editor-menu-anchor image-editor-menu-anchor-end">
+        <div
+          ref={countMenuAnchorRef}
+          className="image-editor-menu-anchor image-editor-menu-anchor-end"
+        >
           <button
             type="button"
             className="image-editor-pill image-editor-count-button"
@@ -301,8 +314,13 @@ export function VideoGenerationPanel({
             <span>{count}条</span>
             <ChevronDown size={15} strokeWidth={1.8} />
           </button>
-          {countMenuOpen ? (
-            <div className="image-count-menu">
+          <ViewportMenuPortal
+            anchorRef={countMenuAnchorRef}
+            open={countMenuOpen}
+            onClose={onCountToggle}
+            align="end"
+            className="image-count-menu"
+          >
               {VIDEO_COUNTS.map((item) => (
                 <button
                   type="button"
@@ -314,8 +332,7 @@ export function VideoGenerationPanel({
                   {item === count ? <Check size={15} strokeWidth={1.8} /> : null}
                 </button>
               ))}
-            </div>
-          ) : null}
+          </ViewportMenuPortal>
         </div>
 
         <button
