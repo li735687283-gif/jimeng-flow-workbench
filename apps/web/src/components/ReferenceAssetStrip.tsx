@@ -1,19 +1,21 @@
-import { X } from 'lucide-react'
-import { getAssetFileUrl } from '../api/assets'
+import { Plus, X } from 'lucide-react'
+import { getAssetThumbUrl } from '../api/assets'
 
 interface ReferenceAssetStripProps {
   assetIds: string[]
   onRemove?: (assetId: string) => void
+  onAdd?: () => void
 }
 
 export function ReferenceAssetStrip({
   assetIds,
   onRemove,
+  onAdd,
 }: ReferenceAssetStripProps) {
   const references = Array.from(
     new Set(assetIds.map((assetId) => assetId.trim()).filter(Boolean)),
   )
-  if (references.length === 0) return null
+  if (references.length === 0 && !onAdd) return null
 
   return (
     <div
@@ -21,16 +23,17 @@ export function ReferenceAssetStrip({
       aria-label={`已引用 ${references.length} 张图片`}
     >
       {references.map((assetId, index) => {
-        const assetUrl = getAssetFileUrl(assetId)
+        const thumbnailUrl = getAssetThumbUrl(assetId, 320)
+        const previewUrl = getAssetThumbUrl(assetId, 640)
         return (
           <span
             key={assetId}
             className="reference-asset-thumb"
             title={`引用图 ${index + 1}`}
           >
-            <img src={assetUrl} alt="" draggable={false} />
+            <img src={thumbnailUrl} alt="" draggable={false} loading="lazy" />
             <span className="reference-asset-preview" aria-hidden="true">
-              <img src={assetUrl} alt="" draggable={false} />
+              <img src={previewUrl} alt="" draggable={false} loading="lazy" />
             </span>
             {onRemove ? (
               <button
@@ -50,6 +53,21 @@ export function ReferenceAssetStrip({
           </span>
         )
       })}
+      {onAdd ? (
+        <button
+          type="button"
+          className="reference-asset-add"
+          aria-label="从素材库添加参考图片"
+          title="从素材库添加参考图片"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            onAdd()
+          }}
+        >
+          <Plus size={24} strokeWidth={1.7} aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   )
 }

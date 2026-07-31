@@ -69,7 +69,7 @@ test('asset library modal renders real image and video assets', async () => {
     />,
   )
 
-  assert.equal(html.includes('/api/assets/asset_image_1/file'), true)
+  assert.equal(html.includes('/api/assets/asset_image_1/thumb?w=320'), true)
   assert.equal(html.includes('/api/assets/asset_video_1/file'), true)
   assert.equal(html.includes('<img'), true)
   assert.equal(html.includes('<video'), true)
@@ -158,7 +158,43 @@ test('generation history shows generated image and video assets only', async () 
 
   assert.equal(html.includes('历史记录'), true)
   assert.equal(html.includes('搜索历史记录'), false)
-  assert.equal(html.includes('/api/assets/asset_generated_image/file'), true)
+  assert.equal(html.includes('/api/assets/asset_generated_image/thumb?w=320'), true)
   assert.equal(html.includes('/api/assets/asset_generated_video/file'), true)
   assert.equal(html.includes('/api/assets/asset_imported/file'), false)
+})
+test('asset library reference mode exposes view and apply actions for images', async () => {
+  const { AssetLibraryModal } = await import(
+    '../src/components/AssetLibraryModal'
+  )
+
+  const html = renderToStaticMarkup(
+    <AssetLibraryModal
+      open={true}
+      onClose={() => undefined}
+      onApplyAsset={() => undefined}
+      acceptedTypes={['image']}
+      initialAssets={[
+        {
+          id: 'asset_image_apply',
+          type: 'image',
+          path: 'workspace/outputs/apply.png',
+          prompt: 'apply image',
+          createdAt: '2026-07-07T10:00:00.000Z',
+        },
+        {
+          id: 'asset_video_hidden',
+          type: 'video',
+          path: 'workspace/outputs/hidden.mp4',
+          prompt: 'hidden video',
+          createdAt: '2026-07-07T11:00:00.000Z',
+        },
+      ]}
+    />,
+  )
+
+  assert.equal(html.includes('选择参考图片'), true)
+  assert.equal(html.includes('aria-label="查看素材：apply image"'), true)
+  assert.equal(html.includes('aria-label="应用素材：apply image"'), true)
+  assert.equal(html.includes('/api/assets/asset_image_apply/thumb?w=320'), true)
+  assert.equal(html.includes('/api/assets/asset_video_hidden/file'), false)
 })

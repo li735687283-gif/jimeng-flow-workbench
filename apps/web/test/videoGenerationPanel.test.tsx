@@ -52,7 +52,7 @@ test('video generation panel mirrors the image editor controls with video models
   assert.equal(html.includes('1条'), true)
   assert.equal(html.includes('aria-label="发送生成视频"'), true)
   assert.equal(html.includes('reference-asset-strip'), true)
-  assert.equal(html.includes('/api/assets/asset_ref_a/file'), true)
+  assert.equal(html.includes('/api/assets/asset_ref_a/thumb?w=320'), true)
   assert.equal(html.includes('video-reference-mode-tabs'), true)
   assert.equal(html.includes('首尾帧'), true)
   assert.equal(html.includes('多图参考'), true)

@@ -99,6 +99,7 @@ import {
 import { validateImageProvider } from '../utils/imageProviderValidation'
 import { clampPreviewScale } from '../utils/imageFullscreenPreview'
 import { resolveImageGenerationDefaults } from '../utils/generationDefaults'
+import { mergeReferenceAssetIds } from '../utils/assetLibrarySelection'
 import {
   COUNT_OPTIONS,
   QUALITY_OPTIONS,
@@ -143,6 +144,7 @@ interface ImageNodeData extends BaseNodeData {
   ratio?: string
   resolution?: string
   inputImageAssetIds?: string[]
+  libraryImageAssetIds?: string[]
   generationRuns?: ImageGenerationRun[]
   sourceOnly?: boolean
   gridSpec?: { rows: number; cols: number }
@@ -250,6 +252,9 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
   const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const openReferencePicker = useCanvasStore(
+    (state) => state.openAssetReferencePicker,
+  )
   const generationStoreStatus = useGenerateStore(
     (state) => state.states[id]?.status,
   )
@@ -423,23 +428,18 @@ export function ImageNode({ id, data, selected }: NodeProps) {
     if (outputAssetIds.length > 0) return outputAssetIds
     return getImageResultAssetIds(generationRuns.at(-1)?.run.assetIds)
   }, [generationRuns, nodeData.outputAssetIds])
-  const referenceAssetIds = useMemo(() => {
-    const selfAssetId = nodeData.assetId
-    const references = new Set<string>()
-    for (const assetId of getImageGenerationInputImages({
-      nodeId: id,
-      nodes,
-      edges,
-    })) {
-      if (assetId && assetId !== selfAssetId) references.add(assetId)
-    }
-    return Array.from(references)
-  }, [
-    edges,
-    id,
-    nodeData.assetId,
-    nodes,
-  ])
+  const referenceAssetIds = useMemo(
+    () =>
+      mergeReferenceAssetIds(
+        nodeData.libraryImageAssetIds,
+        getImageGenerationInputImages({
+          nodeId: id,
+          nodes,
+          edges,
+        }),
+      ).filter((assetId) => assetId !== nodeData.assetId),
+    [edges, id, nodeData.assetId, nodeData.libraryImageAssetIds, nodes],
+  )
   /** 上游文本节点引用：可作为生图提示词，无需在图片节点重复填写 */
   const upstreamTextRefs = useMemo(
     () =>
@@ -469,9 +469,21 @@ export function ImageNode({ id, data, selected }: NodeProps) {
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
       removeIncomingImageReference(id, assetId)
+      const libraryImageAssetIds = mergeReferenceAssetIds(
+        nodeData.libraryImageAssetIds,
+      ).filter((item) => item !== assetId)
+      updateNodeData(id, {
+        libraryImageAssetIds,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
     },
-    [id, removeIncomingImageReference],
+    [
+      id,
+      nodeData.libraryImageAssetIds,
+      removeIncomingImageReference,
+      updateNodeData,
+    ],
   )
   const historyPreviewStyle = useMemo(
     () =>
@@ -1270,13 +1282,19 @@ export function ImageNode({ id, data, selected }: NodeProps) {
       nodes: store.nodes,
       edges: store.edges,
     })
-    const inputImageAssetIds = upstreamInputImages
+    const liveNodeData = store.nodes.find((node) => node.id === id)?.data as
+      | Partial<ImageNodeData>
+      | undefined
+    const inputImageAssetIds = mergeReferenceAssetIds(
+      liveNodeData?.libraryImageAssetIds,
+      upstreamInputImages,
+    ).filter((assetId) => assetId !== liveNodeData?.assetId)
     const request: GenerationRequest = {
       flowId: startedFlowId ?? 'local',
       nodeId: id,
       mediaType: 'image',
       prompt: trimmedPrompt,
-      inputImages: upstreamInputImages,
+      inputImages: inputImageAssetIds,
       model: effectiveModel.id,
       width: size.width,
       height: size.height,
@@ -1751,6 +1769,7 @@ export function ImageNode({ id, data, selected }: NodeProps) {
             <ReferenceAssetStrip
               assetIds={referenceAssetIds}
               onRemove={handleRemoveReferenceAsset}
+              onAdd={() => openReferencePicker(id, 'image')}
             />
 
             {upstreamTextBrief ? (

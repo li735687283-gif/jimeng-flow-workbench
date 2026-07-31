@@ -46,6 +46,8 @@ export interface GenerateNodeData {
 
   /** 图生图参考图 Asset id 数组（可选，文生图时为空） */
   inputImageAssetIds: string[]
+  /** 从素材库直接添加、无需连线的参考图片 Asset id */
+  libraryImageAssetIds: string[]
 
   /** 生成成功的 Asset id 数组 */
   outputAssetIds: string[]
@@ -255,6 +257,7 @@ const GENERATE_DEFAULTS = {
   count: 1,
   seed: null as number | null,
   inputImageAssetIds: [] as string[],
+  libraryImageAssetIds: [] as string[],
   outputAssetIds: [] as string[],
   status: 'idle' as GenerationStatus,
 }
@@ -282,6 +285,8 @@ export function mergeGenerateDefaults(
     seed: data.seed ?? GENERATE_DEFAULTS.seed,
     inputImageAssetIds:
       data.inputImageAssetIds ?? GENERATE_DEFAULTS.inputImageAssetIds,
+    libraryImageAssetIds:
+      data.libraryImageAssetIds ?? GENERATE_DEFAULTS.libraryImageAssetIds,
     outputAssetIds: data.outputAssetIds ?? GENERATE_DEFAULTS.outputAssetIds,
     generationRuns: normalizeImageGenerationRuns(data.generationRuns),
     generationId: data.generationId,

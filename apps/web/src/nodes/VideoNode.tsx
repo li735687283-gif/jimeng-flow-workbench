@@ -26,6 +26,7 @@ import {
   shouldCloseFloatingMenuOnPointerDown,
 } from '../utils/editorPointer'
 import { resolveGenerationFlowId } from '../utils/generationFlow'
+import { mergeReferenceAssetIds } from '../utils/assetLibrarySelection'
 import { subscribeGenerationWithFallback } from '../utils/generationStatusSubscription'
 import {
   getImageGenerationInputImages,
@@ -101,6 +102,9 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const nodes = useCanvasStore((state) => state.nodes)
   const edges = useCanvasStore((state) => state.edges)
   const updateNodeData = useCanvasStore((state) => state.updateNodeData)
+  const openReferencePicker = useCanvasStore(
+    (state) => state.openAssetReferencePicker,
+  )
   const openVideoPlayer = useVideoPlayerStore((state) => state.openPlayer)
   const removeIncomingImageReference = useCanvasStore(
     (state) => state.removeIncomingImageReference,
@@ -627,10 +631,19 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   )
   const referenceAssetIds = useMemo(
     () =>
-      resolveVideoInputImages(nodeData.inputImageAssetIds, upstreamImageAssetIds, {
-        preferUpstream: true,
-      }),
-    [nodeData.inputImageAssetIds, upstreamImageAssetIds],
+      mergeReferenceAssetIds(
+        nodeData.libraryImageAssetIds,
+        resolveVideoInputImages(
+          nodeData.inputImageAssetIds,
+          upstreamImageAssetIds,
+          { preferUpstream: true },
+        ),
+      ),
+    [
+      nodeData.inputImageAssetIds,
+      nodeData.libraryImageAssetIds,
+      upstreamImageAssetIds,
+    ],
   )
   const mentionImages = useMemo(
     () =>
@@ -668,9 +681,21 @@ export function VideoNode({ id, data, selected }: NodeProps) {
   const handleRemoveReferenceAsset = useCallback(
     (assetId: string) => {
       removeIncomingImageReference(id, assetId)
+      const libraryImageAssetIds = mergeReferenceAssetIds(
+        nodeData.libraryImageAssetIds,
+      ).filter((item) => item !== assetId)
+      updateNodeData(id, {
+        libraryImageAssetIds,
+        updatedAt: new Date().toISOString(),
+      } as unknown as Partial<BaseNodeData>)
       void useFlowStore.getState().saveCurrent().catch(() => undefined)
     },
-    [id, removeIncomingImageReference],
+    [
+      id,
+      nodeData.libraryImageAssetIds,
+      removeIncomingImageReference,
+      updateNodeData,
+    ],
   )
   const generationHistoryItems = useMemo(
     () => getVideoGenerationHistoryItems(nodeData.generationRuns),
@@ -1085,6 +1110,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
               setCountMenuOpen(false)
             }}
             onRemoveReference={handleRemoveReferenceAsset}
+            onAddReference={() => openReferencePicker(id, 'video')}
             onSelectHistory={handleSelectHistory}
             onSend={() => void handleSend()}
           />

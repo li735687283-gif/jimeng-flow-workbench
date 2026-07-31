@@ -53,6 +53,8 @@ export interface VideoNodeData {
   prompt: string
   /** 上游 Image 节点接入的资源 id 列表 */
   inputImageAssetIds: string[]
+  /** 从素材库直接添加、无需连线的参考图片 Asset id */
+  libraryImageAssetIds: string[]
   /** 带角色的视频引用，兼容首帧/尾帧/多图参考 */
   references?: VideoMediaReference[]
   /** 生成结果资源 id 列表 */
@@ -227,6 +229,7 @@ export const VIDEO_COUNTS: (1 | 2 | 4)[] = [1, 2, 4]
 const VIDEO_DEFAULTS = {
   prompt: '',
   inputImageAssetIds: [] as string[],
+  libraryImageAssetIds: [] as string[],
   references: [] as VideoMediaReference[],
   assetIds: [] as string[],
   generationRuns: [] as VideoGenerationRun[],
@@ -358,6 +361,8 @@ export function mergeVideoDefaults(
     prompt: data.prompt ?? VIDEO_DEFAULTS.prompt,
     inputImageAssetIds:
       data.inputImageAssetIds ?? VIDEO_DEFAULTS.inputImageAssetIds,
+    libraryImageAssetIds:
+      data.libraryImageAssetIds ?? VIDEO_DEFAULTS.libraryImageAssetIds,
     references: normalizeVideoReferences(data.references),
     assetIds: data.assetIds ?? VIDEO_DEFAULTS.assetIds,
     generationRuns: normalizeVideoGenerationRuns(data.generationRuns),

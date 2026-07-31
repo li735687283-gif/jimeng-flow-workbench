@@ -57,6 +57,7 @@ interface VideoGenerationPanelProps {
   onCountToggle: () => void
   onCountChange: (count: VideoNodeData['count']) => void
   onRemoveReference?: (assetId: string) => void
+  onAddReference?: () => void
   onSelectHistory?: (item: VideoGenerationHistoryItem) => void
   onSend: () => void
 }
@@ -100,6 +101,7 @@ export function VideoGenerationPanel({
   onCountToggle,
   onCountChange,
   onRemoveReference,
+  onAddReference,
   onSelectHistory,
   onSend,
 }: VideoGenerationPanelProps) {
@@ -140,6 +142,7 @@ export function VideoGenerationPanel({
       <ReferenceAssetStrip
         assetIds={referenceAssetIds}
         onRemove={onRemoveReference}
+        onAdd={onAddReference}
       />
 
       {upstreamTextBrief ? (

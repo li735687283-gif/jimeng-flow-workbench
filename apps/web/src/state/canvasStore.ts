@@ -333,6 +333,10 @@ interface CanvasState {
   edges: Edge[]
   deletedNodeIds: string[]
   selectedNodeId: string | null
+  assetReferenceTarget: {
+    nodeId: string
+    nodeType: 'image' | 'video'
+  } | null
   onNodesChange: OnNodesChange
   onEdgesChange: OnEdgesChange
   onConnect: OnConnect
@@ -366,6 +370,11 @@ interface CanvasState {
   removeIncomingImageReference: (targetNodeId: string, assetId: string) => void
   updateNodeData: (id: string, data: Partial<BaseNodeData>) => void
   setSelectedNode: (id: string | null) => void
+  openAssetReferencePicker: (
+    nodeId: string,
+    nodeType: 'image' | 'video',
+  ) => void
+  closeAssetReferencePicker: () => void
   arrangeGrid: (nodeIds: string[]) => void
   arrangeHorizontal: (nodeIds: string[]) => void
   arrangeVertical: (nodeIds: string[]) => void
@@ -382,6 +391,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   deletedNodeIds: [],
   selectedNodeId: null,
+  assetReferenceTarget: null,
   clipboardNode: null,
 
   onNodesChange: (changes: NodeChange[]) => {
@@ -830,6 +840,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   setSelectedNode: (id) => set({ selectedNodeId: id }),
+  openAssetReferencePicker: (nodeId, nodeType) => {
+    const normalizedNodeId = nodeId.trim()
+    if (!normalizedNodeId) return
+    set({
+      assetReferenceTarget: { nodeId: normalizedNodeId, nodeType },
+    })
+  },
+  closeAssetReferencePicker: () => set({ assetReferenceTarget: null }),
 
   arrangeGrid: (nodeIds) => {
     const { nodes } = get()

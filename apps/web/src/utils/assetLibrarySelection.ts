@@ -25,6 +25,38 @@ interface AssetRestoreNode {
 
 type AssetRestorePatch = Partial<BaseNodeData>
 
+export function mergeReferenceAssetIds(...groups: unknown[]): string[] {
+  const merged: string[] = []
+  const seen = new Set<string>()
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue
+    for (const item of group) {
+      const assetId = typeof item === 'string' ? item.trim() : ''
+      if (!assetId || seen.has(assetId)) continue
+      seen.add(assetId)
+      merged.push(assetId)
+    }
+  }
+  return merged
+}
+
+export function buildAssetReferencePatch(
+  asset: Asset,
+  node: AssetRestoreNode,
+  updatedAt = new Date().toISOString(),
+): AssetRestorePatch | null {
+  if (asset.type !== 'image') return null
+  if (node.type !== 'image' && node.type !== 'video') return null
+  const data = node.data ?? {}
+  if (node.type === 'image' && data.assetId === asset.id) return null
+  return {
+    libraryImageAssetIds: mergeReferenceAssetIds(
+      data.libraryImageAssetIds,
+      [asset.id],
+    ),
+    updatedAt,
+  }
+}
 export function buildAssetInsertPatch(asset: Asset): AssetRestorePatch {
   const prompt = asset.prompt?.trim()
   const common = {

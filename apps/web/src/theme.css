@@ -844,6 +844,7 @@ textarea::placeholder {
 .image-ratio-grid button,
 .image-count-menu button,
 .reference-asset-thumb,
+.reference-asset-add,
 .reference-asset-preview,
 .image-generation-history-item,
 .image-generation-history-preview,
@@ -861,6 +862,8 @@ textarea::placeholder {
 .image-ratio-grid button:hover,
 .image-count-menu button:hover,
 .reference-asset-thumb:hover,
+.reference-asset-add:hover,
+.reference-asset-add:focus-visible,
 .image-generation-history-item:hover,
 .video-generation-history-item:hover,
 .video-generation-history-item:focus-visible {

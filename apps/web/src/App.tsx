@@ -26,6 +26,7 @@ import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
 import { getUserFacingErrorMessage } from './utils/userFacingError'
+import { buildAssetReferencePatch } from './utils/assetLibrarySelection'
 import {
   applyCanvasTheme,
   applyThemeBackgroundMode,
@@ -106,6 +107,9 @@ function AppInner() {
   const [operationError, setOperationError] = useState<string | null>(null)
   const videoPlayer = useVideoPlayerStore((s) => s.player)
   const openVideoPlayer = useVideoPlayerStore((s) => s.openPlayer)
+  const referencePickerTarget = useCanvasStore(
+    (state) => state.assetReferenceTarget,
+  )
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
   const [showcaseAssets, setShowcaseAssets] = useState<Asset[]>([])
   const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
@@ -288,6 +292,37 @@ function AppInner() {
     [addNode, getCanvasCenterPosition],
   )
 
+  const handleApplyReferenceAsset = useCallback(
+    (asset: Asset) => {
+      if (!referencePickerTarget) return
+      const canvasStore = useCanvasStore.getState()
+      const targetNode = canvasStore.nodes.find(
+        (node) => node.id === referencePickerTarget.nodeId,
+      )
+      if (!targetNode) {
+        setOperationError('目标节点已不存在，请重新选择节点')
+        useCanvasStore.getState().closeAssetReferencePicker()
+        return
+      }
+      const patch = buildAssetReferencePatch(asset, targetNode)
+      if (!patch) {
+        setOperationError('该素材不能作为当前节点的参考图片')
+        return
+      }
+      canvasStore.updateNodeData(referencePickerTarget.nodeId, patch)
+      setOperationError(null)
+      setAssetLibraryOpen(false)
+      useCanvasStore.getState().closeAssetReferencePicker()
+      void useFlowStore.getState().saveCurrent().catch((error: unknown) => {
+        setOperationError(
+          '参考图片已应用，但保存画布失败：' +
+            getUserFacingErrorMessage(error, '请稍后重试'),
+        )
+      })
+    },
+    [referencePickerTarget],
+  )
+
   const handleLocateNodes = useCallback(() => {
     void fitView({ padding: 0.2, duration: 320 })
   }, [fitView])
@@ -445,8 +480,13 @@ function AppInner() {
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <AssetLibraryModal
-        open={assetLibraryOpen}
-        onClose={() => setAssetLibraryOpen(false)}
+        open={assetLibraryOpen || !!referencePickerTarget}
+        acceptedTypes={referencePickerTarget ? ['image'] : undefined}
+        onApplyAsset={referencePickerTarget ? handleApplyReferenceAsset : undefined}
+        onClose={() => {
+          setAssetLibraryOpen(false)
+          useCanvasStore.getState().closeAssetReferencePicker()
+        }}
       />
 
       <AssetLibraryModal

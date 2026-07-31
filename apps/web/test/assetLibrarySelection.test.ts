@@ -2,8 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { Asset } from '@jimeng-flow/shared/asset'
 import {
+  buildAssetReferencePatch,
   buildAssetInsertPatch,
   buildAssetRestorePatch,
+  mergeReferenceAssetIds,
   resolveAssetSourceNodeId,
 } from '../src/utils/assetLibrarySelection'
 
@@ -213,4 +215,78 @@ test('buildAssetInsertPatch creates video node data from an orphan video asset',
     assetIds: ['asset_video_orphan'],
     prompt: 'orphan video prompt',
   })
+})
+test('buildAssetReferencePatch adds an image as a persistent library reference', () => {
+  const asset: Asset = {
+    id: 'asset_image_reference',
+    type: 'image',
+    path: 'workspace/outputs/reference.png',
+    createdAt: '2026-07-07T11:00:00.000Z',
+  }
+
+  assert.deepEqual(
+    buildAssetReferencePatch(
+      asset,
+      {
+        id: 'video-1',
+        type: 'video',
+        data: {
+          title: '视频节点 1',
+          status: 'idle',
+          libraryImageAssetIds: ['asset_existing', 'asset_image_reference'],
+        },
+      },
+      '2026-07-07T12:00:00.000Z',
+    ),
+    {
+      libraryImageAssetIds: ['asset_existing', 'asset_image_reference'],
+      updatedAt: '2026-07-07T12:00:00.000Z',
+    },
+  )
+})
+
+test('buildAssetReferencePatch rejects videos and an image node own output', () => {
+  const videoAsset: Asset = {
+    id: 'asset_video_reference',
+    type: 'video',
+    path: 'workspace/outputs/reference.mp4',
+    createdAt: '2026-07-07T11:00:00.000Z',
+  }
+  const ownImage: Asset = {
+    id: 'asset_image_own',
+    type: 'image',
+    path: 'workspace/outputs/own.png',
+    createdAt: '2026-07-07T11:00:00.000Z',
+  }
+
+  assert.equal(
+    buildAssetReferencePatch(videoAsset, {
+      id: 'video-1',
+      type: 'video',
+      data: { title: '视频节点 1', status: 'idle' },
+    }),
+    null,
+  )
+  assert.equal(
+    buildAssetReferencePatch(ownImage, {
+      id: 'image-1',
+      type: 'image',
+      data: {
+        title: '图片节点 1',
+        status: 'success',
+        assetId: 'asset_image_own',
+      },
+    }),
+    null,
+  )
+})
+
+test('mergeReferenceAssetIds preserves order and removes duplicates', () => {
+  assert.deepEqual(
+    mergeReferenceAssetIds(
+      ['asset_library', 'asset_duplicate'],
+      ['asset_duplicate', '', 'asset_connected'],
+    ),
+    ['asset_library', 'asset_duplicate', 'asset_connected'],
+  )
 })
