@@ -16,6 +16,7 @@ import type {
 } from '@jimeng-flow/shared/videoNode'
 import {
   buildVideoReferencesFromInputImages,
+  MAX_VIDEO_REFERENCE_IMAGES,
   getVideoReferenceInputs,
   normalizeVideoReferences,
 } from '@jimeng-flow/shared/videoNode'
@@ -580,6 +581,13 @@ export function buildJimengVideoArgs(
   params: JimengGenerateVideoParams,
   inputs: JimengResolvedVideoInput[],
 ): string[] {
+  if (inputs.length > MAX_VIDEO_REFERENCE_IMAGES) {
+    throw new JimengError(
+      'INVALID_INPUT',
+      `视频节点最多引用 ${MAX_VIDEO_REFERENCE_IMAGES} 张图片，请先移除多余素材`,
+      400,
+    )
+  }
   const inputPaths = inputs.map((input) => input.path)
   const modelVersion = getVideoModelVersion(params.model)
   const requestedResolution = getVideoResolution(params.resolution)

@@ -3054,7 +3054,7 @@
     transform var(--motion-base) var(--ease-standard);
 }
 
-.reference-asset-add:hover,
+.reference-asset-add:not(:disabled):hover,
 .reference-asset-add:focus-visible {
   color: var(--theme-heading, #ffffff);
   background: var(--theme-control-hover, #303030);
@@ -3063,6 +3063,10 @@
   transform: translateY(-1px);
 }
 
+.reference-asset-add:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
 .reference-asset-thumb {
   position: relative;
   display: inline-flex;

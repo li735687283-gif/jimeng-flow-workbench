@@ -26,7 +26,10 @@ import { listFeaturedWorks, listGalleryWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
 import { getUserFacingErrorMessage } from './utils/userFacingError'
-import { buildAssetReferencePatch } from './utils/assetLibrarySelection'
+import {
+  buildAssetReferencePatch,
+  getAssetReferenceLimitError,
+} from './utils/assetLibrarySelection'
 import {
   applyCanvasTheme,
   applyThemeBackgroundMode,
@@ -302,6 +305,11 @@ function AppInner() {
       if (!targetNode) {
         setOperationError('目标节点已不存在，请重新选择节点')
         useCanvasStore.getState().closeAssetReferencePicker()
+        return
+      }
+      const limitError = getAssetReferenceLimitError(asset, targetNode)
+      if (limitError) {
+        setOperationError(limitError)
         return
       }
       const patch = buildAssetReferencePatch(asset, targetNode)

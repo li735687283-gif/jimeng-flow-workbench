@@ -34,6 +34,7 @@ import type {
 import { getModelConfigsByCapability } from '@jimeng-flow/shared/settings'
 import {
   appendVideoGenerationRun,
+  MAX_VIDEO_REFERENCE_IMAGES,
   buildVideoReferencesFromInputImages,
   isJimengVideoModel,
   normalizeVideoReferences,
@@ -950,6 +951,23 @@ export function assertValidGenerationInputImages(
     }
   }
 }
+export function assertValidVideoReferenceImageLimit(
+  inputImages: readonly unknown[] | undefined,
+): void {
+  const uniqueImages = new Set<string>()
+  for (const input of inputImages ?? []) {
+    if (typeof input !== 'string') continue
+    const value = input.trim()
+    if (value) uniqueImages.add(value)
+  }
+  if (uniqueImages.size <= MAX_VIDEO_REFERENCE_IMAGES) return
+  throw new JimengError(
+    'INVALID_INPUT',
+    `视频节点最多引用 ${MAX_VIDEO_REFERENCE_IMAGES} 张图片，请先移除多余素材`,
+    400,
+  )
+}
+
 /** 创建任务前的通用校验 */
 function validateCreateRequest(
   req: GenerationRequest | VideoGenerationRequest,
@@ -962,11 +980,12 @@ function validateCreateRequest(
   }
   assertValidGenerationInputImages(req.inputImages)
   if (req.mediaType === 'video') {
-    assertValidGenerationInputImages(
-      normalizeVideoReferences(req.references).map((reference) =>
-        reference.url ?? reference.assetId,
-      ),
+    assertValidVideoReferenceImageLimit(req.inputImages)
+    const referenceInputs = normalizeVideoReferences(req.references).map(
+      (reference) => reference.url ?? reference.assetId,
     )
+    assertValidGenerationInputImages(referenceInputs)
+    assertValidVideoReferenceImageLimit(referenceInputs)
   }
 }
 

@@ -2,6 +2,7 @@ import type { Asset } from '@jimeng-flow/shared/asset'
 import type { ImageGenerationRun } from '@jimeng-flow/shared/generateNode'
 import { normalizeImageGenerationRuns } from '@jimeng-flow/shared/generateNode'
 import {
+  MAX_VIDEO_REFERENCE_IMAGES,
   normalizeVideoGenerationRuns,
   type VideoGenerationRun,
 } from '@jimeng-flow/shared/videoNode'
@@ -40,6 +41,21 @@ export function mergeReferenceAssetIds(...groups: unknown[]): string[] {
   return merged
 }
 
+export function getAssetReferenceLimitError(
+  asset: Asset,
+  node: AssetRestoreNode,
+): string | null {
+  if (asset.type !== 'image' || node.type !== 'video') return null
+  const data = node.data ?? {}
+  const currentAssetIds = mergeReferenceAssetIds(
+    data.libraryImageAssetIds,
+    data.inputImageAssetIds,
+  )
+  if (currentAssetIds.includes(asset.id)) return null
+  return currentAssetIds.length >= MAX_VIDEO_REFERENCE_IMAGES
+    ? `视频节点最多引用 ${MAX_VIDEO_REFERENCE_IMAGES} 张图片，请先移除一张再添加`
+    : null
+}
 export function buildAssetReferencePatch(
   asset: Asset,
   node: AssetRestoreNode,
@@ -47,6 +63,7 @@ export function buildAssetReferencePatch(
 ): AssetRestorePatch | null {
   if (asset.type !== 'image') return null
   if (node.type !== 'image' && node.type !== 'video') return null
+  if (getAssetReferenceLimitError(asset, node)) return null
   const data = node.data ?? {}
   if (node.type === 'image' && data.assetId === asset.id) return null
   return {

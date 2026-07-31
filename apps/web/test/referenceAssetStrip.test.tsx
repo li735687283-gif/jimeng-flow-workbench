@@ -53,3 +53,18 @@ test('reference asset strip keeps a fixed add card even without references', asy
   assert.equal(html.includes('reference-asset-add'), true)
   assert.equal(html.includes('aria-label="从素材库添加参考图片"'), true)
 })
+
+test('reference asset strip disables adding when the configured maximum is reached', async () => {
+  const { ReferenceAssetStrip } = await import('../src/components/ReferenceAssetStrip')
+  const html = renderToStaticMarkup(
+    <ReferenceAssetStrip
+      assetIds={Array.from({ length: 9 }, (_, index) => `asset_${index + 1}`)}
+      maxAssets={9}
+      onAdd={() => undefined}
+    />,
+  )
+
+  assert.equal(html.includes('aria-label="参考图片已达上限 9 张"'), true)
+  assert.equal(html.includes('disabled=""'), true)
+  assert.equal(html.includes('title="最多引用 9 张图片"'), true)
+})

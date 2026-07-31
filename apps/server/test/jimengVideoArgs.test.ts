@@ -141,3 +141,17 @@ test('buildJimengVideoArgs uses multi-frame command for multi-image reference mo
   assert.equal(args[0], 'multiframe2video')
   assert.ok(args.includes('--images=F:\\refs\\a.png,F:\\refs\\b.png'))
 })
+
+test('buildJimengVideoArgs rejects more than nine reference images', () => {
+  assert.throws(
+    () =>
+      buildJimengVideoArgs(
+        { ...baseParams, mode: 'all_reference' },
+        Array.from({ length: 10 }, (_, index) => ({
+          path: `F:\\refs\\${index + 1}.png`,
+          role: 'reference',
+        })),
+      ),
+    /最多引用 9 张图片/,
+  )
+})

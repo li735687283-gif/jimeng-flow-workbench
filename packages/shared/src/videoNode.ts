@@ -32,6 +32,9 @@ export type VideoResolution = '480P' | '720P' | '1080P' | '4K'
 /** 视频清晰度 */
 export type VideoQuality = 'standard' | 'high'
 
+/** 即梦 CLI 全能参考（multimodal2video）的图片输入上限。 */
+export const MAX_VIDEO_REFERENCE_IMAGES = 9
+
 /** 视频输入引用角色，用于区分普通参考、首帧、尾帧 */
 export type VideoReferenceRole = 'reference' | 'first_frame' | 'last_frame'
 

@@ -394,3 +394,46 @@ test('onNodesDelete removes connected image references from downstream nodes', (
     { kind: 'image', role: 'first_frame', assetId: 'asset_b' },
   ])
 })
+
+
+test('onConnect rejects a tenth unique image reference for a video node', () => {
+  const imageNode: Node = {
+    id: 'image-10',
+    type: 'image',
+    position: { x: 0, y: 0 },
+    data: { title: 'Image 10', status: 'idle', assetId: 'asset_10' },
+  }
+  const targetNode: Node = {
+    id: 'video-1',
+    type: 'video',
+    position: { x: 320, y: 0 },
+    data: {
+      title: 'Video 1',
+      status: 'idle',
+      mode: 'all_reference',
+      libraryImageAssetIds: Array.from(
+        { length: 9 },
+        (_, index) => `asset_${index + 1}`,
+      ),
+      inputImageAssetIds: [],
+      references: [],
+    },
+  }
+
+  useCanvasStore.setState({
+    nodes: [imageNode, targetNode],
+    edges: [],
+    selectedNodeId: null,
+  })
+  useCanvasStore.getState().onConnect({
+    source: imageNode.id,
+    target: targetNode.id,
+    sourceHandle: null,
+    targetHandle: null,
+  })
+
+  const state = useCanvasStore.getState()
+  const updatedTarget = state.nodes.find((node) => node.id === targetNode.id)
+  assert.deepEqual(state.edges, [])
+  assert.deepEqual(updatedTarget?.data.inputImageAssetIds, [])
+})

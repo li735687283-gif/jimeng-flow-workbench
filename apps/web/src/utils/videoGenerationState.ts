@@ -6,6 +6,7 @@ import type {
 } from '@jimeng-flow/shared/videoNode'
 import {
   appendVideoGenerationRun,
+  MAX_VIDEO_REFERENCE_IMAGES,
   buildVideoReferencesFromInputImages,
   normalizeVideoReferences,
 } from '@jimeng-flow/shared/videoNode'
@@ -37,7 +38,7 @@ export function resolveVideoInputImages(
   const seen = new Set<string>()
   const pushUnique = (value: unknown) => {
     const image = typeof value === 'string' ? value.trim() : ''
-    if (!image || seen.has(image)) return
+    if (!image || seen.has(image) || inputImages.length >= MAX_VIDEO_REFERENCE_IMAGES) return
     seen.add(image)
     inputImages.push(image)
   }

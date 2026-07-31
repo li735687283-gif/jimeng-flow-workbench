@@ -14,7 +14,10 @@ import type {
   NodeChange,
   EdgeChange,
 } from '@xyflow/react'
-import { buildVideoReferencesFromInputImages } from '@jimeng-flow/shared/videoNode'
+import {
+  buildVideoReferencesFromInputImages,
+  MAX_VIDEO_REFERENCE_IMAGES,
+} from '@jimeng-flow/shared/videoNode'
 import { GRID_PRESET_CONFIGS, buildGridImagePrompt } from '@jimeng-flow/shared/grid'
 import type { VideoMode } from '@jimeng-flow/shared/videoNode'
 import type { VideoCompressionTargetHeight } from '@jimeng-flow/shared/videoCompression'
@@ -246,6 +249,23 @@ function syncVideoModeForConnectedImages(
   return 'text_to_video'
 }
 
+function wouldExceedVideoReferenceImageLimit(
+  nodes: Node[],
+  connection: Connection,
+): boolean {
+  const source = nodes.find((node) => node.id === connection.source)
+  const target = nodes.find((node) => node.id === connection.target)
+  if (source?.type !== 'image' || target?.type !== 'video') return false
+  const assetId = getAssetId(source)
+  if (!assetId) return false
+  const data = target.data as BaseNodeData
+  const references = new Set([
+    ...stringArray(data.libraryImageAssetIds),
+    ...stringArray(data.inputImageAssetIds),
+  ])
+  return !references.has(assetId) && references.size >= MAX_VIDEO_REFERENCE_IMAGES
+}
+
 function syncConnectedImageReference(
   nodes: Node[],
   connection: Connection,
@@ -404,6 +424,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   onConnect: (connection: Connection) => {
     set((state) => {
+      if (wouldExceedVideoReferenceImageLimit(state.nodes, connection)) {
+        return state
+      }
       const edges = addEdge({ ...connection, type: 'cut' }, state.edges)
       // 先按连接写引用，再全量同步文本节点上游图（保证重渲染 + 数据一致）
       let nodes = syncConnectedImageReference(state.nodes, connection)

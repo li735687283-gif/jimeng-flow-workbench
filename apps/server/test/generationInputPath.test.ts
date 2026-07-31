@@ -6,6 +6,7 @@ import {
 } from '../src/config'
 import {
   assertValidGenerationInputImages,
+  assertValidVideoReferenceImageLimit,
   createGeneration,
 } from '../src/services/generations'
 import { JimengError, generateImage } from '../src/services/jimeng'
@@ -156,4 +157,15 @@ test('openai-compatible image edit rejects absolute input path before any fetch'
     /workspace/,
   )
   assert.equal(fetchCalled, false)
+})
+
+
+test('assertValidVideoReferenceImageLimit rejects a tenth image', () => {
+  assert.doesNotThrow(() =>
+    assertValidVideoReferenceImageLimit(Array.from({ length: 9 }, (_, index) => `asset_${index + 1}`)),
+  )
+  assert.throws(
+    () => assertValidVideoReferenceImageLimit(Array.from({ length: 10 }, (_, index) => `asset_${index + 1}`)),
+    /最多引用 9 张图片/,
+  )
 })

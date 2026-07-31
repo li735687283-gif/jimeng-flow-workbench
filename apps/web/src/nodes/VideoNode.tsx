@@ -56,6 +56,7 @@ import {
 } from '../utils/videoModels'
 import {
   buildVideoReferencesFromInputImages,
+  MAX_VIDEO_REFERENCE_IMAGES,
   mergeVideoDefaults,
   type VideoAspectRatio,
   type VideoGenerationRequest,
@@ -641,8 +642,7 @@ export function VideoNode({ id, data, selected }: NodeProps) {
           nodeData.inputImageAssetIds,
           upstreamImageAssetIds,
           { preferUpstream: true },
-        ),
-      ),
+        ),      ).slice(0, MAX_VIDEO_REFERENCE_IMAGES),
     [
       nodeData.inputImageAssetIds,
       nodeData.libraryImageAssetIds,

@@ -11,6 +11,7 @@ import {
   VIDEO_ASPECT_RATIOS,
   VIDEO_COUNTS,
   VIDEO_DURATIONS,
+  MAX_VIDEO_REFERENCE_IMAGES,
   VIDEO_RESOLUTIONS,
   type VideoAspectRatio,
   type VideoMode,
@@ -143,6 +144,7 @@ export function VideoGenerationPanel({
         assetIds={referenceAssetIds}
         onRemove={onRemoveReference}
         onAdd={onAddReference}
+        maxAssets={MAX_VIDEO_REFERENCE_IMAGES}
       />
 
       {upstreamTextBrief ? (

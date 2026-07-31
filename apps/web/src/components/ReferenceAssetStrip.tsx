@@ -5,16 +5,24 @@ interface ReferenceAssetStripProps {
   assetIds: string[]
   onRemove?: (assetId: string) => void
   onAdd?: () => void
+  maxAssets?: number
 }
 
 export function ReferenceAssetStrip({
   assetIds,
   onRemove,
   onAdd,
+  maxAssets,
 }: ReferenceAssetStripProps) {
   const references = Array.from(
     new Set(assetIds.map((assetId) => assetId.trim()).filter(Boolean)),
   )
+  const normalizedMaxAssets =
+    typeof maxAssets === 'number' && Number.isFinite(maxAssets)
+      ? Math.max(0, Math.floor(maxAssets))
+      : undefined
+  const addDisabled =
+    normalizedMaxAssets !== undefined && references.length >= normalizedMaxAssets
   if (references.length === 0 && !onAdd) return null
 
   return (
@@ -57,12 +65,13 @@ export function ReferenceAssetStrip({
         <button
           type="button"
           className="reference-asset-add"
-          aria-label="从素材库添加参考图片"
-          title="从素材库添加参考图片"
+          aria-label={addDisabled ? `参考图片已达上限 ${normalizedMaxAssets} 张` : '从素材库添加参考图片'}
+          title={addDisabled ? `最多引用 ${normalizedMaxAssets} 张图片` : '从素材库添加参考图片'}
+          disabled={addDisabled}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation()
-            onAdd()
+            if (!addDisabled) onAdd()
           }}
         >
           <Plus size={24} strokeWidth={1.7} aria-hidden="true" />

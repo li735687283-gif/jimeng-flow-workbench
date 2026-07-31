@@ -281,3 +281,13 @@ test('resolveVideoModeForInputImages promotes connected multi-image refs to firs
     'all_reference',
   )
 })
+
+test('resolveVideoInputImages keeps at most nine unique references', () => {
+  assert.deepEqual(
+    resolveVideoInputImages(
+      Array.from({ length: 7 }, (_, index) => `asset_${index + 1}`),
+      Array.from({ length: 7 }, (_, index) => `asset_${index + 6}`),
+    ),
+    Array.from({ length: 9 }, (_, index) => `asset_${index + 1}`),
+  )
+})

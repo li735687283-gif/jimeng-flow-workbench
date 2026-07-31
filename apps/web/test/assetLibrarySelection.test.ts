@@ -5,6 +5,7 @@ import {
   buildAssetReferencePatch,
   buildAssetInsertPatch,
   buildAssetRestorePatch,
+  getAssetReferenceLimitError,
   mergeReferenceAssetIds,
   resolveAssetSourceNodeId,
 } from '../src/utils/assetLibrarySelection'
@@ -288,5 +289,34 @@ test('mergeReferenceAssetIds preserves order and removes duplicates', () => {
       ['asset_duplicate', '', 'asset_connected'],
     ),
     ['asset_library', 'asset_duplicate', 'asset_connected'],
+  )
+})
+
+test('video nodes reject a tenth unique library reference image', () => {
+  const imageAsset: Asset = {
+    id: 'asset_10',
+    type: 'image',
+    path: 'workspace/outputs/asset_10.png',
+    createdAt: '2026-07-31T00:00:00.000Z',
+  }
+  const node = {
+    id: 'video-1',
+    type: 'video',
+    data: {
+      libraryImageAssetIds: Array.from(
+        { length: 9 },
+        (_, index) => `asset_${index + 1}`,
+      ),
+      inputImageAssetIds: [],
+    },
+  }
+
+  assert.equal(
+    getAssetReferenceLimitError(imageAsset, node),
+    '视频节点最多引用 9 张图片，请先移除一张再添加',
+  )
+  assert.equal(
+    getAssetReferenceLimitError({ ...imageAsset, id: 'asset_1' }, node),
+    null,
   )
 })
