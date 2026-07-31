@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+} from 'react'
 import {
   ChevronRight,
   Download,
@@ -17,6 +25,11 @@ import type { Asset } from '@jimeng-flow/shared/asset'
 import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
 import { getAssetFileUrl, getAssetThumbUrl } from '../api/assets'
+import {
+  filterCanvasGeneratedAssets,
+  getNextHomeMediaVisibleCount,
+  HOME_MEDIA_PAGE_SIZE,
+} from '../utils/homeMediaFeed'
 import { HomeParticleField } from './HomeParticleField'
 
 export interface HomePageProps {
@@ -24,7 +37,6 @@ export interface HomePageProps {
   showcaseAssets: Asset[]
   workAssets: Asset[]
   featuredWorks?: ManagedWork[]
-  galleryWorks?: ManagedWork[]
   mokHeroImageUrl: string
   mokHeroContainerStyle?: CSSProperties
   mokHeroImageStyle?: CSSProperties
@@ -155,31 +167,59 @@ function FeaturedWorkCard({ work, onPlay }: { work: ManagedWork; onPlay?: () => 
   )
 }
 
-function GalleryWorkCard({
-  work,
+function HomeMediaCard({
+  asset,
   onPlay,
 }: {
-  work: ManagedWork
+  asset: Asset
   onPlay?: () => void
 }) {
-  const isVideo = work.mediaType === 'video'
+  const isVideo = asset.type === 'video'
+
+  const handleMouseEnter = (event: MouseEvent<HTMLElement>) => {
+    if (!isVideo) return
+    const video = event.currentTarget.querySelector('video')
+    void video?.play().catch(() => undefined)
+  }
+
+  const handleMouseLeave = (event: MouseEvent<HTMLElement>) => {
+    if (!isVideo) return
+    const video = event.currentTarget.querySelector('video')
+    if (!video) return
+    video.pause()
+    video.currentTime = 0
+  }
+
   return (
     <article
-      className={`home-work-card${isVideo && onPlay ? ' clickable' : ''}`}
+      className={`home-media-card${isVideo && onPlay ? ' clickable' : ''}`}
+      aria-label={assetLabel(asset)}
+      title={assetLabel(asset)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
       onClick={isVideo && onPlay ? onPlay : undefined}
     >
-      <div className="home-work-media">
-        {isVideo ? (
-          <video src={work.mediaUrl} muted playsInline preload="metadata" />
-        ) : (
-          <img src={getAssetThumbUrl(work.mediaAssetId, 640)} alt={work.title} />
-        )}
-        {isVideo && (
-          <span className="home-work-badge">
-            <Film size={10} />
-          </span>
-        )}
-      </div>
+      {isVideo ? (
+        <video
+          src={getAssetFileUrl(asset.id)}
+          muted
+          loop
+          playsInline
+          preload="metadata"
+        />
+      ) : (
+        <img
+          src={getAssetThumbUrl(asset.id, 640)}
+          alt={assetLabel(asset)}
+          loading="lazy"
+          decoding="async"
+        />
+      )}
+      {isVideo ? (
+        <span className="home-work-badge" aria-hidden="true">
+          <Film size={10} />
+        </span>
+      ) : null}
     </article>
   )
 }
@@ -341,7 +381,6 @@ export function HomePage({
   showcaseAssets,
   workAssets,
   featuredWorks = [],
-  galleryWorks = [],
   mokHeroImageUrl,
   mokHeroContainerStyle,
   mokHeroImageStyle,
@@ -363,9 +402,38 @@ export function HomePage({
   const visibleFlows = recentFlows.slice(0, 3)
   const featuredAssets = showcaseAssets.slice(0, 3)
   const visibleFeaturedWorks = featuredWorks.slice(0, 3)
-  const visibleManagedGalleryWorks = galleryWorks.slice(0, 10)
-  const visibleWorkAssets = workAssets.slice(0, 10)
-  const useManagedGallery = galleryWorks.length > 0
+  const generatedWorkAssets = useMemo(
+    () => filterCanvasGeneratedAssets(workAssets),
+    [workAssets],
+  )
+  const [visibleWorkCount, setVisibleWorkCount] = useState(HOME_MEDIA_PAGE_SIZE)
+  const loadMoreRef = useRef<HTMLButtonElement>(null)
+  const visibleWorkAssets = generatedWorkAssets.slice(0, visibleWorkCount)
+  const hasMoreWorks = visibleWorkCount < generatedWorkAssets.length
+
+  useEffect(() => {
+    setVisibleWorkCount(HOME_MEDIA_PAGE_SIZE)
+  }, [generatedWorkAssets])
+
+  const loadMoreWorks = useCallback(() => {
+    setVisibleWorkCount((current) =>
+      getNextHomeMediaVisibleCount(current, generatedWorkAssets.length),
+    )
+  }, [generatedWorkAssets.length])
+
+  useEffect(() => {
+    if (!hasMoreWorks || typeof IntersectionObserver === 'undefined') return
+    const target = loadMoreRef.current
+    if (!target) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreWorks()
+      },
+      { rootMargin: '600px 0px' },
+    )
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [hasMoreWorks, loadMoreWorks])
 
   const handleRename = useCallback(
     (id: string, name: string) => {
@@ -521,59 +589,53 @@ export function HomePage({
           </section>
         ) : null}
 
-        <section className="home-section home-works-layer" aria-labelledby="home-works-title">
-          {useManagedGallery ? (
-            visibleManagedGalleryWorks.length > 0 ? (
-              <div className="home-works-grid five-up">
-                {visibleManagedGalleryWorks.map((work) => (
-                  <GalleryWorkCard
-                    key={work.id}
-                    work={work}
-                    onPlay={
-                      work.mediaType === 'video' && onPlayVideo
-                        ? () => onPlayVideo(work.mediaUrl, work.title)
-                        : undefined
-                    }
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="home-empty-text">暂无作品，请在作品管理中添加</p>
-            )
-          ) : visibleWorkAssets.length > 0 ? (
-            <div className="home-works-grid five-up">
-              {visibleWorkAssets.map((asset) => {
-                const isVideoAsset = asset.type === 'video'
-                const canPlay = isVideoAsset && !!onPlayVideo
-                return (
-                  <article
-                    key={asset.id}
-                    className={`home-work-card${canPlay ? ' clickable' : ''}`}
-                    onClick={
-                      canPlay
-                        ? () => onPlayVideo!(getAssetFileUrl(asset.id), assetLabel(asset))
-                        : undefined
-                    }
-                  >
-                    <div className="home-work-media">
-                      {isVideoAsset ? (
-                        <video src={getAssetFileUrl(asset.id)} muted playsInline preload="metadata" />
-                      ) : (
-                        <img src={getAssetThumbUrl(asset.id, 640)} alt={assetLabel(asset)} />
-                      )}
-                      {isVideoAsset && (
-                        <span className="home-work-badge">
-                          <Film size={10} />
-                        </span>
-                      )}
-                    </div>
-                  </article>
-                )
-              })}
+        <section
+          className="home-section home-works-layer"
+          aria-labelledby="home-works-title"
+        >
+          <div className="home-media-feed-head">
+            <div>
+              <span className="home-section-kicker">来自画布</span>
+              <h2 id="home-works-title">作品流</h2>
+            </div>
+            <span>{generatedWorkAssets.length} 个作品</span>
+          </div>
+
+          {visibleWorkAssets.length > 0 ? (
+            <div className="home-media-masonry">
+              {visibleWorkAssets.map((asset) => (
+                <HomeMediaCard
+                  key={asset.id}
+                  asset={asset}
+                  onPlay={
+                    asset.type === 'video' && onPlayVideo
+                      ? () =>
+                          onPlayVideo(
+                            getAssetFileUrl(asset.id),
+                            assetLabel(asset),
+                          )
+                      : undefined
+                  }
+                />
+              ))}
             </div>
           ) : (
-            !loadingAssets && <p className="home-empty-text">暂无作品</p>
+            !loadingAssets && <p className="home-empty-text">暂无画布作品</p>
           )}
+
+          {hasMoreWorks ? (
+            <button
+              ref={loadMoreRef}
+              type="button"
+              className="home-media-load-more"
+              onClick={loadMoreWorks}
+              aria-label="加载更多画布作品"
+            >
+              继续加载
+            </button>
+          ) : generatedWorkAssets.length > 0 ? (
+            <p className="home-media-feed-end">已展示全部作品</p>
+          ) : null}
         </section>
       </main>
     </div>

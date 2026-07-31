@@ -35,6 +35,7 @@ test('home page renders a restrained creation entry with logo menu items', async
           id: 'asset_cover',
           type: 'image',
           path: 'outputs/2026-07-08/asset_cover.png',
+          sourceNodeId: 'image_node',
           prompt: '工程封面',
           createdAt: '2026-07-08T12:30:00.000Z',
         },
@@ -42,6 +43,7 @@ test('home page renders a restrained creation entry with logo menu items', async
           id: 'asset_work',
           type: 'video',
           path: 'outputs/2026-07-08/asset_work.mp4',
+          sourceNodeId: 'video_node',
           prompt: '作品视频',
           createdAt: '2026-07-08T12:00:00.000Z',
         },
@@ -79,7 +81,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('home-project-cover'), true)
   assert.equal(html.includes('home-featured-layer'), true)
   assert.equal(html.includes('home-works-layer'), true)
-  assert.equal(html.includes('home-works-grid five-up'), true)
+  assert.equal(html.includes('home-media-masonry'), true)
   assert.equal(html.includes('/api/assets/asset_cover/thumb?w=640'), true)
   assert.equal(html.includes('从空白创意板开始'), false)
   assert.equal(html.includes('8 个节点'), false)
@@ -88,7 +90,7 @@ test('home page renders a restrained creation entry with logo menu items', async
   assert.equal(html.includes('精选'), false)
   assert.equal(html.match(/资源库/g)?.length, 1)
   assert.equal(html.includes('home-work-caption'), false)
-  assert.equal(html.includes('作品视频'), false)
+  assert.equal(html.includes('作品视频'), true)
   assert.equal(html.includes('把作品'), false)
   assert.equal(html.includes('/agent-avatar.png'), true)
   assert.equal(html.includes('alt="首页 Logo"'), true)
@@ -152,7 +154,48 @@ test('home page uses quiet empty states without fake projects or assets', async 
 
   assert.equal(html.includes('暂无最近项目'), true)
   assert.equal(html.includes('暂无精选作品'), false)
-  assert.equal(html.includes('暂无作品'), true)
+  assert.equal(html.includes('暂无画布作品'), true)
   assert.equal(html.includes('品牌视觉方案'), false)
   assert.equal(html.includes('假数据'), false)
+})
+
+test('home page progressively renders canvas-generated media as an infinite masonry feed', async () => {
+  const { HomePage } = await import('../src/components/HomePage')
+  const generatedAssets = Array.from({ length: 15 }, (_, index) => ({
+    id: `asset_generated_${index}`,
+    type: index % 3 === 0 ? ('video' as const) : ('image' as const),
+    path: `outputs/2026-07-31/asset_generated_${index}.${index % 3 === 0 ? 'mp4' : 'png'}`,
+    sourceNodeId: `node_${index}`,
+    prompt: `画布作品 ${index}`,
+    createdAt: new Date(Date.UTC(2026, 6, 31, 12, index)).toISOString(),
+  }))
+
+  const html = renderToStaticMarkup(
+    <HomePage
+      recentFlows={[]}
+      showcaseAssets={[]}
+      workAssets={[
+        ...generatedAssets,
+        {
+          id: 'asset_upload',
+          type: 'image',
+          path: 'outputs/2026-07-31/asset_upload.png',
+          params: { origin: 'upload' },
+          createdAt: '2026-07-31T14:00:00.000Z',
+        },
+      ]}
+      mokHeroImageUrl="/mok-hero-test.png"
+      onCreateFlow={() => undefined}
+      onOpenFlow={() => undefined}
+      onOpenAllFlows={() => undefined}
+      onOpenAssetLibrary={() => undefined}
+      onOpenSettings={() => undefined}
+    />,
+  )
+
+  assert.equal(html.includes('home-media-masonry'), true)
+  assert.equal((html.match(/home-media-card/g) ?? []).length, 12)
+  assert.equal(html.includes('home-media-load-more'), true)
+  assert.equal(html.includes('asset_upload'), false)
+  assert.equal(html.includes('loading="lazy"'), true)
 })

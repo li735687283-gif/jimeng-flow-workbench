@@ -22,7 +22,7 @@ import { useVideoPlayerStore } from './state/videoPlayerStore'
 import { useAutoSave } from './hooks/useAutoSave'
 import { useDesktopUpdate } from './hooks/useDesktopUpdate'
 import { listAssets } from './api/assets'
-import { listFeaturedWorks, listGalleryWorks } from './api/videos'
+import { listFeaturedWorks } from './api/videos'
 import { startLastFlowRestore } from './utils/lastFlowRestore'
 import { resolveInitialAppView } from './utils/initialAppView'
 import { getUserFacingErrorMessage } from './utils/userFacingError'
@@ -116,7 +116,6 @@ function AppInner() {
   const [homeAssets, setHomeAssets] = useState<Asset[]>([])
   const [showcaseAssets, setShowcaseAssets] = useState<Asset[]>([])
   const [featuredWorks, setFeaturedWorks] = useState<ManagedWork[]>([])
-  const [galleryWorks, setGalleryWorks] = useState<ManagedWork[]>([])
   const [assetsLoading, setAssetsLoading] = useState(false)
   const { downloadUpdate, updateState } = useDesktopUpdate()
 
@@ -144,12 +143,7 @@ function AppInner() {
 
   const reloadWorks = useCallback(async () => {
     try {
-      const [featured, gallery] = await Promise.all([
-        listFeaturedWorks(),
-        listGalleryWorks(),
-      ])
-      setFeaturedWorks(featured)
-      setGalleryWorks(gallery)
+      setFeaturedWorks(await listFeaturedWorks())
     } catch (err: unknown) {
       console.error('[App] 加载首页作品失败:', err)
     }
@@ -223,8 +217,8 @@ function AppInner() {
     })
 
     setAssetsLoading(true)
-    Promise.allSettled([listAssets(), listFeaturedWorks(), listGalleryWorks()])
-      .then(([assetsResult, featuredResult, galleryResult]) => {
+    Promise.allSettled([listAssets(), listFeaturedWorks()])
+      .then(([assetsResult, featuredResult]) => {
         if (cancelled) return
 
         if (assetsResult.status === 'fulfilled') {
@@ -241,13 +235,6 @@ function AppInner() {
         } else {
           console.error('[App] 加载首页精选作品失败:', featuredResult.reason)
           setFeaturedWorks([])
-        }
-
-        if (galleryResult.status === 'fulfilled') {
-          setGalleryWorks(galleryResult.value)
-        } else {
-          console.error('[App] 加载首页作品展示失败:', galleryResult.reason)
-          setGalleryWorks([])
         }
       })
       .finally(() => {
@@ -423,7 +410,6 @@ function AppInner() {
           showcaseAssets={showcaseAssets}
           workAssets={homeAssets}
           featuredWorks={featuredWorks}
-          galleryWorks={galleryWorks}
           mokHeroImageUrl={resolveHomeMokHeroImage(settings?.homeMokHeroImagePath)}
           mokHeroContainerStyle={resolveHomeMokHeroStyles(settings).container}
           mokHeroImageStyle={resolveHomeMokHeroStyles(settings).image}
