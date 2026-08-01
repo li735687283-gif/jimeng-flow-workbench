@@ -1173,21 +1173,28 @@
 }
 
 .home-media-masonry {
-  column-count: 5;
-  column-gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(var(--home-media-column-count, 5), minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.home-media-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .home-media-card {
   position: relative;
-  display: inline-block;
+  display: block;
   width: 100%;
-  margin: 0 0 12px;
+  margin: 0;
   overflow: hidden;
-  break-inside: avoid;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   background: #111111;
-  vertical-align: top;
   transition:
     border-color var(--motion-fast) var(--ease-standard),
     transform var(--motion-base) var(--ease-standard);
@@ -1276,9 +1283,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .home-media-masonry {
-    column-count: 3;
-  }
 }
 
 @media (max-width: 640px) {
@@ -1306,9 +1310,6 @@
     grid-template-columns: 1fr;
   }
 
-  .home-media-masonry {
-    column-count: 2;
-  }
 }
 
 /* 通用面板标题 */

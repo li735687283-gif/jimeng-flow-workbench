@@ -2,6 +2,26 @@ import type { Asset } from '@jimeng-flow/shared/asset'
 
 export const HOME_MEDIA_PAGE_SIZE = 12
 
+export function getHomeMediaColumnCount(viewportWidth?: number): number {
+  if (viewportWidth !== undefined && viewportWidth <= 640) return 2
+  if (viewportWidth !== undefined && viewportWidth <= 960) return 3
+  return 5
+}
+
+export function distributeHomeMediaAssets(
+  assets: Asset[],
+  columnCount: number,
+): Asset[][] {
+  const normalizedColumnCount = Math.max(1, Math.floor(columnCount))
+  const columns = Array.from({ length: normalizedColumnCount }, () => [] as Asset[])
+  assets.forEach((asset, index) => columns[index % normalizedColumnCount].push(asset))
+  return columns
+}
+
+export function getHomeMediaLayoutKey(assets: Asset[]): string {
+  return assets.map((asset) => asset.id).join('|')
+}
+
 export function filterCanvasGeneratedAssets(assets: Asset[]): Asset[] {
   return assets
     .filter((asset) => {

@@ -64,7 +64,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "image/agent-avatar-black.png",
+      "icon": "image/app-icon-cat-round.png",
       "artifactName": "MO.K-Setup-${version}.${ext}"
     },
     "nsis": {

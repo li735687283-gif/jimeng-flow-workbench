@@ -194,8 +194,9 @@ test('home page progressively renders canvas-generated media as an infinite maso
   )
 
   assert.equal(html.includes('home-media-masonry'), true)
+  assert.equal((html.match(/class="home-media-column"/g) ?? []).length, 5)
   assert.equal((html.match(/home-media-card/g) ?? []).length, 12)
   assert.equal(html.includes('home-media-load-more'), true)
   assert.equal(html.includes('asset_upload'), false)
-  assert.equal(html.includes('loading="lazy"'), true)
+  assert.equal(html.includes('loading="eager"'), true)
 })

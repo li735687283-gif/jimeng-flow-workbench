@@ -26,7 +26,10 @@ import type { FlowSummary } from '@jimeng-flow/shared/flow'
 import type { ManagedWork } from '@jimeng-flow/shared/video'
 import { getAssetFileUrl, getAssetThumbUrl } from '../api/assets'
 import {
+  distributeHomeMediaAssets,
   filterCanvasGeneratedAssets,
+  getHomeMediaColumnCount,
+  getHomeMediaLayoutKey,
   getNextHomeMediaVisibleCount,
   HOME_MEDIA_PAGE_SIZE,
 } from '../utils/homeMediaFeed'
@@ -211,7 +214,7 @@ function HomeMediaCard({
         <img
           src={getAssetThumbUrl(asset.id, 640)}
           alt={assetLabel(asset)}
-          loading="lazy"
+          loading="eager"
           decoding="async"
         />
       )}
@@ -407,13 +410,31 @@ export function HomePage({
     [workAssets],
   )
   const [visibleWorkCount, setVisibleWorkCount] = useState(HOME_MEDIA_PAGE_SIZE)
+  const [mediaColumnCount, setMediaColumnCount] = useState(() =>
+    getHomeMediaColumnCount(
+      typeof window === 'undefined' ? undefined : window.innerWidth,
+    ),
+  )
   const loadMoreRef = useRef<HTMLButtonElement>(null)
   const visibleWorkAssets = generatedWorkAssets.slice(0, visibleWorkCount)
+  const mediaLayoutKey = getHomeMediaLayoutKey(visibleWorkAssets)
+  const visibleWorkColumns = distributeHomeMediaAssets(
+    visibleWorkAssets,
+    mediaColumnCount,
+  )
   const hasMoreWorks = visibleWorkCount < generatedWorkAssets.length
 
   useEffect(() => {
     setVisibleWorkCount(HOME_MEDIA_PAGE_SIZE)
   }, [generatedWorkAssets])
+
+  useEffect(() => {
+    const updateColumnCount = () => {
+      setMediaColumnCount(getHomeMediaColumnCount(window.innerWidth))
+    }
+    window.addEventListener('resize', updateColumnCount)
+    return () => window.removeEventListener('resize', updateColumnCount)
+  }, [])
 
   const loadMoreWorks = useCallback(() => {
     setVisibleWorkCount((current) =>
@@ -602,21 +623,29 @@ export function HomePage({
           </div>
 
           {visibleWorkAssets.length > 0 ? (
-            <div className="home-media-masonry">
-              {visibleWorkAssets.map((asset) => (
-                <HomeMediaCard
-                  key={asset.id}
-                  asset={asset}
-                  onPlay={
-                    asset.type === 'video' && onPlayVideo
-                      ? () =>
-                          onPlayVideo(
-                            getAssetFileUrl(asset.id),
-                            assetLabel(asset),
-                          )
-                      : undefined
-                  }
-                />
+            <div
+              key={mediaLayoutKey}
+              className="home-media-masonry"
+              style={{ '--home-media-column-count': mediaColumnCount } as CSSProperties}
+            >
+              {visibleWorkColumns.map((column, columnIndex) => (
+                <div className="home-media-column" key={columnIndex}>
+                  {column.map((asset) => (
+                    <HomeMediaCard
+                      key={asset.id}
+                      asset={asset}
+                      onPlay={
+                        asset.type === 'video' && onPlayVideo
+                          ? () =>
+                              onPlayVideo(
+                                getAssetFileUrl(asset.id),
+                                assetLabel(asset),
+                              )
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
               ))}
             </div>
           ) : (
