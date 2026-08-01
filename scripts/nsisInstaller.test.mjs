@@ -20,6 +20,38 @@ test('Windows desktop build uses a circular transparent cat icon', async () => {
   assert.ok((bitmap.getPixelColor(256, 256) & 0xff) >= 250)
 })
 
+test('Windows shortcuts use a standalone multi-size circular icon', async () => {
+  const shortcutIcon = 'image/app-icon-cat-round.ico'
+  assert.ok(existsSync(shortcutIcon), 'Windows 快捷方式 ICO 不存在')
+
+  const ico = readFileSync(shortcutIcon)
+  assert.equal(ico.readUInt16LE(0), 0)
+  assert.equal(ico.readUInt16LE(2), 1)
+  const count = ico.readUInt16LE(4)
+  assert.ok(count >= 7)
+
+  for (let index = 0; index < count; index += 1) {
+    const entryOffset = 6 + index * 16
+    const dataLength = ico.readUInt32LE(entryOffset + 8)
+    const dataOffset = ico.readUInt32LE(entryOffset + 12)
+    const layer = await Jimp.read(ico.subarray(dataOffset, dataOffset + dataLength))
+    const lastX = layer.bitmap.width - 1
+    const lastY = layer.bitmap.height - 1
+    for (const [x, y] of [[0, 0], [lastX, 0], [0, lastY], [lastX, lastY]]) {
+      assert.equal(layer.getPixelColor(x, y) & 0xff, 0)
+    }
+  }
+
+  assert.ok(
+    packageJson.build?.extraResources?.some(
+      (entry) =>
+        entry.from === shortcutIcon &&
+        entry.to === 'icons/app-icon-cat-round-v1.ico',
+    ),
+    '独立 ICO 未打包进 resources/icons',
+  )
+})
+
 test('nsis installer is wired to a foreground include script', () => {
   const nsis = packageJson.build?.nsis ?? {}
 
@@ -42,6 +74,12 @@ test('nsis installer is wired to a foreground include script', () => {
   // 进入安装段后取消 TOPMOST，不永久压在其他窗口上
   assert.match(script, /!macro customInstall/)
   assert.match(script, /SetWindowPos\(i \$HWNDPARENT, i -2,/)
+  assert.match(script, /Delete "\$newDesktopLink"/)
+  assert.match(script, /CreateShortCut "\$newDesktopLink"[^\n]+app-icon-cat-round-v1\.ico/)
+  assert.match(script, /Delete "\$newStartMenuLink"/)
+  assert.match(script, /CreateShortCut "\$newStartMenuLink"[^\n]+app-icon-cat-round-v1\.ico/)
+  assert.match(script, /SHChangeNotify/)
+  assert.match(script, /ie4uinit\.exe.*-show/)
   // .onInit 兜底宏
   assert.match(script, /!macro customInit/)
 })

@@ -33,6 +33,22 @@ FunctionEnd
 ; flags = SWP_NOSIZE(0x0001)|SWP_NOMOVE(0x0002)|SWP_NOACTIVATE(0x0010) = 0x0013
 !macro customInstall
   System::Call "user32::SetWindowPos(i $HWNDPARENT, i -2, i 0, i 0, i 0, i 0, i 0x0013)"
+
+  ; 升级安装时 electron-builder 会保留旧快捷方式，Windows 又按 EXE 路径缓存图标。
+  ; 改用独立 ICO 路径并重建快捷方式，确保缓存键发生变化。
+  ${if} ${FileExists} "$newDesktopLink"
+    Delete "$newDesktopLink"
+    CreateShortCut "$newDesktopLink" "$appExe" "" "$INSTDIR\resources\icons\app-icon-cat-round-v1.ico" 0 "" "" "${APP_DESCRIPTION}"
+    WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+  ${endIf}
+  ${if} ${FileExists} "$newStartMenuLink"
+    Delete "$newStartMenuLink"
+    CreateShortCut "$newStartMenuLink" "$appExe" "" "$INSTDIR\resources\icons\app-icon-cat-round-v1.ico" 0 "" "" "${APP_DESCRIPTION}"
+    WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
+  ${endIf}
+
+  System::Call "shell32::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)"
+  ExecWait '"$SYSDIR\ie4uinit.exe" -show'
 !macroend
 
 ; .onInit 兜底（此时窗口可能尚未创建，调用无害）
