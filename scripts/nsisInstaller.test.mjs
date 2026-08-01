@@ -4,6 +4,13 @@ import test from 'node:test'
 
 const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
 
+test('Windows desktop build uses the same cat avatar as the home logo', () => {
+  const icon = packageJson.build?.win?.icon
+
+  assert.equal(icon, 'image/agent-avatar-black.png')
+  assert.ok(existsSync(icon), 'Windows 应用图标不存在：' + icon)
+})
+
 test('nsis installer is wired to a foreground include script', () => {
   const nsis = packageJson.build?.nsis ?? {}
 
