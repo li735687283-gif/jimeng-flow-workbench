@@ -29,6 +29,12 @@ npm run package:win
 
 已有 userData 不会被覆盖。安装升级和应用版本号变化都继续使用同一个 userData，所以安装目录被替换不会丢失工作流。
 
+## Windows 快捷方式图标
+
+应用可执行文件使用 `image/app-icon-cat-round.png`，安装器创建的桌面和开始菜单快捷方式使用独立的多尺寸图标 `image/app-icon-cat-round.ico`。打包时该 ICO 会复制到安装目录的 `resources/icons/app-icon-cat-round-v1.ico`；升级安装会重建已有的 MO.K 快捷方式并通知 Windows 刷新图标缓存。
+
+用户通过资源管理器手动“发送到桌面快捷方式”时，Windows 通常会把快捷方式的 `IconLocation` 留为空并直接读取 EXE 图标。该快捷方式不经过安装器的重建逻辑，可能继续显示旧缓存。遇到这种情况，应优先使用安装器创建的 `MO.K` 快捷方式，或在快捷方式属性中把图标改为 `C:\Program Files\MO.K\resources\icons\app-icon-cat-round-v1.ico`；如果安装目录曾被自定义，则使用该安装目录下的同名相对路径。
+
 ## 升级版本号
 
 桌面应用版本取自根 `package.json` 的 `version`。发布前修改它，并同步锁文件：
